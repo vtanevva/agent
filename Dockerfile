@@ -9,23 +9,12 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 # ----------------------------
-# System deps incl. Node.js (more reliable method)
+# System deps incl. Node.js
 # ----------------------------
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    git \
-    ca-certificates \
-    gnupg \
-    && mkdir -p /etc/apt/keyrings \
-    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends nodejs \
-    && apt-get install -y --no-install-recommends build-essential \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* \
-    && node --version \
-    && npm --version
+RUN apt-get update && apt-get install -y curl git build-essential && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # ----------------------------
 # Python deps (layer-cached)
@@ -54,4 +43,4 @@ WORKDIR /app
 
 # Use environment variable PORT for Railway compatibility
 # Support both server.py and server_minimal.py
-CMD gunicorn server:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+CMD gunicorn server:app --bind 0.0.0.0:${PORT} --workers 1 --timeout 120
