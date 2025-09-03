@@ -50,18 +50,7 @@ print(f"[DEBUG] App initialized. PORT env var: {os.getenv('PORT')}")
 print(f"[DEBUG] Current working directory: {os.getcwd()}")
 print(f"[DEBUG] Available environment variables: {list(os.environ.keys())}")
 
-# Health check endpoint for Render (using existing health.py)
-@app.route("/health")
-def health_check():
-    try:
-        from app.health import get_health_status
-        return jsonify(get_health_status()), 200
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": f"Health check failed: {str(e)}",
-            "timestamp": datetime.now().isoformat()
-        }), 500
+# Health check removed for Railway deployment
 
 # Memory usage monitoring endpoint
 @app.route("/memory")
