@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: mental-health-chatbot
+    env: python
+    plan: free
+    buildCommand: |
+      cd my-chatbot && npm install && npm run build
+      cd .. && pip install -r requirements-render-simple.txt
+    startCommand: gunicorn server_render:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.0
+      - key: FLASK_ENV
+        value: production
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: MONGO_URI
+        sync: false
+      - key: GOOGLE_SECRET_FILE
+        sync: false
+      - key: IG_APP_ID
+        sync: false
+      - key: IG_APP_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+    healthCheckPath: /health
+    autoDeploy: true
+
+databases:
+  - name: mental-health-mongodb
+    databaseName: mental_health
+    user: mental_health_user
+    plan: free

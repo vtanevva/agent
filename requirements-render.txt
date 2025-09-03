@@ -1,0 +1,35 @@
+# Core AI and ML (lightweight for Render)
+openai==0.28
+tiktoken
+numpy==1.26.4
+
+# Vector Database (RAG)
+faiss-cpu
+pinecone
+
+# Web Framework
+flask
+flask-cors
+gunicorn
+
+# Database
+pymongo
+
+# Google APIs
+google-api-python-client
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+
+# OAuth
+requests-oauthlib
+
+# Configuration and Utilities
+python-dotenv
+pydantic>=2.0
+
+# Monitoring and Health Checks
+psutil
+
+# Security
+cryptography

@@ -1,0 +1,44 @@
+# Use Python 3.10 slim image
+FROM python:3.10-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PORT=10000
+
+# Set work directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs
+
+# Copy requirements and install Python dependencies
+COPY requirements-render.txt .
+RUN pip install --upgrade pip && pip install -r requirements-render.txt
+
+# Copy package files and install Node dependencies
+COPY my-chatbot/package*.json ./my-chatbot/
+WORKDIR /app/my-chatbot
+RUN npm ci --only=production
+
+# Copy source code and build frontend
+COPY . /app
+WORKDIR /app/my-chatbot
+RUN npm run build
+
+# Go back to app root
+WORKDIR /app
+
+# Expose port
+EXPOSE $PORT
+
+# Start command
+CMD gunicorn server:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120

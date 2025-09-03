@@ -1,0 +1,21 @@
+# Core Flask dependencies (minimal for Render)
+flask==2.3.3
+flask-cors==4.0.0
+gunicorn==21.2.0
+
+# Basic utilities
+python-dotenv==1.0.0
+requests==2.31.0
+
+# Database (optional)
+pymongo==4.5.0
+
+# Configuration
+pydantic>=2.0.0
+
+# Remove these for Render compatibility:
+# psutil - causes build issues on Render
+# pinecone - heavy dependency
+# openai - can be added later
+# faiss-cpu - heavy ML dependency
+# cryptography - can cause build issues

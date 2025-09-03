@@ -1,0 +1,16 @@
+[
+  {
+    "timestamp": "2025-06-29T20:16:54.237729",
+    "user": "hey",
+    "bot": "Hello! How are you doing today?",
+    "emotion": "joy",
+    "suicide_flag": false
+  },
+  {
+    "timestamp": "2025-06-29T20:24:26.255251",
+    "user": "im elizabet",
+    "bot": "Hello, Elizabet! It's nice to meet you. How are you doing today?",
+    "emotion": "joy",
+    "suicide_flag": false
+  }
+]

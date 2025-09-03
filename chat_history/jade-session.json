@@ -1,0 +1,37 @@
+[
+  {
+    "timestamp": "2025-06-28T21:59:47.041256",
+    "user": "whats my anme",
+    "bot": "I'm sorry, but I don't have access to personal information such as your name. However, I'd be happy to assist you with anything else you need!",
+    "emotion": "anger",
+    "suicide_flag": false
+  },
+  {
+    "timestamp": "2025-06-28T21:59:55.583343",
+    "user": "my name is jade",
+    "bot": "Hello Jade! It's nice to meet you. How are you feeling today?",
+    "emotion": "joy",
+    "suicide_flag": false
+  },
+  {
+    "timestamp": "2025-06-28T22:00:21.858925",
+    "user": "whats my name",
+    "bot": "Your name is Jade. How are you doing today?",
+    "emotion": "anger",
+    "suicide_flag": false
+  },
+  {
+    "timestamp": "2025-06-28T22:03:52.279717",
+    "user": "hello",
+    "bot": "Hello! It's good to hear from you again. How have you been doing lately?",
+    "emotion": "joy",
+    "suicide_flag": false
+  },
+  {
+    "timestamp": "2025-06-28T22:03:59.086064",
+    "user": "whats my anme",
+    "bot": "Your name is Jade. How have you been lately?",
+    "emotion": "anger",
+    "suicide_flag": false
+  }
+]
