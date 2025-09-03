@@ -50,31 +50,18 @@ print(f"[DEBUG] App initialized. PORT env var: {os.getenv('PORT')}")
 print(f"[DEBUG] Current working directory: {os.getcwd()}")
 print(f"[DEBUG] Available environment variables: {list(os.environ.keys())}")
 
-# Simple health check endpoint for Railway (no complex imports)
+# Health check endpoint for Render (using existing health.py)
 @app.route("/health")
 def health_check():
     try:
-        return jsonify({
-            "status": "healthy",
-            "message": "Server is running",
-            "timestamp": datetime.now().isoformat(),
-            "port": os.getenv('PORT', 'unknown'),
-            "environment": os.getenv('FLASK_ENV', 'production')
-        }), 200
+        from app.health import get_health_status
+        return jsonify(get_health_status()), 200
     except Exception as e:
         return jsonify({
             "status": "error",
             "message": f"Health check failed: {str(e)}",
             "timestamp": datetime.now().isoformat()
         }), 500
-
-# Test endpoint to verify server is working
-@app.route("/test")
-def test():
-    return jsonify({
-        "message": "Test endpoint working",
-        "timestamp": datetime.now().isoformat()
-    }), 200
 
 # Memory usage monitoring endpoint
 @app.route("/memory")
@@ -734,16 +721,9 @@ def serve_frontend(path):
 # Local dev (not used in Gunicorn container runtime)
 # ------------------------------------------------------------------------------
 if __name__ == "__main__":
-    try:
-        port = int(os.getenv("PORT", "10000"))
-        print(f"[DEBUG] Starting server on port {port}")
-        print(f"[DEBUG] PORT env var: {os.getenv('PORT')}")
-        print(f"[DEBUG] Static folder: {app.static_folder}")
-        print(f"[DEBUG] Static folder exists: {os.path.exists(app.static_folder)}")
-        app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
-    except Exception as e:
-        print(f"[ERROR] Failed to start server: {e}")
-        import traceback
-        traceback.print_exc()
+    port = int(os.getenv("PORT", "10000"))
+    print(f"[DEBUG] Starting server on port {port}")
+    print(f"[DEBUG] PORT env var: {os.getenv('PORT')}")
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
     
