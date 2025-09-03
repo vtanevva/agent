@@ -9,14 +9,14 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 # ----------------------------
-# System deps incl. Node.js
+# System deps incl. Node.js (with retries and smaller groups)
 # ----------------------------
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
-    build-essential \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
+    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get install -y --no-install-recommends build-essential \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
     && npm --version
@@ -46,6 +46,6 @@ RUN npm run build
 # ----------------------------
 WORKDIR /app
 
-# Use environment variable PORT for Render compatibility
+# Use environment variable PORT for Railway compatibility
 # Support both server.py and server_minimal.py
 CMD gunicorn server:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
