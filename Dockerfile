@@ -11,10 +11,15 @@ WORKDIR /app
 # ----------------------------
 # System deps incl. Node.js
 # ----------------------------
-RUN apt-get update && apt-get install -y curl git build-essential && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    build-essential \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm --version
 
 # ----------------------------
 # Python deps (layer-cached)
@@ -42,4 +47,5 @@ RUN npm run build
 WORKDIR /app
 
 # Use environment variable PORT for Render compatibility
-CMD gunicorn server_minimal:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+# Support both server.py and server_minimal.py
+CMD gunicorn server:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
