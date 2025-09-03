@@ -50,7 +50,7 @@ print(f"[DEBUG] App initialized. PORT env var: {os.getenv('PORT')}")
 print(f"[DEBUG] Current working directory: {os.getcwd()}")
 print(f"[DEBUG] Available environment variables: {list(os.environ.keys())}")
 
-# Health check endpoint for Railway (simple and reliable)
+# Simple health check endpoint for Railway (no complex imports)
 @app.route("/health")
 def health_check():
     try:
@@ -68,12 +68,11 @@ def health_check():
             "timestamp": datetime.now().isoformat()
         }), 500
 
-# Simple root endpoint for basic connectivity test
-@app.route("/")
-def root():
+# Test endpoint to verify server is working
+@app.route("/test")
+def test():
     return jsonify({
-        "message": "Mental Health Chatbot API",
-        "status": "running",
+        "message": "Test endpoint working",
         "timestamp": datetime.now().isoformat()
     }), 200
 
@@ -735,9 +734,16 @@ def serve_frontend(path):
 # Local dev (not used in Gunicorn container runtime)
 # ------------------------------------------------------------------------------
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "10000"))
-    print(f"[DEBUG] Starting server on port {port}")
-    print(f"[DEBUG] PORT env var: {os.getenv('PORT')}")
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    try:
+        port = int(os.getenv("PORT", "10000"))
+        print(f"[DEBUG] Starting server on port {port}")
+        print(f"[DEBUG] PORT env var: {os.getenv('PORT')}")
+        print(f"[DEBUG] Static folder: {app.static_folder}")
+        print(f"[DEBUG] Static folder exists: {os.path.exists(app.static_folder)}")
+        app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    except Exception as e:
+        print(f"[ERROR] Failed to start server: {e}")
+        import traceback
+        traceback.print_exc()
 
     
