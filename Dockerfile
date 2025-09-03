@@ -9,16 +9,22 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
 # ----------------------------
-# System deps incl. Node.js (with retries and smaller groups)
+# System deps incl. Node.js (more reliable method)
 # ----------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    ca-certificates \
+    gnupg \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
     && apt-get install -y --no-install-recommends nodejs \
     && apt-get install -y --no-install-recommends build-essential \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
+    && node --version \
     && npm --version
 
 # ----------------------------
