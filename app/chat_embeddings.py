@@ -23,19 +23,25 @@ PINECONE_ENV = (
 ).strip()
 INDEX_NAME = (os.getenv("PINECONE_INDEX_NAME") or "chatbot-facts").strip()
 
-if not PINECONE_API_KEY:
-    raise RuntimeError("PINECONE_API_KEY is missing.")
-
-# --- Pinecone client --------------------------------------------------------
-pinecone.init(api_key=PINECONE_API_KEY, environment=PINECONE_ENV)
-existing = [ix["name"] for ix in pinecone.list_indexes()]
-if INDEX_NAME not in existing:
-    pinecone.create_index(
-        name=INDEX_NAME,
-        dimension=1536,
-        metric="cosine"
-    )
-index = pinecone.Index(INDEX_NAME)
+# --- Pinecone client (optional) ---------------------------------------------
+index = None
+if PINECONE_API_KEY:
+    try:
+        pinecone.init(api_key=PINECONE_API_KEY, environment=PINECONE_ENV)
+        existing = [ix["name"] for ix in pinecone.list_indexes()]
+        if INDEX_NAME not in existing:
+            pinecone.create_index(
+                name=INDEX_NAME,
+                dimension=1536,
+                metric="cosine"
+            )
+        index = pinecone.Index(INDEX_NAME)
+        print("✅ Pinecone initialized successfully")
+    except Exception as e:
+        print(f"⚠️ Pinecone initialization failed: {e}")
+        print("⚠️ Continuing without Pinecone vector database")
+else:
+    print("⚠️ PINECONE_API_KEY not set - continuing without Pinecone")
 
 
 def should_embed(text: str) -> bool:
@@ -57,7 +63,7 @@ def save_chat_to_memory(message_text, session_id, user_id="default", emotion="ne
     """
     Embeds and upserts a message into the Pinecone namespace for the given user_id.
     """
-    if not should_embed(message_text):
+    if not index or not should_embed(message_text):
         return
 
     emb = embed_text(message_text)
@@ -84,6 +90,9 @@ def search_chat_memory(query, top_k=3, user_id="default"):
     """
     Returns up to `top_k` stored texts for this user that best match `query`.
     """
+    if not index:
+        return []
+        
     emb = embed_text(query)
     try:
         print(f"[DEBUG] querying namespace='{user_id}' for '{query}'")
@@ -111,6 +120,9 @@ def get_user_facts(user_id, namespace=None):
     """
     Returns *all* saved facts for this user across sessions.
     """
+    if not index:
+        return []
+        
     ns = namespace or user_id
     try:
         # Query with a random vector to retrieve all items in the namespace
