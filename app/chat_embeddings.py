@@ -5,7 +5,7 @@ from uuid import uuid4
 import openai
 from dotenv import load_dotenv
 from tiktoken import get_encoding
-from pinecone import Pinecone
+import pinecone
 
 
 load_dotenv()
@@ -27,16 +27,15 @@ if not PINECONE_API_KEY:
     raise RuntimeError("PINECONE_API_KEY is missing.")
 
 # --- Pinecone client --------------------------------------------------------
-pc = Pinecone(api_key=PINECONE_API_KEY)
-existing = [ix["name"] for ix in pc.list_indexes()]
+pinecone.init(api_key=PINECONE_API_KEY, environment=PINECONE_ENV)
+existing = [ix["name"] for ix in pinecone.list_indexes()]
 if INDEX_NAME not in existing:
-    pc.create_index(
+    pinecone.create_index(
         name=INDEX_NAME,
         dimension=1536,
-        metric="cosine",
-        spec={"serverless": {"cloud": "aws", "region": PINECONE_ENV}}
+        metric="cosine"
     )
-index = pc.Index(INDEX_NAME)
+index = pinecone.Index(INDEX_NAME)
 
 
 def should_embed(text: str) -> bool:
