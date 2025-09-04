@@ -17,6 +17,7 @@ google-auth-oauthlib==1.1.0
 # AI dependencies
 openai==1.3.0
 faiss-cpu==1.7.4
+numpy==1.24.3
 
 # Database (optional)
 pymongo==4.5.0
