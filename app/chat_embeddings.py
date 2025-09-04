@@ -5,7 +5,7 @@ from uuid import uuid4
 import openai
 from dotenv import load_dotenv
 from tiktoken import get_encoding
-from pinecone import Pinecone, ServerlessSpec
+from pinecone import Pinecone
 
 
 load_dotenv()
@@ -34,7 +34,7 @@ if INDEX_NAME not in existing:
         name=INDEX_NAME,
         dimension=1536,
         metric="cosine",
-        spec=ServerlessSpec(cloud="aws", region=PINECONE_ENV)
+        spec={"serverless": {"cloud": "aws", "region": PINECONE_ENV}}
     )
 index = pc.Index(INDEX_NAME)
 
