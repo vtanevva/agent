@@ -63,7 +63,7 @@ export default function LoginPage() {
           </div>
           <div>
             <h1 className="text-3xl font-bold text-gradient-violet mb-3">Aivis</h1>
-            <p className="text-slate-200/80 text-sm">Your compassionate AI companion for mental wellness</p>
+            <p className="text-slate-200/80 text-sm"></p>
           </div>
         </div>
 
