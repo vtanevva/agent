@@ -28,18 +28,17 @@ index = None
 if PINECONE_API_KEY:
     try:
         # Initialize Pinecone with SSL configuration
-        pinecone.init(
-            api_key=PINECONE_API_KEY, 
-            environment=PINECONE_ENV
-        )
-        existing = [ix["name"] for ix in pinecone.list_indexes()]
+        # Use new Pinecone API format
+        from pinecone import Pinecone
+        pc = Pinecone(api_key=PINECONE_API_KEY)
+        existing = [ix["name"] for ix in pc.list_indexes()]
         if INDEX_NAME not in existing:
-            pinecone.create_index(
+            pc.create_index(
                 name=INDEX_NAME,
                 dimension=1536,
                 metric="cosine"
             )
-        index = pinecone.Index(INDEX_NAME)
+        index = pc.Index(INDEX_NAME)
         print("✅ Pinecone initialized successfully")
     except Exception as e:
         print(f"❌ Error getting facts from Pinecone: {e}")
