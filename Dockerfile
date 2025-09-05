@@ -43,4 +43,4 @@ WORKDIR /app
 
 # Use environment variable PORT for Railway compatibility
 # Support both server.py and server_minimal.py
-CMD gunicorn server:app --bind 0.0.0.0:8000 --workers 1 --timeout 120
+CMD gunicorn server:app --bind 0.0.0.0:10000 --workers 1 --timeout 120
