@@ -2,7 +2,7 @@
 openai>=1.3.0
 tiktoken
 numpy==1.26.4
-httpx>=0.27.2
+httpx==0.27.2
 
 # Vector Database (RAG)
 faiss-cpu
