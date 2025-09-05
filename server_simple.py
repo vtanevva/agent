@@ -30,7 +30,7 @@ def chat():
             return jsonify({"error": "No message provided"}), 400
         
         # Simple chat with OpenAI
-        response = openai.ChatCompletion.create(
+        response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a helpful AI assistant."},

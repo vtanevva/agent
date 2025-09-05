@@ -4,7 +4,6 @@ FROM python:3.10-slim
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV PORT=10000
 
 # Set work directory
 WORKDIR /app
@@ -27,7 +26,7 @@ RUN pip install --upgrade pip && pip install -r requirements-render.txt
 # Copy package files and install Node dependencies
 COPY my-chatbot/package*.json ./my-chatbot/
 WORKDIR /app/my-chatbot
-RUN npm ci --only=production
+RUN npm ci
 
 # Copy source code and build frontend
 COPY . /app
@@ -37,8 +36,8 @@ RUN npm run build
 # Go back to app root
 WORKDIR /app
 
-# Expose port
-EXPOSE $PORT
+# Expose port (Railway will set PORT env var)
+EXPOSE 10000
 
-# Start command
-CMD gunicorn server:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+# Start command - use Railway's PORT env var
+CMD gunicorn server:app --bind 0.0.0.0:${PORT:-10000} --workers 2 --timeout 120
