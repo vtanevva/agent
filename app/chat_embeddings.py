@@ -27,7 +27,12 @@ INDEX_NAME = (os.getenv("PINECONE_INDEX_NAME") or "chatbot-facts").strip()
 index = None
 if PINECONE_API_KEY:
     try:
-        pinecone.init(api_key=PINECONE_API_KEY, environment=PINECONE_ENV)
+        # Initialize Pinecone with SSL configuration
+        pinecone.init(
+            api_key=PINECONE_API_KEY, 
+            environment=PINECONE_ENV,
+            ssl_verify=True
+        )
         existing = [ix["name"] for ix in pinecone.list_indexes()]
         if INDEX_NAME not in existing:
             pinecone.create_index(
@@ -38,8 +43,9 @@ if PINECONE_API_KEY:
         index = pinecone.Index(INDEX_NAME)
         print("✅ Pinecone initialized successfully")
     except Exception as e:
-        print(f"⚠️ Pinecone initialization failed: {e}")
+        print(f"❌ Error getting facts from Pinecone: {e}")
         print("⚠️ Continuing without Pinecone vector database")
+        index = None
 else:
     print("⚠️ PINECONE_API_KEY not set - continuing without Pinecone")
 

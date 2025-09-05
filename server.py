@@ -1,6 +1,14 @@
 import os, uuid, pickle
+import ssl
+import certifi
+
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+
+# Configure SSL context for better certificate handling
+ssl_context = ssl.create_default_context(cafile=certifi.where())
+os.environ["SSL_CERT_FILE"] = certifi.where()
+os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
 from datetime import datetime
 from email.mime.text import MIMEText
@@ -187,12 +195,15 @@ def load_google_credentials(user_id: str) -> Credentials | None:
 # ──────────────────────────────────────────────────────────────────
 def _build_flow(redirect_uri: str, state: str | None = None):
     """Return a google-auth Flow object with the common settings."""
-    return Flow.from_client_secrets_file(
+    flow = Flow.from_client_secrets_file(
         GOOGLE_JSON,
         scopes=GOOGLE_SCOPES,
         redirect_uri=redirect_uri,
         state=state,
     )
+    # Configure SSL for the flow
+    flow.redirect_uri = redirect_uri
+    return flow
 
 # ──────────────────────────────────────────────────────────────────
 # /api/chat  – now tries tool-calling first, falls back to plain chat
@@ -350,8 +361,12 @@ def google_callback():
     cred_json = json.loads(creds.to_json())
 
     # get the real Gmail address
-    service = build("gmail", "v1", credentials=creds)
-    real_email = service.users().getProfile(userId="me").execute().get("emailAddress")
+    try:
+        service = build("gmail", "v1", credentials=creds)
+        real_email = service.users().getProfile(userId="me").execute().get("emailAddress")
+    except Exception as e:
+        print(f"❌ Error getting Gmail profile: {e}")
+        real_email = state  # fallback to state if we can't get the real email
 
     # save under both your temp key *and* the real address
     if tokens is not None:
