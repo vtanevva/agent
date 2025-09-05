@@ -25,17 +25,21 @@ MONGO_URI = os.getenv("MONGO_URI")
 client = None
 tokens = None
 
-if MONGO_URI:
+if MONGO_URI and MONGO_URI.strip() and MONGO_URI != "your-mongodb-uri-here":
     try:
         client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
         client.admin.command('ping')
         db = client.get_database()
         tokens = db["tokens"]
+        print("[INFO] MongoDB connected successfully")
     except Exception as e:
         print(f"[WARNING] MongoDB connection failed: {e}")
+        client = None
         tokens = None
 else:
-    print("[WARNING] MONGO_URI not set.")
+    print("[INFO] MongoDB not configured - continuing without database")
+    client = None
+    tokens = None
 
 
 def _service(user_id: str):

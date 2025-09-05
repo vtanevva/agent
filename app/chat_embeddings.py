@@ -30,8 +30,7 @@ if PINECONE_API_KEY:
         # Initialize Pinecone with SSL configuration
         pinecone.init(
             api_key=PINECONE_API_KEY, 
-            environment=PINECONE_ENV,
-            ssl_verify=True
+            environment=PINECONE_ENV
         )
         existing = [ix["name"] for ix in pinecone.list_indexes()]
         if INDEX_NAME not in existing:
