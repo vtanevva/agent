@@ -56,13 +56,26 @@ def build_vector_store(file_path: str):
     print("Vector store built and saved.")
 
 def load_vector_store():
-    index = faiss.read_index("rag_index.faiss")
-    with open("rag_chunks.pkl", "rb") as f:
-        chunks = pickle.load(f)
-    return index, chunks
+    try:
+        if not os.path.exists("rag_index.faiss") or not os.path.exists("rag_chunks.pkl"):
+            print("Vector store files not found. RAG functionality will be disabled.")
+            return None, []
+        
+        index = faiss.read_index("rag_index.faiss")
+        with open("rag_chunks.pkl", "rb") as f:
+            chunks = pickle.load(f)
+        return index, chunks
+    except Exception as e:
+        print(f"Error loading vector store: {e}. RAG functionality will be disabled.")
+        return None, []
 
 def search_similar_chunks(user_query: str, top_k=3):
     index, chunks = load_vector_store()
+    
+    # If vector store is not available, return empty results
+    if index is None or len(chunks) == 0:
+        print("Vector store not available. Returning empty search results.")
+        return []
     
     query_embedding = openai.Embedding.create(
         input=user_query,
