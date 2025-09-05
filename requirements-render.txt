@@ -32,4 +32,6 @@ pydantic>=2.0
 psutil
 
 # Security
-cryptography
+cryptography>=3.4.8
+certifi>=2023.7.22
+urllib3>=1.26.0

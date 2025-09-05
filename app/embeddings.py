@@ -57,10 +57,16 @@ def build_vector_store(file_path: str):
 
 def load_vector_store():
     try:
-        if not os.path.exists("rag_index.faiss") or not os.path.exists("rag_chunks.pkl"):
-            print("Vector store files not found. RAG functionality will be disabled.")
+        # Check if files exist first
+        if not os.path.exists("rag_index.faiss"):
+            print("rag_index.faiss not found. RAG functionality will be disabled.")
             return None, []
         
+        if not os.path.exists("rag_chunks.pkl"):
+            print("rag_chunks.pkl not found. RAG functionality will be disabled.")
+            return None, []
+        
+        # Load the files
         index = faiss.read_index("rag_index.faiss")
         with open("rag_chunks.pkl", "rb") as f:
             chunks = pickle.load(f)
