@@ -48,6 +48,7 @@ if PINECONE_API_KEY:
         index = None
 else:
     print("⚠️ PINECONE_API_KEY not set - continuing without Pinecone")
+    index = None
 
 
 def should_embed(text: str) -> bool:
@@ -82,6 +83,10 @@ def save_chat_to_memory(message_text, session_id, user_id="default", emotion="ne
         "emotion":    emotion or ""
     }
 
+    if index is None:
+        print(f"⚠️ Pinecone not available - skipping fact save: {message_text!r}")
+        return
+    
     try:
         index.upsert(
             vectors=[{"id": vid, "values": emb, "metadata": metadata}],

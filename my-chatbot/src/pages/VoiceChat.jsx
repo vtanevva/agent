@@ -27,13 +27,19 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
 
   // Fetch sessions function
   async function fetchSessions(id = userId) {
-    if (!id) return;
+    if (!id || id === 'undefined' || id === 'null') {
+      console.log("No valid userId, skipping fetchSessions");
+      return;
+    }
     try {
       const r = await fetch("/api/sessions-log", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: id }),
       });
+      if (!r.ok) {
+        throw new Error(`HTTP error! status: ${r.status}`);
+      }
       const { sessions: sessionData = [] } = await r.json();
       setSessions(sessionData);
     } catch (err) {
@@ -69,7 +75,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
 
   // Load sessions when component mounts
   useEffect(() => {
-    if (userId) {
+    if (userId && userId !== 'undefined' && userId !== 'null') {
       fetchSessions(userId);
     }
   }, [userId]);

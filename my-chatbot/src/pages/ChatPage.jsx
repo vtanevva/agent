@@ -84,13 +84,19 @@ export default function ChatPage() {
   }, [userId]);
 
   async function fetchSessions(id = userId) {
-    if (!id) return;
+    if (!id || id === 'undefined' || id === 'null') {
+      console.log("No valid userId, skipping fetchSessions");
+      return;
+    }
     try {
       const r = await fetch("/api/sessions-log", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: id }),
       });
+      if (!r.ok) {
+        throw new Error(`HTTP error! status: ${r.status}`);
+      }
       const { sessions = [] } = await r.json();
       setSessions(sessions);
     } catch (err) {
@@ -100,7 +106,7 @@ export default function ChatPage() {
 
   // Load sessions on component mount
   useEffect(() => {
-    if (userId) {
+    if (userId && userId !== 'undefined' && userId !== 'null') {
       fetchSessions(userId);
     }
   }, [userId]);
