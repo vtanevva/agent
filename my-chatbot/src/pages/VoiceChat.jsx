@@ -19,6 +19,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
   const [emailChoices, setEmailChoices] = useState(null)
   const [showGoogleModal, setShowGoogleModal] = useState(false)
   const [googleConnectUrl, setGoogleConnectUrl] = useState("")
+  const [showSidebar, setShowSidebar] = useState(false)
   const lastUserMessage = useRef("")
 
   const recognitionRef = useRef(null)
@@ -240,9 +241,39 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
   };
 
   return (
-    <div className="w-full max-w-7xl flex gap-6 h-[90vh]">
+    <div className="w-full max-w-7xl flex gap-6 h-[90vh] relative">
+      {/* Mobile overlay */}
+      {showSidebar && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={() => setShowSidebar(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <div className="w-80 flex flex-col gap-4 h-full overflow-y-auto custom-scrollbar">
+      <div className={`
+        ${showSidebar ? 'translate-x-0' : '-translate-x-full'} 
+        lg:translate-x-0 
+        fixed lg:static 
+        top-0 left-0 
+        w-80 
+        h-full 
+        z-50 lg:z-0
+        flex flex-col gap-4 
+        overflow-y-auto custom-scrollbar
+        bg-slate-900/95 lg:bg-transparent 
+        backdrop-blur-md lg:backdrop-blur-none
+        transition-transform duration-300 ease-in-out
+        p-4 lg:p-0
+      `}>
+        {/* Mobile close button */}
+        <button
+          onClick={() => setShowSidebar(false)}
+          className="lg:hidden absolute top-4 right-4 text-white hover:text-gray-300 z-10 bg-slate-800/50 rounded-full p-2"
+        >
+          ✕
+        </button>
+
         {/* User Profile Section */}
         <div className="glass-effect-strong rounded-2xl p-4 shadow-glow">
           <div className="flex items-center gap-3">
@@ -509,13 +540,24 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
       </div>
 
       {/* Main Voice Chat Area */}
-      <div className="flex-1 flex flex-col glass-effect-strong rounded-3xl shadow-glow border border-slate-600/30">
+      <div className="flex-1 flex flex-col glass-effect-strong rounded-3xl shadow-glow border border-slate-600/30 lg:ml-0 ml-0">
         {/* Chat Header */}
-        <div className="p-6 border-b border-slate-600/20">
+        <div className="p-4 lg:p-6 border-b border-slate-600/20">
           <div className="flex justify-between items-center">
-            <div>
-              <h2 className="text-white font-bold text-xl">Voice Chat</h2>
-              <p className="text-slate-300/70 text-sm"></p>
+            <div className="flex items-center gap-3">
+              {/* Mobile menu button */}
+              <button
+                onClick={() => setShowSidebar(true)}
+                className="lg:hidden text-white hover:text-gray-300 p-2 -ml-2"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+              <div>
+                <h2 className="text-white font-bold text-lg lg:text-xl">Voice Chat</h2>
+                <p className="text-slate-300/70 text-sm"></p>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 bg-emerald-400 rounded-full animate-pulse"></div>
@@ -526,7 +568,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
 
         {/* Chat Messages */}
         {showChat && (
-          <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-6">
+          <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-4 lg:p-6">
             <div className="space-y-6">
               {chat.map((msg, idx) => (
                 <div
@@ -534,7 +576,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
                   className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} message-enter`}
                 >
                   <div
-                    className={`max-w-xs lg:max-w-md px-6 py-4 rounded-2xl shadow-lg ${
+                    className={`max-w-xs lg:max-w-md px-4 lg:px-6 py-3 lg:py-4 rounded-2xl shadow-lg ${
                       msg.role === "user"
                         ? "glass-effect-violet text-white rounded-br-md shadow-glow"
                         : "glass-effect-emerald text-slate-800 rounded-bl-md shadow-glow-emerald"
@@ -620,18 +662,18 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         )}
 
         {/* Input Area */}
-        <div className="p-6 border-t border-slate-600/20">
-          <div className="flex gap-4 items-end">
+        <div className="p-4 lg:p-6 border-t border-slate-600/20">
+          <div className="flex flex-col sm:flex-row gap-3 lg:gap-4 items-stretch sm:items-end">
             <div className="flex-1 relative">
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                className="w-full px-6 py-4 rounded-xl text-white bg-slate-800/50 placeholder-slate-300/60 border border-slate-600/30 focus:border-violet-400/50 input-focus resize-none focus:bg-slate-800/70 transition-all duration-300"
+                className="w-full px-4 lg:px-6 py-3 lg:py-4 rounded-xl text-white bg-slate-800/50 placeholder-slate-300/60 border border-slate-600/30 focus:border-violet-400/50 input-focus resize-none focus:bg-slate-800/70 transition-all duration-300 text-sm lg:text-base"
                 placeholder={isListening ? "Listening..." : "Type your message or use voice..."}
                 rows="1"
                 style={{
-                  minHeight: '56px',
+                  minHeight: '48px',
                   maxHeight: '120px'
                 }}
               />
@@ -639,7 +681,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
             <button
               onClick={() => handleSend()}
               disabled={loading || !input.trim()}
-              className="bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white px-8 py-4 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed btn-hover font-semibold flex items-center gap-3 shadow-lg"
+              className="bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white px-6 lg:px-8 py-3 lg:py-4 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed btn-hover font-semibold flex items-center justify-center gap-2 lg:gap-3 shadow-lg text-sm lg:text-base min-h-[48px]"
             >
               {loading ? (
                 <>

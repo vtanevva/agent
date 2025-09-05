@@ -35,6 +35,7 @@ export default function ChatPage() {
   const [showCalendar, setShowCalendar] = useState(false);
   const [calendarEvents, setCalendarEvents] = useState([]);
   const [calendarEvent, setCalendarEvent] = useState(null);
+  const [showSidebar, setShowSidebar] = useState(false);
   const lastUserMessage = useRef("");
 
   /* ── refs & effects ── */
@@ -275,9 +276,39 @@ export default function ChatPage() {
 
     /* ── MAIN CHAT ── */
   return (
-    <div className="w-full max-w-7xl flex gap-6 h-[90vh]">
+    <div className="w-full max-w-7xl flex gap-6 h-[90vh] relative">
+      {/* Mobile overlay */}
+      {showSidebar && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={() => setShowSidebar(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <div className="w-80 flex flex-col gap-4 h-full overflow-y-auto custom-scrollbar">
+      <div className={`
+        ${showSidebar ? 'translate-x-0' : '-translate-x-full'} 
+        lg:translate-x-0 
+        fixed lg:static 
+        top-0 left-0 
+        w-80 
+        h-full 
+        z-50 lg:z-0
+        flex flex-col gap-4 
+        overflow-y-auto custom-scrollbar
+        bg-slate-900/95 lg:bg-transparent 
+        backdrop-blur-md lg:backdrop-blur-none
+        transition-transform duration-300 ease-in-out
+        p-4 lg:p-0
+      `}>
+        {/* Mobile close button */}
+        <button
+          onClick={() => setShowSidebar(false)}
+          className="lg:hidden absolute top-4 right-4 text-white hover:text-gray-300 z-10 bg-slate-800/50 rounded-full p-2"
+        >
+          ✕
+        </button>
+
         {/* User Profile Section */}
         <div className="glass-effect-strong rounded-2xl p-4 shadow-glow">
           <div className="flex items-center gap-3">
@@ -437,12 +468,23 @@ export default function ChatPage() {
       </div>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col glass-effect-strong rounded-3xl shadow-glow border border-slate-600/30">
+      <div className="flex-1 flex flex-col glass-effect-strong rounded-3xl shadow-glow border border-slate-600/30 lg:ml-0 ml-0">
         {/* Chat Header */}
-        <div className="p-6 border-b border-slate-600/20">
+        <div className="p-4 lg:p-6 border-b border-slate-600/20">
           <div className="flex justify-between items-center">
-            <div>
-              <p className="text-white font-bold text-xl">Session: {sessionId?.slice(-8)}</p>
+            <div className="flex items-center gap-3">
+              {/* Mobile menu button */}
+              <button
+                onClick={() => setShowSidebar(true)}
+                className="lg:hidden text-white hover:text-gray-300 p-2 -ml-2"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+              <div>
+                <p className="text-white font-bold text-lg lg:text-xl">Session: {sessionId?.slice(-8)}</p>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 bg-emerald-400 rounded-full animate-pulse"></div>
@@ -452,7 +494,7 @@ export default function ChatPage() {
         </div>
 
         {/* Chat Messages */}
-        <div ref={chatRef} className="flex-1 overflow-y-auto custom-scrollbar p-6">
+        <div ref={chatRef} className="flex-1 overflow-y-auto custom-scrollbar p-4 lg:p-6">
           <MessageList chat={chat} loading={loading} />
           {emailChoices && <EmailList emails={emailChoices} onSelect={handleEmailSelect} />}
           {calendarEvent && (
@@ -466,7 +508,7 @@ export default function ChatPage() {
         </div>
 
         {/* Input Area */}
-        <div className="p-6 border-t border-slate-600/20">
+        <div className="p-4 lg:p-6 border-t border-slate-600/20">
           <InputBar
             input={input}
             setInput={setInput}

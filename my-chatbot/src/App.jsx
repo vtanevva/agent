@@ -51,7 +51,7 @@ export default function App() {
       </div>
 
       {/* Main content */}
-      <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-4">
+      <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-2 lg:p-4">
         <Routes>
           <Route path="/" element={<LoginPage />} />
           <Route path="/chat/:userId/:sessionId" element={<ChatPage />} />
