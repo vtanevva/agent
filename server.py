@@ -725,7 +725,14 @@ def serve_frontend(path):
 # Local dev (not used in Gunicorn container runtime)
 # ------------------------------------------------------------------------------
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "10000"))
+    # Parse PORT more safely
+    port_str = os.getenv("PORT", "10000")
+    try:
+        # Extract only the numeric part if there's extra text
+        port = int(''.join(filter(str.isdigit, port_str)) or "10000")
+    except ValueError:
+        port = 10000
+    
     print(f"[DEBUG] Starting server on port {port}")
     print(f"[DEBUG] PORT env var: {os.getenv('PORT')}")
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
