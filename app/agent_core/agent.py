@@ -88,7 +88,7 @@ def run_agent(user_id: str, message: str, history: list):
 
     # 1 – first pass: GPT chooses / is forced to a tool
     print(f"Making OpenAI call with forced_choice: {forced_choice}")
-    first = openai.ChatCompletion.create(
+    first = openai.chat.completions.create(
         model="gpt-4o-mini",
         messages=messages,
         tools=all_openai_schemas(),
@@ -134,5 +134,5 @@ def run_agent(user_id: str, message: str, history: list):
 
 
     # 3 – final pass: GPT narrates result or returns raw JSON
-    final = openai.ChatCompletion.create(model="gpt-4o-mini", messages=messages)
+    final = openai.chat.completions.create(model="gpt-4o-mini", messages=messages)
     return final.choices[0].message.content

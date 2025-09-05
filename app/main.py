@@ -37,7 +37,7 @@ while True:
     if user_input.lower().startswith("summarize:"):
         messages = search_chat_memory("reflect on all", user_id=user_id)
         context = "\n".join(messages)
-        response = openai.ChatCompletion.create(
+        response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a gentle assistant. Summarize the user's recent concerns or emotional patterns."},

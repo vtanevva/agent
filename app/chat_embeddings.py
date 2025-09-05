@@ -59,7 +59,7 @@ def should_embed(text: str) -> bool:
 
 
 def embed_text(text: str):
-    resp = openai.Embedding.create(
+    resp = openai.embeddings.create(
         model="text-embedding-ada-002",
         input=text,
     )
@@ -159,7 +159,7 @@ def get_user_facts(user_id, namespace=None):
 # ---------------------------------------------------------------------------
 def summarize_old_facts(context_text: str) -> str:
     try:
-        resp = openai.ChatCompletion.create(
+        resp = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": (
@@ -186,7 +186,7 @@ Return 'None' if there's nothing to store.
 User input: "{user_input}"
 """
     try:
-        resp = openai.ChatCompletion.create(
+        resp = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a fact extractor for a psychology chatbot."},

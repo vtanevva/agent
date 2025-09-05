@@ -32,7 +32,7 @@ def split_text(text: str, max_tokens=300) -> List[str]:
     return chunks
 
 def embed_text_chunks(chunks: List[str]):
-    response = openai.Embedding.create(
+    response = openai.embeddings.create(
         input=chunks,
         model="text-embedding-ada-002"
     )
@@ -83,7 +83,7 @@ def search_similar_chunks(user_query: str, top_k=3):
         print("Vector store not available. Returning empty search results.")
         return []
     
-    query_embedding = openai.Embedding.create(
+    query_embedding = openai.embeddings.create(
         input=user_query,
         model="text-embedding-ada-002",
     ).data[0].embedding

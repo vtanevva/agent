@@ -80,7 +80,7 @@ def chat_with_gpt(user_message, user_id="default", session_id=None, return_meta=
         print(f"[{msg['role'].upper()}] {msg['content']}\n")
 
     # 🤖 Query GPT
-    response = openai.ChatCompletion.create(
+    response = openai.chat.completions.create(
         model="gpt-4o",
         messages=messages,
         max_tokens=300 if wants_detail else 100,
