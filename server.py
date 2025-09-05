@@ -195,12 +195,41 @@ def load_google_credentials(user_id: str) -> Credentials | None:
 # ──────────────────────────────────────────────────────────────────
 def _build_flow(redirect_uri: str, state: str | None = None):
     """Return a google-auth Flow object with the common settings."""
-    flow = Flow.from_client_secrets_file(
-        GOOGLE_JSON,
-        scopes=GOOGLE_SCOPES,
-        redirect_uri=redirect_uri,
-        state=state,
-    )
+    # Try to use environment variables first, fallback to file
+    google_client_id = os.getenv("GOOGLE_CLIENT_ID")
+    google_client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+    
+    if google_client_id and google_client_secret:
+        # Use environment variables
+        google_project_id = os.getenv("GOOGLE_PROJECT_ID", "gmail-agent-466700")
+        google_redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/google/oauth2callback/demo")
+        
+        client_config = {
+            "web": {
+                "client_id": google_client_id,
+                "project_id": google_project_id,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                "client_secret": google_client_secret,
+                "redirect_uris": [google_redirect_uri]
+            }
+        }
+        flow = Flow.from_client_config(
+            client_config,
+            scopes=GOOGLE_SCOPES,
+            redirect_uri=redirect_uri,
+            state=state,
+        )
+    else:
+        # Fallback to file
+        flow = Flow.from_client_secrets_file(
+            GOOGLE_JSON,
+            scopes=GOOGLE_SCOPES,
+            redirect_uri=redirect_uri,
+            state=state,
+        )
+    
     # Configure SSL for the flow
     flow.redirect_uri = redirect_uri
     return flow
