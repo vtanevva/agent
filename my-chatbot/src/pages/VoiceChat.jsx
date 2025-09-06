@@ -240,7 +240,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
   };
 
   return (
-    <div className="w-full max-w-none lg:max-w-full flex gap-6 h-[90vh] lg:h-[calc(100vh-2rem)] relative">
+    <div className="w-full max-w-full lg:max-w-full flex gap-6 h-[90vh] lg:h-[calc(100vh-2rem)] relative overflow-hidden">
       {/* Mobile overlay */}
       {showSidebar && (
         <div 
@@ -255,16 +255,17 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         lg:translate-x-0 
         fixed lg:static 
         top-0 left-0 
-        w-80 lg:w-72 
+        w-full lg:w-72 
         h-full 
         z-50 lg:z-0
-        flex flex-col gap-4 
+        flex flex-col gap-6 
         overflow-y-auto custom-scrollbar
-        bg-transparent 
+        bg-white lg:bg-transparent 
         backdrop-blur-none
         transition-transform duration-300 ease-in-out
         p-4 lg:p-0
       `}>
+        <div className="w-72 sm:w-80 lg:w-full mx-auto">
         {/* Mobile close button */}
         <button
           onClick={() => setShowSidebar(false)}
@@ -274,7 +275,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </button>
 
         {/* User Profile Section */}
-        <div className="glass-effect-strong rounded-2xl p-4 border border-dark-500/10">
+        <div className="glass-effect-strong rounded-2xl p-2 sm:p-3 md:p-4 border border-dark-500/10 mb-3 sm:mb-4">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 bg-gradient-to-br from-accent-500 via-secondary-500 to-dark-500 rounded-full flex items-center justify-center text-primary-50 font-bold text-lg shadow-lg">
               {userId.charAt(0).toUpperCase()}
@@ -306,8 +307,8 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </div>
 
         {/* Voice Controls */}
-        <div className="glass-effect-strong rounded-2xl p-4 border border-dark-500/10">
-          <h3 className="text-primary-900 font-semibold text-lg mb-3 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-2 sm:p-3 md:p-4 border border-dark-500/10 mb-3 sm:mb-4">
+          <h3 className="text-primary-900 font-semibold text-sm sm:text-base md:text-lg mb-2 sm:mb-3 flex items-center gap-2">
             Voice Controls
           </h3>
           <div className="space-y-3">
@@ -344,8 +345,8 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </div>
 
         {/* Chat Toggle */}
-        <div className="glass-effect-strong rounded-2xl p-4 border border-dark-500/10">
-          <h3 className="text-primary-900 font-semibold text-lg mb-3 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-2 sm:p-3 md:p-4 border border-dark-500/10 mb-3 sm:mb-4">
+          <h3 className="text-primary-900 font-semibold text-sm sm:text-base md:text-lg mb-2 sm:mb-3 flex items-center gap-2">
             Chat Display
           </h3>
           <button
@@ -357,8 +358,8 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </div>
 
         {/* Voice Sessions */}
-        <div className="glass-effect-strong rounded-2xl p-4 border border-dark-500/10">
-          <h3 className="text-primary-900 font-semibold text-lg mb-3 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-2 sm:p-3 md:p-4 border border-dark-500/10 mb-3 sm:mb-4">
+          <h3 className="text-primary-900 font-semibold text-sm sm:text-base md:text-lg mb-2 sm:mb-3 flex items-center gap-2">
             Mindful Voice
           </h3>
           <div className="space-y-2">
@@ -412,8 +413,8 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </div>
 
         {/* Voice Settings */}
-        <div className="glass-effect-strong rounded-2xl p-4 border border-dark-500/10">
-          <h3 className="text-primary-900 font-semibold text-lg mb-3 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-2 sm:p-3 md:p-4 border border-dark-500/10 mb-3 sm:mb-4">
+          <h3 className="text-primary-900 font-semibold text-sm sm:text-base md:text-lg mb-2 sm:mb-3 flex items-center gap-2">
             Voice Settings
           </h3>
           <div className="space-y-2">
@@ -443,8 +444,8 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </div>
 
         {/* Email Integration */}
-        <div className="glass-effect-strong rounded-2xl p-4 border border-dark-500/10">
-          <h3 className="text-primary-900 font-semibold text-lg mb-3 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-2 sm:p-3 md:p-4 border border-dark-500/10 mb-3 sm:mb-4">
+          <h3 className="text-primary-900 font-semibold text-sm sm:text-base md:text-lg mb-2 sm:mb-3 flex items-center gap-2">
             Quick Actions
           </h3>
           <div className="space-y-2">
@@ -464,8 +465,8 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </div>
 
         {/* Smart Insights */}
-        <div className="glass-effect-strong rounded-2xl p-4 border border-dark-500/10">
-          <h3 className="text-primary-900 font-semibold text-lg mb-3 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-2 sm:p-3 md:p-4 border border-dark-500/10 mb-3 sm:mb-4">
+          <h3 className="text-primary-900 font-semibold text-sm sm:text-base md:text-lg mb-2 sm:mb-3 flex items-center gap-2">
             Smart Insights
           </h3>
           <div className="space-y-2">
@@ -506,8 +507,8 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </div>
 
         {/* Voice Status */}
-        <div className="glass-effect-strong rounded-2xl p-4 border border-dark-500/10">
-          <h3 className="text-primary-900 font-semibold text-lg mb-3 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-2 sm:p-3 md:p-4 border border-dark-500/10 mb-3 sm:mb-4">
+          <h3 className="text-primary-900 font-semibold text-sm sm:text-base md:text-lg mb-2 sm:mb-3 flex items-center gap-2">
             Status
           </h3>
           <div className="space-y-2 text-sm">
@@ -536,10 +537,11 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
             )}
           </div>
         </div>
+        </div>
       </div>
 
       {/* Main Voice Chat Area */}
-      <div className="flex-1 flex flex-col glass-effect-strong rounded-3xl lg:rounded-2xl border border-dark-500/20 lg:ml-0 ml-0">
+      <div className="flex-1 flex flex-col glass-effect-strong rounded-3xl lg:rounded-2xl border border-dark-500/20 lg:ml-0 ml-0 max-w-full overflow-hidden">
         {/* Chat Header */}
         <div className="p-3 lg:p-4 border-b border-dark-500/10">
           <div className="flex justify-between items-center">
@@ -559,7 +561,6 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-secondary-500 rounded-full animate-pulse"></div>
               <span className="text-secondary-600 text-sm font-medium">Voice Active</span>
             </div>
           </div>

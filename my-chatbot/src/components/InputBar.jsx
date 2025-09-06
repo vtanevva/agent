@@ -16,20 +16,29 @@ export default function InputBar({ input, setInput, loading, onSend, showConnect
   };
 
   return (
-    <div className="glass-effect-strong rounded-2xl p-4 lg:p-6 shadow-glow border border-dark-500/10">
-      <div className="flex flex-col sm:flex-row gap-3 lg:gap-4 items-stretch sm:items-end">
+    <div className="p-3 lg:p-1">
+      <div className="flex flex-col sm:flex-row gap-3 lg:gap-4 items-stretch sm:items-end lg:items-end">
         {/* Input field */}
         <div className="flex-1 relative">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="w-full px-4 lg:px-6 py-3 lg:py-4 rounded-xl text-primary-900 bg-primary-100/50 placeholder-primary-900/40 border border-dark-500/20 focus:border-accent-500/50 input-focus resize-none focus:bg-primary-100/70 transition-all duration-300 text-sm lg:text-base"
+            onFocus={(e) => {
+              e.target.style.border = 'none';
+              e.target.style.outline = 'none';
+              e.target.style.boxShadow = 'none';
+            }}
+            className="w-full px-4 lg:px-6 py-3 lg:py-4 rounded-xl text-primary-900 bg-primary-100/50 placeholder-primary-900/40 border-0 focus:border-0 focus:outline-none focus:ring-0 focus:ring-offset-0 resize-none focus:bg-primary-100/70 transition-all duration-300 text-sm lg:text-base overflow-y-hidden"
             placeholder="Share your thoughts, feelings, or ask me anything..."
             rows="1"
             style={{
               minHeight: '48px',
-              maxHeight: '120px'
+              maxHeight: '120px',
+              height: '48px',
+              border: 'none !important',
+              outline: 'none !important',
+              boxShadow: 'none !important'
             }}
           />
           
@@ -39,7 +48,7 @@ export default function InputBar({ input, setInput, loading, onSend, showConnect
         <button
           onClick={handleSendClick}
           disabled={loading || !input.trim()}
-          className="bg-gradient-to-r from-accent-500 to-accent-600 hover:from-accent-600 hover:to-accent-700 text-primary-50 px-6 lg:px-8 py-3 lg:py-4 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed btn-hover font-semibold flex items-center justify-center gap-2 lg:gap-3 shadow-lg text-sm lg:text-base min-h-[48px]"
+          className="bg-gradient-to-r from-accent-500 to-accent-600 hover:from-accent-600 hover:to-accent-700 text-primary-50 px-6 lg:px-8 py-3 lg:py-4 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed btn-hover font-semibold flex items-center justify-center gap-2 lg:gap-3 shadow-lg border border-accent-600/30 text-sm lg:text-base min-h-[48px]"
         >
           {loading ? (
             <>

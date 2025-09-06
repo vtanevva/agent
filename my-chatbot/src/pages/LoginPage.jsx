@@ -70,7 +70,9 @@ export default function LoginPage() {
             value={loginName}
             onChange={(e) => setLoginName(e.target.value)}
             placeholder="Choose a username"
-            className="w-full lg:w-auto lg:max-w-sm px-6 py-3 lg:px-6 lg:py-3.5 rounded-xl text-center text-primary-900 bg-secondary-500/10 placeholder-primary-900/40 border-0 focus:border-0 focus:outline-none input-focus text-lg lg:text-base font-medium"
+            className="w-auto max-w-sm lg:w-auto lg:max-w-sm px-6 py-3 lg:px-6 lg:py-3.5 rounded-xl text-center text-primary-900 bg-secondary-500/10 placeholder-primary-900/40 border-0 focus:border-0 focus:outline-none focus:ring-0 focus:ring-offset-0 input-focus text-lg lg:text-base font-medium"
+            onFocus={(e) => { e.target.style.border = 'none'; e.target.style.outline = 'none'; e.target.style.boxShadow = 'none'; }}
+            style={{ border: 'none !important', outline: 'none !important', boxShadow: 'none !important' }}
           />
 
           {/* Sign in with Google */}
@@ -80,7 +82,7 @@ export default function LoginPage() {
               setGoogleConnectUrl(getGoogleAuthUrl());
               setShowGoogleModal(true);
             }}
-            className="w-full lg:w-auto lg:max-w-sm bg-gradient-to-r from-secondary-500 to-secondary-600 hover:from-secondary-600 hover:to-secondary-700 text-primary-50 px-4 py-3 lg:px-6 lg:py-3.5 rounded-xl disabled:opacity-50 btn-hover font-semibold flex items-center justify-center gap-3 shadow-lg border border-secondary-600/30 text-base lg:text-base"
+            className="w-auto max-w-sm lg:w-auto lg:max-w-sm bg-gradient-to-r from-secondary-500 to-secondary-600 hover:from-secondary-600 hover:to-secondary-700 text-primary-50 px-4 py-3 lg:px-6 lg:py-3.5 rounded-xl disabled:opacity-50 btn-hover font-semibold flex items-center justify-center gap-3 shadow-lg border border-secondary-600/30 text-base lg:text-base"
           >
             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -101,7 +103,7 @@ export default function LoginPage() {
           <button
             disabled={!loginName.trim()}
             onClick={handleGuestLogin}
-            className="w-full lg:w-auto lg:max-w-sm bg-gradient-to-r from-accent-500 to-accent-600 hover:from-accent-600 hover:to-accent-700 text-primary-50 px-4 py-3 lg:px-6 lg:py-3.5 rounded-xl disabled:opacity-50 btn-hover font-semibold shadow-lg border border-accent-600/30 text-base lg:text-base"
+            className="w-auto max-w-sm lg:w-auto lg:max-w-sm bg-gradient-to-r from-accent-500 to-accent-600 hover:from-accent-600 hover:to-accent-700 text-primary-50 px-4 py-3 lg:px-6 lg:py-3.5 rounded-xl disabled:opacity-50 btn-hover font-semibold shadow-lg border border-accent-600/30 text-base lg:text-base"
           >
             Continue as "{loginName.trim().toLowerCase()}"
           </button>
@@ -110,19 +112,26 @@ export default function LoginPage() {
         {/* Features */}
         <div className="flex justify-center items-center gap-4 lg:gap-12 pt-4 lg:pt-6">
           <div className="text-center">
-            <div className="w-8 h-8 lg:w-12 lg:h-12 bg-primary-200/60 rounded-full flex items-center justify-center mx-auto mb-2 border border-dark-500/10 text-lg lg:text-xl">
+            <div className="w-12 h-12 lg:w-16 lg:h-16 bg-primary-200/60 rounded-full flex items-center justify-center mx-auto mb-2 border border-dark-500/10 text-lg lg:text-xl">
+              <svg className="w-4 h-4 lg:w-6 lg:h-6 text-black" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4l4 4 4-4h4c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
+              </svg>
             </div>
-            <p className="text-primary-900/60 text-xs lg:text-sm">Chat</p>
           </div>
           <div className="text-center">
-            <div className="w-8 h-8 lg:w-12 lg:h-12 bg-primary-200/60 rounded-full flex items-center justify-center mx-auto mb-2 border border-dark-500/10 text-lg lg:text-xl">
+            <div className="w-12 h-12 lg:w-16 lg:h-16 bg-primary-200/60 rounded-full flex items-center justify-center mx-auto mb-2 border border-dark-500/10 text-lg lg:text-xl">
+              <svg className="w-4 h-4 lg:w-6 lg:h-6 text-black" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+              </svg>
             </div>
-            <p className="text-primary-900/60 text-xs lg:text-sm">Voice</p>
           </div>
           <div className="text-center">
-            <div className="w-8 h-8 lg:w-12 lg:h-12 bg-primary-200/60 rounded-full flex items-center justify-center mx-auto mb-2 border border-dark-500/10 text-lg lg:text-xl">
+            <div className="w-12 h-12 lg:w-16 lg:h-16 bg-primary-200/60 rounded-full flex items-center justify-center mx-auto mb-2 border border-dark-500/10 text-lg lg:text-xl">
+              <svg className="w-4 h-4 lg:w-6 lg:h-6 text-black" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
+              </svg>
             </div>
-            <p className="text-primary-900/60 text-xs lg:text-sm">Email</p>
           </div>
         </div>
         </div>
