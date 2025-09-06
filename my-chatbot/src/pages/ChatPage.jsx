@@ -310,16 +310,16 @@ export default function ChatPage() {
         </button>
 
         {/* User Profile Section */}
-        <div className="glass-effect-strong rounded-2xl p-4 shadow-glow">
+        <div className="glass-effect-strong rounded-2xl p-4 shadow-glow border border-dark-500/10">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-gradient-to-br from-violet-400 via-purple-500 to-fuchsia-500 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-lg">
+            <div className="w-12 h-12 bg-gradient-to-br from-accent-500 via-secondary-500 to-dark-500 rounded-full flex items-center justify-center text-primary-50 font-bold text-lg shadow-lg">
               {userId.charAt(0).toUpperCase()}
             </div>
             <div>
-              <div className="text-white font-semibold text-lg">
+              <div className="text-primary-900 font-semibold text-lg">
                 {userId}
               </div>
-                              <div className="text-slate-300/60 text-sm">
+                              <div className="text-primary-900/60 text-sm">
                   {new Date().getDate()}/{new Date().getMonth() + 1}
                 </div>
             </div>
@@ -328,13 +328,13 @@ export default function ChatPage() {
           <div className="mt-4 flex gap-2">
             <button
               onClick={() => setUseVoice(true)}
-              className="flex-1 px-4 py-2 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-emerald-500 to-teal-600 text-white btn-hover text-sm"
+              className="flex-1 px-4 py-2 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-secondary-500 to-secondary-600 text-primary-50 btn-hover text-sm"
             >
               🎙️ Voice Mode
             </button>
             <button
               onClick={handleLogout}
-              className="px-4 py-2 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-red-500 to-red-600 text-white btn-hover text-sm"
+              className="px-4 py-2 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-dark-500 to-dark-600 text-primary-50 btn-hover text-sm"
             >
               Logout
             </button>
@@ -342,20 +342,20 @@ export default function ChatPage() {
         </div>
 
         {/* Mindful Conversations */}
-        <div className="glass-effect-strong rounded-2xl p-4 shadow-glow">
-          <h3 className="text-white font-semibold text-lg mb-3 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-4 shadow-glow border border-dark-500/10">
+          <h3 className="text-primary-900 font-semibold text-lg mb-3 flex items-center gap-2">
             Conversations
           </h3>
           <div className="space-y-2">
             <button 
               onClick={handleNewChat}
-              className="w-full text-left px-3 py-2 rounded-lg bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30 transition-all duration-200 text-sm"
+              className="w-full text-left px-3 py-2 rounded-lg bg-secondary-500/20 text-secondary-700 hover:bg-secondary-500/30 transition-all duration-200 text-sm"
             >
               + New Conversation
             </button>
             {sessions.length > 0 && (
               <div className="space-y-2">
-                <div className="text-emerald-300 text-sm">Past Conversations:</div>
+                <div className="text-secondary-600 text-sm">Past Conversations:</div>
                 <div className="max-h-32 overflow-y-auto transparent-scrollbar">
                   {sessions.map((session) => (
                     <button
@@ -373,8 +373,8 @@ export default function ChatPage() {
                       }}
                       className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-all duration-200 ${
                         selectedSession === (session.session_id || session)
-                          ? "bg-emerald-600/30 text-emerald-300"
-                          : "bg-emerald-600/10 text-emerald-400/70 hover:bg-emerald-600/20 hover:text-emerald-300"
+                          ? "bg-secondary-500/30 text-secondary-700"
+                          : "bg-secondary-500/10 text-secondary-600/70 hover:bg-secondary-500/20 hover:text-secondary-700"
                       }`}
                     >
                       {(session.session_id || session).slice(-8)}
@@ -389,24 +389,24 @@ export default function ChatPage() {
         
 
         {/* Email Integration */}
-        <div className="glass-effect-strong rounded-2xl p-4 shadow-glow">
-          <h3 className="text-white font-semibold text-lg mb-3 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-4 shadow-glow border border-dark-500/10">
+          <h3 className="text-primary-900 font-semibold text-lg mb-3 flex items-center gap-2">
             Quick Actions
           </h3>
           <div className="space-y-2">
             <button 
               onClick={handleCheckEmails}
-              className="w-full text-left px-3 py-2 rounded-lg bg-violet-600/20 text-violet-300 hover:bg-violet-600/30 transition-all duration-200 text-sm"
+              className="w-full text-left px-3 py-2 rounded-lg bg-accent-500/20 text-accent-700 hover:bg-accent-500/30 transition-all duration-200 text-sm"
             >
               Check Emails
             </button>
             <button 
               onClick={handleCheckCalendar}
-              className="w-full text-left px-3 py-2 rounded-lg bg-orange-600/20 text-orange-300 hover:bg-orange-600/30 transition-all duration-200 text-sm"
+              className="w-full text-left px-3 py-2 rounded-lg bg-secondary-500/20 text-secondary-700 hover:bg-secondary-500/30 transition-all duration-200 text-sm"
             >
               Calendar Events
             </button>
-            <button className="w-full text-left px-3 py-2 rounded-lg bg-pink-600/20 text-pink-300 hover:bg-pink-600/30 transition-all duration-200 text-sm">
+            <button className="w-full text-left px-3 py-2 rounded-lg bg-dark-500/20 text-dark-600 hover:bg-dark-500/30 transition-all duration-200 text-sm">
               Compose Email
             </button>
           </div>
@@ -414,29 +414,29 @@ export default function ChatPage() {
 
         
         {/* Smart Insights */}
-        <div className="glass-effect-strong rounded-2xl p-4 shadow-glow">
-          <h3 className="text-white font-semibold text-lg mb-3 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-4 shadow-glow border border-dark-500/10">
+          <h3 className="text-primary-900 font-semibold text-lg mb-3 flex items-center gap-2">
             Smart Insights
           </h3>
           <div className="space-y-2">
-            <div className="bg-slate-700/30 rounded-lg p-3">
-              <div className="text-slate-300 text-sm">
+            <div className="bg-primary-200/30 rounded-lg p-3 border border-dark-500/5">
+              <div className="text-primary-900 text-sm">
                 <div className="flex items-center gap-2 mb-1">
-                  <div className="w-2 h-2 bg-emerald-400 rounded-full"></div>
+                  <div className="w-2 h-2 bg-secondary-500 rounded-full"></div>
                   <span className="font-medium">Memory Active</span>
                 </div>
-                <div className="text-xs text-slate-400">
+                <div className="text-xs text-primary-900/60">
                   {chat.length} messages in session
                 </div>
               </div>
             </div>
-            <div className="bg-slate-700/30 rounded-lg p-3">
-              <div className="text-slate-300 text-sm">
+            <div className="bg-primary-200/30 rounded-lg p-3 border border-dark-500/5">
+              <div className="text-primary-900 text-sm">
                 <div className="flex items-center gap-2 mb-1">
-                  <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
+                  <div className="w-2 h-2 bg-accent-500 rounded-full"></div>
                   <span className="font-medium">Context Aware</span>
                 </div>
-                <div className="text-xs text-slate-400">
+                <div className="text-xs text-primary-900/60">
                   Personal facts remembered
                 </div>
               </div>
@@ -446,49 +446,49 @@ export default function ChatPage() {
 
 
         {/* Session Stats */}
-        <div className="glass-effect-strong rounded-2xl p-4 shadow-glow">
-          <h3 className="text-white font-semibold text-lg mb-3 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-4 shadow-glow border border-dark-500/10">
+          <h3 className="text-primary-900 font-semibold text-lg mb-3 flex items-center gap-2">
             Session Stats
           </h3>
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
-              <span className="text-slate-300">Messages:</span>
-              <span className="text-emerald-400">{chat.length}</span>
+              <span className="text-primary-900/70">Messages:</span>
+              <span className="text-secondary-600">{chat.length}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-300">Sessions:</span>
-              <span className="text-blue-400">{sessions.length}</span>
+              <span className="text-primary-900/70">Sessions:</span>
+              <span className="text-accent-600">{sessions.length}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-300">Status:</span>
-              <span className="text-emerald-400">Active</span>
+              <span className="text-primary-900/70">Status:</span>
+              <span className="text-secondary-600">Active</span>
             </div>
           </div>
         </div>
       </div>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col glass-effect-strong rounded-3xl shadow-glow border border-slate-600/30 lg:ml-0 ml-0">
+      <div className="flex-1 flex flex-col glass-effect-strong rounded-3xl shadow-glow border border-dark-500/20 lg:ml-0 ml-0">
         {/* Chat Header */}
-        <div className="p-4 lg:p-6 border-b border-slate-600/20">
+        <div className="p-4 lg:p-6 border-b border-dark-500/10">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-3">
               {/* Mobile menu button */}
               <button
                 onClick={() => setShowSidebar(true)}
-                className="lg:hidden text-white hover:text-gray-300 p-2 -ml-2"
+                className="lg:hidden text-primary-900 hover:text-primary-900/70 p-2 -ml-2"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
               </button>
               <div>
-                <p className="text-white font-bold text-lg lg:text-xl">Session: {sessionId?.slice(-8)}</p>
+                <p className="text-primary-900 font-bold text-lg lg:text-xl">Session: {sessionId?.slice(-8)}</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-emerald-400 rounded-full animate-pulse"></div>
-              <span className="text-emerald-400 text-sm font-medium">Online</span>
+              <div className="w-3 h-3 bg-secondary-500 rounded-full animate-pulse"></div>
+              <span className="text-secondary-600 text-sm font-medium">Online</span>
             </div>
           </div>
         </div>
@@ -508,7 +508,7 @@ export default function ChatPage() {
         </div>
 
         {/* Input Area */}
-        <div className="p-4 lg:p-6 border-t border-slate-600/20">
+        <div className="p-4 lg:p-6 border-t border-dark-500/10">
           <InputBar
             input={input}
             setInput={setInput}

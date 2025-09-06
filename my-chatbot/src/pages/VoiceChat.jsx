@@ -261,7 +261,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         z-50 lg:z-0
         flex flex-col gap-4 
         overflow-y-auto custom-scrollbar
-        bg-slate-900/95 lg:bg-transparent 
+        bg-primary-50/95 lg:bg-transparent 
         backdrop-blur-md lg:backdrop-blur-none
         transition-transform duration-300 ease-in-out
         p-4 lg:p-0
@@ -269,22 +269,22 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         {/* Mobile close button */}
         <button
           onClick={() => setShowSidebar(false)}
-          className="lg:hidden absolute top-4 right-4 text-white hover:text-gray-300 z-10 bg-slate-800/50 rounded-full p-2"
+          className="lg:hidden absolute top-4 right-4 text-primary-900 hover:text-primary-900/70 z-10 bg-primary-200/50 rounded-full p-2"
         >
           ✕
         </button>
 
         {/* User Profile Section */}
-        <div className="glass-effect-strong rounded-2xl p-4 shadow-glow">
+        <div className="glass-effect-strong rounded-2xl p-4 shadow-glow border border-dark-500/10">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-gradient-to-br from-violet-400 via-purple-500 to-fuchsia-500 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-lg">
+            <div className="w-12 h-12 bg-gradient-to-br from-accent-500 via-secondary-500 to-dark-500 rounded-full flex items-center justify-center text-primary-50 font-bold text-lg shadow-lg">
               {userId.charAt(0).toUpperCase()}
             </div>
             <div>
-              <div className="text-white font-semibold text-lg">
+              <div className="text-primary-900 font-semibold text-lg">
                 {userId}
               </div>
-              <div className="text-slate-300/60 text-sm">
+              <div className="text-primary-900/60 text-sm">
                 Voice Session: {sessionId?.slice(-8)}
               </div>
             </div>

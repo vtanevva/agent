@@ -130,31 +130,31 @@
 
 /* Utility classes */
 .glass-effect {
-  background: rgba(148, 163, 184, 0.1);
+  background: rgba(253, 255, 252, 0.85);
   backdrop-filter: blur(20px);
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(50, 22, 31, 0.1);
+  box-shadow: 0 8px 32px rgba(1, 38, 34, 0.1);
 }
 
 .glass-effect-strong {
-  background: rgba(148, 163, 184, 0.15);
+  background: rgba(253, 255, 252, 0.95);
   backdrop-filter: blur(25px);
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(50, 22, 31, 0.15);
+  box-shadow: 0 12px 40px rgba(1, 38, 34, 0.15);
 }
 
 .glass-effect-violet {
-  background: rgba(139, 92, 246, 0.1);
+  background: rgba(166, 161, 94, 0.15);
   backdrop-filter: blur(20px);
-  border: 1px solid rgba(139, 92, 246, 0.2);
-  box-shadow: 0 8px 32px rgba(139, 92, 246, 0.1);
+  border: 1px solid rgba(166, 161, 94, 0.2);
+  box-shadow: 0 8px 32px rgba(166, 161, 94, 0.1);
 }
 
 .glass-effect-emerald {
-  background: rgba(16, 185, 129, 0.1);
+  background: rgba(119, 91, 89, 0.15);
   backdrop-filter: blur(20px);
-  border: 1px solid rgba(16, 185, 129, 0.2);
-  box-shadow: 0 8px 32px rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(119, 91, 89, 0.2);
+  box-shadow: 0 8px 32px rgba(119, 91, 89, 0.1);
 }
 
 .message-enter {
@@ -175,19 +175,19 @@
 
 /* Gradient backgrounds */
 .gradient-bg-primary {
-  background: linear-gradient(135deg, #1e293b 0%, #334155 50%, #475569 100%);
+  background: linear-gradient(135deg, #FDFFFC 0%, #F8FAF7 50%, #F0F4EF 100%);
 }
 
 .gradient-bg-violet {
-  background: linear-gradient(135deg, #8b5cf6 0%, #a855f7 50%, #ec4899 100%);
+  background: linear-gradient(135deg, #A6A15E 0%, #95904F 50%, #848040 100%);
 }
 
 .gradient-bg-emerald {
-  background: linear-gradient(135deg, #10b981 0%, #059669 50%, #047857 100%);
+  background: linear-gradient(135deg, #775B59 0%, #6A4E4C 50%, #5D4340 100%);
 }
 
 .gradient-bg-rose {
-  background: linear-gradient(135deg, #f43f5e 0%, #e11d48 50%, #be123c 100%);
+  background: linear-gradient(135deg, #32161F 0%, #2A1219 50%, #220E13 100%);
 }
 
 /* Button hover effects */
@@ -226,14 +226,14 @@
 
 /* Text gradients */
 .text-gradient-violet {
-  background: linear-gradient(135deg, #8b5cf6 0%, #a855f7 50%, #ec4899 100%);
+  background: linear-gradient(135deg, #A6A15E 0%, #95904F 50%, #848040 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
 .text-gradient-emerald {
-  background: linear-gradient(135deg, #10b981 0%, #059669 50%, #047857 100%);
+  background: linear-gradient(135deg, #775B59 0%, #6A4E4C 50%, #5D4340 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -242,12 +242,12 @@
 /* Modern borders */
 .border-gradient-violet {
   border: 1px solid;
-  border-image: linear-gradient(135deg, #8b5cf6, #a855f7, #ec4899) 1;
+  border-image: linear-gradient(135deg, #A6A15E, #95904F, #848040) 1;
 }
 
 .border-gradient-emerald {
   border: 1px solid;
-  border-image: linear-gradient(135deg, #10b981, #059669, #047857) 1;
+  border-image: linear-gradient(135deg, #775B59, #6A4E4C, #5D4340) 1;
 }
 
 /* Shimmer effect */
@@ -268,11 +268,11 @@
 
 /* Modern shadows */
 .shadow-glow {
-  box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
+  box-shadow: 0 0 20px rgba(166, 161, 94, 0.3);
 }
 
 .shadow-glow-emerald {
-  box-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
+  box-shadow: 0 0 20px rgba(119, 91, 89, 0.3);
 }
 
 /* Responsive text */
@@ -282,7 +282,7 @@
 
 /* Modern focus styles */
 .focus-ring {
-  @apply focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 focus:ring-offset-slate-900;
+  @apply focus:outline-none focus:ring-2 focus:ring-accent-500 focus:ring-offset-2 focus:ring-offset-primary-50;
 }
 
 /* Custom animations */

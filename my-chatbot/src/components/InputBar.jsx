@@ -16,7 +16,7 @@ export default function InputBar({ input, setInput, loading, onSend, showConnect
   };
 
   return (
-    <div className="glass-effect-strong rounded-2xl p-4 lg:p-6 shadow-glow">
+    <div className="glass-effect-strong rounded-2xl p-4 lg:p-6 shadow-glow border border-dark-500/10">
       <div className="flex flex-col sm:flex-row gap-3 lg:gap-4 items-stretch sm:items-end">
         {/* Input field */}
         <div className="flex-1 relative">
@@ -24,7 +24,7 @@ export default function InputBar({ input, setInput, loading, onSend, showConnect
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            className="w-full px-4 lg:px-6 py-3 lg:py-4 rounded-xl text-white bg-slate-800/50 placeholder-slate-300/60 border border-slate-600/30 focus:border-violet-400/50 input-focus resize-none focus:bg-slate-800/70 transition-all duration-300 text-sm lg:text-base"
+            className="w-full px-4 lg:px-6 py-3 lg:py-4 rounded-xl text-primary-900 bg-primary-100/50 placeholder-primary-900/40 border border-dark-500/20 focus:border-accent-500/50 input-focus resize-none focus:bg-primary-100/70 transition-all duration-300 text-sm lg:text-base"
             placeholder="Share your thoughts, feelings, or ask me anything..."
             rows="1"
             style={{
@@ -39,7 +39,7 @@ export default function InputBar({ input, setInput, loading, onSend, showConnect
         <button
           onClick={handleSendClick}
           disabled={loading || !input.trim()}
-          className="bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700 text-white px-6 lg:px-8 py-3 lg:py-4 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed btn-hover font-semibold flex items-center justify-center gap-2 lg:gap-3 shadow-lg text-sm lg:text-base min-h-[48px]"
+          className="bg-gradient-to-r from-accent-500 to-accent-600 hover:from-accent-600 hover:to-accent-700 text-primary-50 px-6 lg:px-8 py-3 lg:py-4 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed btn-hover font-semibold flex items-center justify-center gap-2 lg:gap-3 shadow-lg text-sm lg:text-base min-h-[48px]"
         >
           {loading ? (
             <>
@@ -60,7 +60,7 @@ export default function InputBar({ input, setInput, loading, onSend, showConnect
         {showConnectButton && (
           <button
             onClick={onConnect}
-            className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white px-4 lg:px-6 py-3 lg:py-4 rounded-xl btn-hover font-semibold flex items-center justify-center gap-2 lg:gap-3 shadow-lg text-sm lg:text-base min-h-[48px]"
+            className="bg-gradient-to-r from-secondary-500 to-secondary-600 hover:from-secondary-600 hover:to-secondary-700 text-primary-50 px-4 lg:px-6 py-3 lg:py-4 rounded-xl btn-hover font-semibold flex items-center justify-center gap-2 lg:gap-3 shadow-lg text-sm lg:text-base min-h-[48px]"
           >
             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
