@@ -104,8 +104,18 @@ def run_agent(user_id: str, message: str, history: list):
     print(f"Number of tool calls to execute: {len(tool_calls)}")
     
     for tc in tool_calls:
-        fn_name = tc["function"]["name"]
-        fn_args = json.loads(tc["function"]["arguments"])
+        # Handle both old and new API formats
+        try:
+            # New API format (OpenAI v1.0+)
+            fn_name = tc.function.name
+            fn_args = json.loads(tc.function.arguments)
+            tool_call_id = tc.id
+        except (AttributeError, TypeError):
+            # Old API format (fallback)
+            fn_name = tc["function"]["name"]
+            fn_args = json.loads(tc["function"]["arguments"])
+            tool_call_id = tc["id"]
+        
         fn_args["user_id"] = user_id            # enforce real user_id
         
         print(f"Executing tool: {fn_name} with args: {fn_args}")
@@ -126,7 +136,7 @@ def run_agent(user_id: str, message: str, history: list):
         messages.append(
             {
                 "role": "tool",
-                "tool_call_id": tc["id"],
+                "tool_call_id": tool_call_id,
                 "name": fn_name,
                 "content": tool_result,
             }
