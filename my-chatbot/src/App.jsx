@@ -4,11 +4,11 @@ import ChatPage from "./pages/ChatPage";
 
 export default function App() {
   return (
-    <div className="min-h-screen relative overflow-hidden bg-primary-50">
+    <div className="min-h-screen relative overflow-hidden bg-secondary-500/20">
       {/* Minimalistic Background */}
       <div className="fixed inset-0">
         {/* Base background */}
-        <div className="absolute inset-0 bg-primary-50"></div>
+        <div className="absolute inset-0 bg-secondary-500/20"></div>
         
         {/* Subtle gradient overlay */}
         <div className="absolute inset-0 bg-gradient-to-br from-primary-50 via-primary-100 to-primary-200 opacity-60"></div>
@@ -25,7 +25,7 @@ export default function App() {
                 width: `${Math.random() * 200 + 80}px`,
                 height: `${Math.random() * 200 + 80}px`,
                 background: `radial-gradient(circle, ${
-                  ['#A6A15E', '#775B59', '#32161F'][Math.floor(Math.random() * 3)]
+                  ['#012622', '#775B59', '#32161F'][Math.floor(Math.random() * 3)]
                 }15, transparent)`,
                 animationDelay: `${Math.random() * 8}s`,
                 animationDuration: `${Math.random() * 15 + 15}s`
@@ -51,7 +51,7 @@ export default function App() {
       </div>
 
       {/* Main content */}
-      <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-2 lg:p-4">
+      <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-2 lg:p-4 lg:items-stretch lg:justify-start">
         <Routes>
           <Route path="/" element={<LoginPage />} />
           <Route path="/chat/:userId/:sessionId" element={<ChatPage />} />

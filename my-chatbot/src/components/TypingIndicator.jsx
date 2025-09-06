@@ -4,7 +4,7 @@ export default function TypingIndicator() {
       <div className="bg-gradient-to-r from-secondary-500/20 to-dark-500/20 backdrop-blur-xl rounded-2xl px-6 py-4 max-w-xs border border-secondary-500/30 shadow-lg">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 bg-gradient-to-br from-secondary-500 to-dark-500 rounded-full flex items-center justify-center">
-            <span className="text-primary-50 text-sm">🤖</span>
+            <span className="text-primary-50 text-sm">AI</span>
           </div>
           
           {/* Typing animation dots */}

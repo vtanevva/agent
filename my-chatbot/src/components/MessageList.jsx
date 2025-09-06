@@ -27,7 +27,7 @@ export default function MessageList({ chat, loading }) {
                   ? "bg-gradient-to-br from-accent-500 to-accent-600 shadow-lg text-primary-50" 
                   : "bg-gradient-to-br from-secondary-500 to-secondary-600 shadow-lg text-primary-50"
               }`}>
-                {msg.role === "user" ? "👤" : "🌸"}
+                {msg.role === "user" ? "U" : "AI"}
               </div>
               
               {/* Message content */}

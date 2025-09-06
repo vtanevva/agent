@@ -19,9 +19,9 @@ export default {
             700: '#5D4340',  // Even darker
           },
           'accent': {
-            500: '#A6A15E',  // Moss green - accent elements
-            600: '#95904F',  // Darker variant
-            700: '#848040',  // Even darker
+            500: '#012622',  // Dark green - accent elements
+            600: '#011A1C',  // Darker variant
+            700: '#010E10',  // Even darker
           },
           'dark': {
             500: '#32161F',  // Dark purple - borders and dark accents

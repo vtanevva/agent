@@ -58,13 +58,12 @@ export default function AISpeakerBubble({ isSpeaking, className = "" }) {
 
   // Color generation functions
   const getGradientColors = () => {
-    const baseHue = 240 + Math.sin(colorShift) * 60;
-    const accentHue = baseHue + 60;
+    const shift = Math.sin(colorShift) * 20;
     return {
-      primary: `hsl(${baseHue}, 70%, 60%)`,
-      secondary: `hsl(${accentHue}, 80%, 70%)`,
-      accent: `hsl(${baseHue + 120}, 60%, 50%)`,
-      glow: `hsl(${baseHue}, 80%, 80%)`
+      primary: `rgb(${119 + shift}, ${91 + shift}, ${89 + shift})`,     // Secondary color base
+      secondary: `rgb(${1 + shift}, ${38 + shift}, ${34 + shift})`,     // Dark green accent base  
+      accent: `rgb(${50 + shift}, ${22 + shift}, ${31 + shift})`,       // Dark color base
+      glow: `rgb(${1 + shift * 2}, ${38 + shift * 2}, ${34 + shift * 2})` // Dark green glow
     };
   };
 
@@ -205,10 +204,11 @@ export default function AISpeakerBubble({ isSpeaking, className = "" }) {
               transform: isSpeaking 
                 ? `rotate(${Math.sin(animationPhase * 2) * 8}deg) scale(${1 + Math.sin(animationPhase * 4) * 0.1})`
                 : 'rotate(0deg) scale(1)',
-              filter: isSpeaking ? 'drop-shadow(0 0 8px rgba(255,255,255,0.8))' : 'none',
+              filter: isSpeaking ? `drop-shadow(0 0 8px ${colors.glow})` : 'none',
+              color: '#012622', // Primary text color
             }}
           >
-            
+            AI
           </div>
         </div>
 

@@ -276,7 +276,7 @@ export default function ChatPage() {
 
     /* ── MAIN CHAT ── */
   return (
-    <div className="w-full max-w-7xl flex gap-6 h-[90vh] relative">
+    <div className="w-full max-w-none lg:max-w-full flex gap-6 h-[90vh] lg:h-[calc(100vh-2rem)] relative">
       {/* Mobile overlay */}
       {showSidebar && (
         <div 
@@ -291,13 +291,13 @@ export default function ChatPage() {
         lg:translate-x-0 
         fixed lg:static 
         top-0 left-0 
-        w-80 
+        w-80 lg:w-72 
         h-full 
         z-50 lg:z-0
         flex flex-col gap-4 
         overflow-y-auto custom-scrollbar
-        bg-slate-900/95 lg:bg-transparent 
-        backdrop-blur-md lg:backdrop-blur-none
+        bg-transparent 
+        backdrop-blur-none
         transition-transform duration-300 ease-in-out
         p-4 lg:p-0
       `}>
@@ -310,7 +310,7 @@ export default function ChatPage() {
         </button>
 
         {/* User Profile Section */}
-        <div className="glass-effect-strong rounded-2xl p-4 shadow-glow border border-dark-500/10">
+        <div className="glass-effect-strong rounded-2xl p-4 border border-dark-500/10">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 bg-gradient-to-br from-accent-500 via-secondary-500 to-dark-500 rounded-full flex items-center justify-center text-primary-50 font-bold text-lg shadow-lg">
               {userId.charAt(0).toUpperCase()}
@@ -328,13 +328,13 @@ export default function ChatPage() {
           <div className="mt-4 flex gap-2">
             <button
               onClick={() => setUseVoice(true)}
-              className="flex-1 px-4 py-2 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-secondary-500 to-secondary-600 text-primary-50 btn-hover text-sm"
+              className="flex-1 px-4 py-2 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-secondary-500 to-secondary-600 hover:from-secondary-600 hover:to-secondary-700 text-primary-50 btn-hover text-sm shadow-lg border border-secondary-600/30"
             >
-              🎙️ Voice Mode
+              Voice Mode
             </button>
             <button
               onClick={handleLogout}
-              className="px-4 py-2 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-dark-500 to-dark-600 text-primary-50 btn-hover text-sm"
+              className="px-4 py-2 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-dark-500 to-dark-600 hover:from-dark-600 hover:to-dark-700 text-primary-50 btn-hover text-sm shadow-lg border border-dark-600/30"
             >
               Logout
             </button>
@@ -342,7 +342,7 @@ export default function ChatPage() {
         </div>
 
         {/* Mindful Conversations */}
-        <div className="glass-effect-strong rounded-2xl p-4 shadow-glow border border-dark-500/10">
+        <div className="glass-effect-strong rounded-2xl p-4 border border-dark-500/10">
           <h3 className="text-primary-900 font-semibold text-lg mb-3 flex items-center gap-2">
             Conversations
           </h3>
@@ -356,7 +356,7 @@ export default function ChatPage() {
             {sessions.length > 0 && (
               <div className="space-y-2">
                 <div className="text-secondary-600 text-sm">Past Conversations:</div>
-                <div className="max-h-32 overflow-y-auto transparent-scrollbar">
+                <div className="max-h-32 overflow-y-auto transparent-scrollbar space-y-1">
                   {sessions.map((session) => (
                     <button
                       key={session.session_id || session}
@@ -389,7 +389,7 @@ export default function ChatPage() {
         
 
         {/* Email Integration */}
-        <div className="glass-effect-strong rounded-2xl p-4 shadow-glow border border-dark-500/10">
+        <div className="glass-effect-strong rounded-2xl p-4 border border-dark-500/10">
           <h3 className="text-primary-900 font-semibold text-lg mb-3 flex items-center gap-2">
             Quick Actions
           </h3>
@@ -414,29 +414,29 @@ export default function ChatPage() {
 
         
         {/* Smart Insights */}
-        <div className="glass-effect-strong rounded-2xl p-4 shadow-glow border border-dark-500/10">
+        <div className="glass-effect-strong rounded-2xl p-4 border border-dark-500/10">
           <h3 className="text-primary-900 font-semibold text-lg mb-3 flex items-center gap-2">
             Smart Insights
           </h3>
           <div className="space-y-2">
-            <div className="bg-primary-200/30 rounded-lg p-3 border border-dark-500/5">
-              <div className="text-primary-900 text-sm">
+            <div className="bg-accent-500/20 rounded-lg p-3 border border-dark-500/5">
+              <div className="text-accent-700 text-sm">
                 <div className="flex items-center gap-2 mb-1">
-                  <div className="w-2 h-2 bg-secondary-500 rounded-full"></div>
+                  <div className="w-2 h-2 bg-accent-500 rounded-full"></div>
                   <span className="font-medium">Memory Active</span>
                 </div>
-                <div className="text-xs text-primary-900/60">
+                <div className="text-xs text-accent-700/60">
                   {chat.length} messages in session
                 </div>
               </div>
             </div>
-            <div className="bg-primary-200/30 rounded-lg p-3 border border-dark-500/5">
-              <div className="text-primary-900 text-sm">
+            <div className="bg-accent-500/20 rounded-lg p-3 border border-dark-500/5">
+              <div className="text-accent-700 text-sm">
                 <div className="flex items-center gap-2 mb-1">
                   <div className="w-2 h-2 bg-accent-500 rounded-full"></div>
                   <span className="font-medium">Context Aware</span>
                 </div>
-                <div className="text-xs text-primary-900/60">
+                <div className="text-xs text-accent-700/60">
                   Personal facts remembered
                 </div>
               </div>
@@ -446,7 +446,7 @@ export default function ChatPage() {
 
 
         {/* Session Stats */}
-        <div className="glass-effect-strong rounded-2xl p-4 shadow-glow border border-dark-500/10">
+        <div className="glass-effect-strong rounded-2xl p-4 border border-dark-500/10">
           <h3 className="text-primary-900 font-semibold text-lg mb-3 flex items-center gap-2">
             Session Stats
           </h3>
@@ -468,9 +468,9 @@ export default function ChatPage() {
       </div>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col glass-effect-strong rounded-3xl shadow-glow border border-dark-500/20 lg:ml-0 ml-0">
+      <div className="flex-1 flex flex-col glass-effect-strong rounded-3xl lg:rounded-2xl border border-dark-500/20 lg:ml-0 ml-0">
         {/* Chat Header */}
-        <div className="p-4 lg:p-6 border-b border-dark-500/10">
+        <div className="p-3 lg:p-4 border-b border-dark-500/10">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-3">
               {/* Mobile menu button */}
@@ -494,7 +494,7 @@ export default function ChatPage() {
         </div>
 
         {/* Chat Messages */}
-        <div ref={chatRef} className="flex-1 overflow-y-auto custom-scrollbar p-4 lg:p-6">
+        <div ref={chatRef} className="flex-1 overflow-y-auto custom-scrollbar p-3 lg:p-4">
           <MessageList chat={chat} loading={loading} />
           {emailChoices && <EmailList emails={emailChoices} onSelect={handleEmailSelect} />}
           {calendarEvent && (

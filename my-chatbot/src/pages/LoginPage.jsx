@@ -50,30 +50,27 @@ export default function LoginPage() {
         onSuccess={handleGoogleSuccess}
       />
 
-      <div className="glass-effect-strong rounded-3xl p-8 max-w-md w-full text-center space-y-8 shadow-glow border border-dark-500/10">
+      <div className="w-full max-w-none lg:max-w-full flex items-center justify-center h-[90vh] lg:h-[calc(100vh-2rem)] relative">
+        <div className="glass-effect-strong rounded-3xl lg:rounded-2xl p-6 lg:p-16 max-w-md lg:max-w-full w-full text-center space-y-6 lg:space-y-6 border border-dark-500/10">
         {/* Logo and title */}
-        <div className="space-y-6">
+        <div className="space-y-4 lg:space-y-6">
           <div className="relative">
-            <div className="w-24 h-24 bg-gradient-to-br from-accent-500 via-secondary-500 to-dark-500 rounded-full flex items-center justify-center mx-auto text-4xl shadow-2xl animate-pulse">
-              🌸
-            </div>
-            <div className="absolute -top-2 -right-2 w-8 h-8 bg-gradient-to-br from-accent-500 to-secondary-500 rounded-full flex items-center justify-center text-sm animate-bounce">
-              ✨
+            <div className="w-24 h-24 lg:w-32 lg:h-32 bg-gradient-to-br from-accent-500 via-secondary-500 to-dark-500 rounded-full flex items-center justify-center mx-auto text-4xl lg:text-5xl shadow-2xl animate-pulse">
             </div>
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-gradient-violet mb-3">Aivis</h1>
-            <p className="text-primary-900/60 text-sm"></p>
+            <h1 className="text-3xl lg:text-5xl font-bold text-gradient-violet mb-3">Aivis</h1>
+            <p className="text-primary-900/60 text-sm lg:text-base"></p>
           </div>
         </div>
 
         {/* Username input */}
-        <div className="space-y-4">
+        <div className="space-y-3 lg:space-y-4 flex flex-col items-center">
           <input
             value={loginName}
             onChange={(e) => setLoginName(e.target.value)}
             placeholder="Choose a username"
-            className="w-full px-6 py-4 rounded-xl text-center text-primary-900 bg-primary-100/80 placeholder-primary-900/40 border border-dark-500/20 focus:border-accent-500/50 input-focus text-lg font-medium"
+            className="w-full lg:w-auto lg:max-w-sm px-6 py-3 lg:px-6 lg:py-3.5 rounded-xl text-center text-primary-900 bg-secondary-500/10 placeholder-primary-900/40 border-0 focus:border-0 focus:outline-none input-focus text-lg lg:text-base font-medium"
           />
 
           {/* Sign in with Google */}
@@ -83,7 +80,7 @@ export default function LoginPage() {
               setGoogleConnectUrl(getGoogleAuthUrl());
               setShowGoogleModal(true);
             }}
-            className="w-full bg-gradient-to-r from-secondary-500 to-secondary-600 hover:from-secondary-600 hover:to-secondary-700 text-primary-50 px-6 py-4 rounded-xl disabled:opacity-50 btn-hover font-semibold flex items-center justify-center gap-3 shadow-lg"
+            className="w-full lg:w-auto lg:max-w-sm bg-gradient-to-r from-secondary-500 to-secondary-600 hover:from-secondary-600 hover:to-secondary-700 text-primary-50 px-4 py-3 lg:px-6 lg:py-3.5 rounded-xl disabled:opacity-50 btn-hover font-semibold flex items-center justify-center gap-3 shadow-lg border border-secondary-600/30 text-base lg:text-base"
           >
             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -94,42 +91,40 @@ export default function LoginPage() {
             <span>Sign in with Google</span>
           </button>
 
-          <div className="flex items-center gap-4">
-            <div className="flex-1 h-px bg-dark-500/20"></div>
+          <div className="flex items-center gap-4 lg:justify-center">
+            <div className="flex-1 lg:flex-none lg:w-16 h-px bg-dark-500/20"></div>
             <span className="text-primary-900/50 text-sm font-medium">or</span>
-            <div className="flex-1 h-px bg-dark-500/20"></div>
+            <div className="flex-1 lg:flex-none lg:w-16 h-px bg-dark-500/20"></div>
           </div>
 
           {/* Continue as guest */}
           <button
             disabled={!loginName.trim()}
             onClick={handleGuestLogin}
-            className="w-full bg-gradient-to-r from-accent-500 to-accent-600 hover:from-accent-600 hover:to-accent-700 text-primary-50 px-6 py-4 rounded-xl disabled:opacity-50 btn-hover font-semibold shadow-lg"
+            className="w-full lg:w-auto lg:max-w-sm bg-gradient-to-r from-accent-500 to-accent-600 hover:from-accent-600 hover:to-accent-700 text-primary-50 px-4 py-3 lg:px-6 lg:py-3.5 rounded-xl disabled:opacity-50 btn-hover font-semibold shadow-lg border border-accent-600/30 text-base lg:text-base"
           >
             Continue as "{loginName.trim().toLowerCase()}"
           </button>
         </div>
 
         {/* Features */}
-        <div className="grid grid-cols-3 gap-4 pt-4">
+        <div className="flex justify-center items-center gap-4 lg:gap-12 pt-4 lg:pt-6">
           <div className="text-center">
-            <div className="w-8 h-8 bg-primary-200/60 rounded-full flex items-center justify-center mx-auto mb-2 border border-dark-500/10">
-              💬
+            <div className="w-8 h-8 lg:w-12 lg:h-12 bg-primary-200/60 rounded-full flex items-center justify-center mx-auto mb-2 border border-dark-500/10 text-lg lg:text-xl">
             </div>
-            <p className="text-primary-900/60 text-xs">Chat</p>
+            <p className="text-primary-900/60 text-xs lg:text-sm">Chat</p>
           </div>
           <div className="text-center">
-            <div className="w-8 h-8 bg-primary-200/60 rounded-full flex items-center justify-center mx-auto mb-2 border border-dark-500/10">
-              🎙️
+            <div className="w-8 h-8 lg:w-12 lg:h-12 bg-primary-200/60 rounded-full flex items-center justify-center mx-auto mb-2 border border-dark-500/10 text-lg lg:text-xl">
             </div>
-            <p className="text-primary-900/60 text-xs">Voice</p>
+            <p className="text-primary-900/60 text-xs lg:text-sm">Voice</p>
           </div>
           <div className="text-center">
-            <div className="w-8 h-8 bg-primary-200/60 rounded-full flex items-center justify-center mx-auto mb-2 border border-dark-500/10">
-              📧
+            <div className="w-8 h-8 lg:w-12 lg:h-12 bg-primary-200/60 rounded-full flex items-center justify-center mx-auto mb-2 border border-dark-500/10 text-lg lg:text-xl">
             </div>
-            <p className="text-primary-900/60 text-xs">Email</p>
+            <p className="text-primary-900/60 text-xs lg:text-sm">Email</p>
           </div>
+        </div>
         </div>
       </div>
     </>

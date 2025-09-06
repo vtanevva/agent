@@ -5,10 +5,9 @@ export default function WelcomeMessage() {
       <div className="space-y-6">
         <div className="relative">
           <div className="w-24 h-24 bg-gradient-to-br from-accent-500 via-secondary-500 to-dark-500 rounded-full flex items-center justify-center mx-auto text-4xl shadow-2xl animate-pulse">
-            🌸
+            AI
           </div>
           <div className="absolute -top-2 -right-2 w-8 h-8 bg-gradient-to-br from-accent-500 to-secondary-500 rounded-full flex items-center justify-center text-sm animate-bounce">
-            ✨
           </div>
         </div>
         
@@ -26,7 +25,7 @@ export default function WelcomeMessage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
         <div className="group bg-gradient-to-br from-accent-500/10 to-secondary-500/10 backdrop-blur-sm rounded-2xl p-6 border border-accent-500/20 hover:border-accent-500/40 transition-all duration-300 hover:scale-105">
           <div className="w-12 h-12 bg-gradient-to-br from-accent-500 to-secondary-500 rounded-xl flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300">
-            <span className="text-2xl">🧘‍♀️</span>
+            <span className="text-2xl">🧘</span>
           </div>
           <h3 className="text-accent-700 font-semibold text-lg mb-2">Mindful Conversations</h3>
           <p className="text-primary-900/70 text-sm leading-relaxed">
@@ -46,7 +45,7 @@ export default function WelcomeMessage() {
         
         <div className="group bg-gradient-to-br from-dark-500/10 to-accent-500/10 backdrop-blur-sm rounded-2xl p-6 border border-dark-500/20 hover:border-dark-500/40 transition-all duration-300 hover:scale-105">
           <div className="w-12 h-12 bg-gradient-to-br from-dark-500 to-accent-500 rounded-xl flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform duration-300">
-            <span className="text-2xl">🌟</span>
+            <span className="text-2xl">🤝</span>
           </div>
           <h3 className="text-dark-600 font-semibold text-lg mb-2">24/7 Support</h3>
           <p className="text-primary-900/70 text-sm leading-relaxed">

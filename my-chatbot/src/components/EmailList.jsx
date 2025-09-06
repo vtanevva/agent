@@ -2,7 +2,7 @@ export default function EmailList({ emails, onSelect }) {
   return (
     <div className="space-y-4 mt-6">
       <div className="text-center mb-4">
-        <h3 className="text-lg font-semibold text-primary-900 mb-2">📧 Recent Emails</h3>
+        <h3 className="text-lg font-semibold text-primary-900 mb-2">Recent Emails</h3>
         <p className="text-primary-900/60 text-sm">Select an email to reply to</p>
       </div>
       
