@@ -545,10 +545,10 @@ def google_callback():
             } else {
               // For mobile/redirect, redirect to chat with the authenticated user
               const userEmail = "{{ user_email }}";
-              const sessionId = userEmail + "-" + Math.random().toString(36).substr(2, 8);
+              const sessionId = userEmail + "-" + Math.random().toString(36).substring(2, 10);
               // Use a more URL-friendly approach
               const encodedEmail = encodeURIComponent(userEmail);
-              window.location.href = "/chat/" + encodedEmail + "/" + sessionId;
+              window.location.href = window.location.origin + "/chat/" + encodedEmail + "/" + sessionId;
             }
           </script>
         </head>
@@ -557,7 +557,7 @@ def google_callback():
             <h1 style="font-size: 2.5em; margin-bottom: 20px;">✅ Connected to Google!</h1>
             <p style="font-size: 1.2em; margin-bottom: 30px;">You can now use Gmail and Calendar features.</p>
             <p style="font-size: 1em; margin-bottom: 20px;">Redirecting to chat...</p>
-            <p><a href="/chat/{{ encoded_user_email }}/{{ user_email }}-session" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 12px 24px; border-radius: 25px; display: inline-block;">Continue to Chat</a></p>
+            <p><a href="{{ request.url_root }}chat/{{ encoded_user_email }}/{{ user_email }}-session" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 12px 24px; border-radius: 25px; display: inline-block;">Continue to Chat</a></p>
           </div>
         </body>
       </html>
@@ -867,6 +867,16 @@ def debug_mobile_test():
         "timestamp": datetime.now().isoformat()
     })
 
+@app.get("/debug/route-test/<path:test_path>")
+def debug_route_test(test_path):
+    """Test endpoint to verify routing is working for any path."""
+    return jsonify({
+        "status": "success",
+        "message": f"Route test successful for path: {test_path}",
+        "path": test_path,
+        "timestamp": datetime.now().isoformat()
+    })
+
 @app.get("/debug/oauth-test/<user_id>")
 def debug_oauth_test(user_id):
     """Test OAuth URL generation without redirecting."""
@@ -976,17 +986,22 @@ def debug_check_tokens(user_id):
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def serve_frontend(path):
+    print(f"[DEBUG] serve_frontend called with path: '{path}'", flush=True)
+    
     # Handle API routes - these should not be served as static files
     if path.startswith("api/"):
+        print(f"[DEBUG] API route requested: {path}", flush=True)
         return jsonify({"error": "API endpoint not found"}), 404
     
     # Handle static files (CSS, JS, images, etc.)
     full_path = os.path.join(app.static_folder, path)
     if path and os.path.exists(full_path):
+        print(f"[DEBUG] Serving static file: {path}", flush=True)
         return send_from_directory(app.static_folder, path)
     
     # For all other routes (including /chat/...), serve the React app
     # This allows React Router to handle client-side routing
+    print(f"[DEBUG] Serving React app for path: {path}", flush=True)
     return send_from_directory(app.static_folder, "index.html")
 
 
