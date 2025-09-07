@@ -13,7 +13,17 @@ export default function ConnectGoogleModal({
   useEffect(() => {
     console.log("ConnectGoogleModal: Opening OAuth with URL:", connectUrl);
     
-    // Try popup first
+    // Detect if we're on mobile
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
+    if (isMobile) {
+      console.log("Mobile device detected, using direct redirect");
+      // On mobile, always use direct redirect as popups are often blocked
+      window.location.href = connectUrl;
+      return;
+    }
+    
+    // Try popup first for desktop
     const popup = window.open(connectUrl, "GoogleAuth", "width=500,height=600,scrollbars=yes,resizable=yes");
     
     if (!popup) {

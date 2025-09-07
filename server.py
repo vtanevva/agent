@@ -484,22 +484,23 @@ def google_callback():
       <html>
         <head>
           <title>Google Connected</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <script>
             // Try to close popup (desktop)
             if (window.opener) {
               window.close();
             } else {
-              // For mobile/redirect, redirect back to app
-              setTimeout(function() {
-                window.location.href = '/';
-              }, 2000);
+              // For mobile/redirect, redirect back to app immediately
+              window.location.href = '/';
             }
           </script>
         </head>
-        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-          <h1>✅ Connected to Google!</h1>
-          <p>You can now use Gmail features.</p>
-          <p><a href="/">Continue to App</a></p>
+        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; min-height: 100vh; display: flex; flex-direction: column; justify-content: center;">
+          <div style="background: rgba(255,255,255,0.1); padding: 40px; border-radius: 20px; backdrop-filter: blur(10px);">
+            <h1 style="font-size: 2.5em; margin-bottom: 20px;">✅ Connected to Google!</h1>
+            <p style="font-size: 1.2em; margin-bottom: 30px;">You can now use Gmail and Calendar features.</p>
+            <p><a href="/" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 12px 24px; border-radius: 25px; display: inline-block;">Continue to App</a></p>
+          </div>
         </body>
       </html>
     """)
