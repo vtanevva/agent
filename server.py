@@ -365,109 +365,135 @@ def chat():
 @app.get("/google/auth/<user_id>")
 def google_auth(user_id):
     """Redirect browser to Google OAuth consent screen."""
-    redirect_uri = url_for("google_callback", _external=True)
-    flow = _build_flow(redirect_uri)
+    try:
+        redirect_uri = url_for("google_callback", _external=True)
+        print(f"DEBUG: Building OAuth flow for user {user_id}", flush=True)
+        print(f"DEBUG: Redirect URI: {redirect_uri}", flush=True)
+        
+        flow = _build_flow(redirect_uri)
+        print("DEBUG: Flow built successfully", flush=True)
 
-    auth_url, _ = flow.authorization_url(
-        prompt="consent select_account",
-        access_type="offline",
-        state=user_id,
-    )
-    print("DEBUG redirect_uri ➜", redirect_uri, flush=True)
+        auth_url, _ = flow.authorization_url(
+            prompt="consent select_account",
+            access_type="offline",
+            state=user_id,
+        )
+        print(f"DEBUG: Auth URL generated: {auth_url[:100]}...", flush=True)
 
-    return redirect(auth_url)
+        return redirect(auth_url)
+    except Exception as e:
+        print(f"ERROR in google_auth: {e}", flush=True)
+        return render_template_string("""
+        <!doctype html>
+        <html>
+          <head><title>OAuth Error</title></head>
+          <body>
+            <h1>OAuth Error</h1>
+            <p>Error: {{ error }}</p>
+            <a href="/">Back to App</a>
+          </body>
+        </html>
+        """, error=str(e))
 
 
 from flask import render_template_string
 
 @app.get("/google/oauth2callback")
 def google_callback():
-    state = request.args.get("state")                # your temp “vani”
-    redirect_uri = url_for("google_callback", _external=True)
-    flow = _build_flow(redirect_uri, state=state)
-    flow.fetch_token(authorization_response=request.url)
-    creds = flow.credentials
-    cred_json = json.loads(creds.to_json())
-
-    # get the real Gmail address
     try:
-        service = build("gmail", "v1", credentials=creds)
-        real_email = service.users().getProfile(userId="me").execute().get("emailAddress")
-    except Exception as e:
-        print(f"❌ Error getting Gmail profile: {e}")
-        real_email = state  # fallback to state if we can't get the real email
+        print(f"DEBUG: OAuth callback received", flush=True)
+        print(f"DEBUG: Request URL: {request.url}", flush=True)
+        print(f"DEBUG: Request args: {dict(request.args)}", flush=True)
+        
+        state = request.args.get("state")                # your temp "vani"
+        error = request.args.get("error")
+        
+        if error:
+            print(f"ERROR: OAuth error: {error}", flush=True)
+            return render_template_string("""
+            <!doctype html>
+            <html>
+              <head><title>OAuth Error</title></head>
+              <body>
+                <h1>OAuth Error</h1>
+                <p>Error: {{ error }}</p>
+                <a href="/">Back to App</a>
+              </body>
+            </html>
+            """, error=error)
+        
+        redirect_uri = url_for("google_callback", _external=True)
+        print(f"DEBUG: Building flow with redirect_uri: {redirect_uri}", flush=True)
+        
+        flow = _build_flow(redirect_uri, state=state)
+        print("DEBUG: Flow built, fetching token...", flush=True)
+        
+        flow.fetch_token(authorization_response=request.url)
+        print("DEBUG: Token fetched successfully", flush=True)
+        
+        creds = flow.credentials
+        cred_json = json.loads(creds.to_json())
+        print("DEBUG: Credentials obtained", flush=True)
 
-    # save under both your temp key *and* the real address
-    if tokens is not None:
+        # get the real Gmail address
         try:
-            tokens.update_one({"user_id": state},
-                              {"$set": {"google": cred_json}}, upsert=True)
-            if real_email and real_email != state:
-                tokens.update_one({"user_id": real_email},
-                                  {"$set": {"google": cred_json}}, upsert=True)
+            service = build("gmail", "v1", credentials=creds)
+            real_email = service.users().getProfile(userId="me").execute().get("emailAddress")
+            print(f"DEBUG: Real email: {real_email}", flush=True)
         except Exception as e:
-            print(f"[ERROR] Failed to save Google credentials: {e}", flush=True)
-    else:
-        print(f"[WARNING] Cannot save Google credentials - MongoDB not available", flush=True)
+            print(f"❌ Error getting Gmail profile: {e}")
+            real_email = state  # fallback to state if we can't get the real email
 
-    # Handle both popup (desktop) and redirect (mobile) flows
+        # save under both your temp key *and* the real address
+        if tokens is not None:
+            try:
+                tokens.update_one({"user_id": state},
+                                  {"$set": {"google": cred_json}}, upsert=True)
+                if real_email and real_email != state:
+                    tokens.update_one({"user_id": real_email},
+                                      {"$set": {"google": cred_json}}, upsert=True)
+                print("DEBUG: Credentials saved to database", flush=True)
+            except Exception as e:
+                print(f"[ERROR] Failed to save Google credentials: {e}", flush=True)
+        else:
+            print(f"[WARNING] Cannot save Google credentials - MongoDB not available", flush=True)
+            
+    except Exception as e:
+        print(f"ERROR in google_callback: {e}", flush=True)
+        return render_template_string("""
+        <!doctype html>
+        <html>
+          <head><title>OAuth Error</title></head>
+          <body>
+            <h1>OAuth Error</h1>
+            <p>Error: {{ error }}</p>
+            <a href="/">Back to App</a>
+          </body>
+        </html>
+        """, error=str(e))
+
+    # Simple success page that works for both popup and redirect
     return render_template_string("""
       <!doctype html>
       <html>
         <head>
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Google Connected</title>
-          <style>
-            body { 
-              font-family: Arial, sans-serif; 
-              text-align: center; 
-              padding: 50px; 
-              background: #f5f5f5;
-            }
-            .container {
-              background: white;
-              padding: 30px;
-              border-radius: 10px;
-              box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-              max-width: 400px;
-              margin: 0 auto;
-            }
-            .success { color: #4CAF50; font-size: 24px; margin-bottom: 20px; }
-            .message { color: #333; margin-bottom: 20px; }
-            .button {
-              background: #4285f4;
-              color: white;
-              padding: 12px 24px;
-              border: none;
-              border-radius: 5px;
-              cursor: pointer;
-              font-size: 16px;
-              text-decoration: none;
-              display: inline-block;
-            }
-            .button:hover { background: #3367d6; }
-          </style>
           <script>
             // Try to close popup (desktop)
             if (window.opener) {
               window.close();
-            }
-            
-            // For mobile, redirect back to app after a delay
-            setTimeout(function() {
-              if (!window.opener) {
+            } else {
+              // For mobile/redirect, redirect back to app
+              setTimeout(function() {
                 window.location.href = '/';
-              }
-            }, 3000);
+              }, 2000);
+            }
           </script>
         </head>
-        <body>
-          <div class="container">
-            <div class="success">✅</div>
-            <div class="message">Successfully connected to Google!</div>
-            <p>You can now use Gmail features in your app.</p>
-            <a href="/" class="button">Continue to App</a>
-          </div>
+        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+          <h1>✅ Connected to Google!</h1>
+          <p>You can now use Gmail features.</p>
+          <p><a href="/">Continue to App</a></p>
         </body>
       </html>
     """)
@@ -765,6 +791,16 @@ def instagram_callback():
     return "✅ Instagram connected! You can close this tab."
 
 from googleapiclient.errors import HttpError
+
+@app.get("/debug/mobile-test")
+def debug_mobile_test():
+    """Simple test endpoint to check if mobile requests are working."""
+    return jsonify({
+        "status": "success",
+        "message": "Mobile connection working",
+        "user_agent": request.headers.get("User-Agent", "Unknown"),
+        "timestamp": datetime.now().isoformat()
+    })
 
 @app.get("/debug/token-info")
 def debug_token_info():
