@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 
 export default function ConnectGoogleModal({
   isOpen,
@@ -8,45 +8,254 @@ export default function ConnectGoogleModal({
   connectUrl,
   onSuccess,
 }) {
-  if (!isOpen || !connectUrl) return null;
+  const [status, setStatus] = useState("idle"); // idle, connecting, popup, redirect, success, error
+  const [error, setError] = useState(null);
+  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
-    console.log("ConnectGoogleModal: Opening OAuth with URL:", connectUrl);
-    
-    // Detect if we're on mobile
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    
-    if (isMobile) {
-      console.log("Mobile device detected, using direct redirect");
-      // On mobile, always use direct redirect as popups are often blocked
-      window.location.href = connectUrl;
-      return;
-    }
-    
-    // Try popup first for desktop
-    const popup = window.open(connectUrl, "GoogleAuth", "width=500,height=600,scrollbars=yes,resizable=yes");
-    
-    if (!popup) {
-      console.log("Popup blocked, using direct redirect");
-      // If popup is blocked, use direct redirect
-      window.location.href = connectUrl;
-      return;
-    }
+    if (!isOpen || !connectUrl) return;
 
-    console.log("Popup opened successfully");
-    const timer = setInterval(() => {
-      if (popup.closed) {
-        clearInterval(timer);
-        console.log("Popup closed, calling success callback");
-        onRequestClose();
-        onSuccess();
+    // Detect mobile device
+    const mobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    setIsMobile(mobile);
+    setStatus("connecting");
+
+    const handleOAuth = () => {
+      try {
+        console.log("ConnectGoogleModal: Opening OAuth with URL:", connectUrl);
+        
+        if (mobile) {
+          console.log("Mobile device detected, using direct redirect");
+          setStatus("redirect");
+          // Small delay to show the redirect message
+          setTimeout(() => {
+            window.location.href = connectUrl;
+          }, 1000);
+          return;
+        }
+        
+        // Try popup first for desktop
+        const popup = window.open(
+          connectUrl, 
+          "GoogleAuth", 
+          "width=500,height=600,scrollbars=yes,resizable=yes,top=100,left=100"
+        );
+        
+        if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+          console.log("Popup blocked or failed, using direct redirect");
+          setStatus("redirect");
+          setTimeout(() => {
+            window.location.href = connectUrl;
+          }, 1000);
+          return;
+        }
+
+        console.log("Popup opened successfully");
+        setStatus("popup");
+        
+        const timer = setInterval(() => {
+          try {
+            if (popup.closed) {
+              clearInterval(timer);
+              console.log("Popup closed, calling success callback");
+              setStatus("success");
+              setTimeout(() => {
+                onRequestClose();
+                onSuccess();
+              }, 1000);
+            }
+          } catch (e) {
+            // Cross-origin error - popup might be on different domain
+            console.log("Cross-origin popup check failed, assuming success");
+            clearInterval(timer);
+            setStatus("success");
+            setTimeout(() => {
+              onRequestClose();
+              onSuccess();
+            }, 1000);
+          }
+        }, 500);
+
+        // Timeout after 5 minutes
+        const timeout = setTimeout(() => {
+          clearInterval(timer);
+          if (!popup.closed) {
+            popup.close();
+          }
+          setError("Authentication timed out. Please try again.");
+          setStatus("error");
+        }, 300000); // 5 minutes
+
+        // Cleanup
+        return () => {
+          clearInterval(timer);
+          clearTimeout(timeout);
+        };
+      } catch (err) {
+        console.error("OAuth error:", err);
+        setError("Failed to start authentication. Please try again.");
+        setStatus("error");
       }
-    }, 500);
+    };
 
-    // Cleanup timer if component unmounts
-    return () => clearInterval(timer);
-  }, [connectUrl, onRequestClose, onSuccess]);
+    // Small delay to ensure modal is rendered
+    const timer = setTimeout(handleOAuth, 100);
+    return () => clearTimeout(timer);
+  }, [isOpen, connectUrl, onRequestClose, onSuccess]);
 
-  // Return null since we don't want to show any UI
-  return null;
+  if (!isOpen || !connectUrl) return null;
+
+  const getStatusMessage = () => {
+    switch (status) {
+      case "connecting":
+        return "Preparing Google authentication...";
+      case "popup":
+        return "Please complete authentication in the popup window.";
+      case "redirect":
+        return "Redirecting to Google authentication...";
+      case "success":
+        return "Authentication successful! Redirecting...";
+      case "error":
+        return error || "Authentication failed. Please try again.";
+      default:
+        return "Connecting to Google...";
+    }
+  };
+
+  const getStatusIcon = () => {
+    switch (status) {
+      case "connecting":
+      case "redirect":
+        return (
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        );
+      case "popup":
+        return (
+          <div className="flex items-center justify-center w-8 h-8 bg-blue-100 rounded-full">
+            <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </div>
+        );
+      case "success":
+        return (
+          <div className="flex items-center justify-center w-8 h-8 bg-green-100 rounded-full">
+            <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+        );
+      case "error":
+        return (
+          <div className="flex items-center justify-center w-8 h-8 bg-red-100 rounded-full">
+            <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </div>
+        );
+      default:
+        return (
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        );
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      {/* Backdrop */}
+      <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity" />
+      
+      {/* Modal */}
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div className="relative bg-white rounded-2xl shadow-xl max-w-md w-full mx-auto transform transition-all">
+          {/* Header */}
+          <div className="px-6 py-4 border-b border-gray-200">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900">
+                Connect Google Account
+              </h3>
+              {status !== "connecting" && status !== "redirect" && (
+                <button
+                  onClick={onRequestClose}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                  disabled={status === "popup"}
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Content */}
+          <div className="px-6 py-8">
+            <div className="text-center">
+              {/* Status Icon */}
+              <div className="flex justify-center mb-4">
+                {getStatusIcon()}
+              </div>
+
+              {/* Status Message */}
+              <p className="text-gray-700 mb-6">
+                {getStatusMessage()}
+              </p>
+
+              {/* Additional Info */}
+              {status === "popup" && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                  <p className="text-sm text-blue-800">
+                    <strong>Tip:</strong> If the popup doesn't appear, check if your browser is blocking popups for this site.
+                  </p>
+                </div>
+              )}
+
+              {status === "redirect" && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                  <p className="text-sm text-yellow-800">
+                    <strong>Mobile:</strong> You'll be redirected to Google for authentication.
+                  </p>
+                </div>
+              )}
+
+              {status === "error" && (
+                <div className="space-y-4">
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                    <p className="text-sm text-red-800">
+                      {error}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setStatus("idle");
+                      setError(null);
+                      // Retry the OAuth flow
+                      setTimeout(() => {
+                        setStatus("connecting");
+                        window.location.href = connectUrl;
+                      }, 100);
+                    }}
+                    className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    Try Again
+                  </button>
+                </div>
+              )}
+
+              {/* Cancel Button */}
+              {status !== "success" && status !== "redirect" && (
+                <button
+                  onClick={onRequestClose}
+                  className="text-gray-500 hover:text-gray-700 text-sm transition-colors"
+                  disabled={status === "popup"}
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
