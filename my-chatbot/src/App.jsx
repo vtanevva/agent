@@ -51,7 +51,7 @@ export default function App() {
       </div>
 
       {/* Main content */}
-      <div className="relative z-10 h-full flex flex-col items-center justify-center pt-0 px-2 pb-14 -mt-2 lg:p-4 lg:items-stretch lg:justify-start overflow-hidden">
+      <div className="relative z-10 h-full flex flex-col items-center justify-center pt-0 px-2 pb-14 -mt-3 lg:p-4 lg:items-stretch lg:justify-start overflow-hidden">
         <Routes>
           <Route path="/" element={<LoginPage />} />
           <Route path="/chat/:userId/:sessionId" element={<ChatPage />} />
