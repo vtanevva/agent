@@ -520,6 +520,7 @@ def google_callback():
 
     # Get the user's real email for redirect
     user_email = real_email if real_email else state
+    encoded_user_email = user_email.replace('@', '%40').replace('+', '%2B')
     
     # Simple success page that works for both popup and redirect
     return render_template_string("""
@@ -556,11 +557,11 @@ def google_callback():
             <h1 style="font-size: 2.5em; margin-bottom: 20px;">✅ Connected to Google!</h1>
             <p style="font-size: 1.2em; margin-bottom: 30px;">You can now use Gmail and Calendar features.</p>
             <p style="font-size: 1em; margin-bottom: 20px;">Redirecting to chat...</p>
-            <p><a href="/chat/{{ user_email }}/{{ user_email }}-session" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 12px 24px; border-radius: 25px; display: inline-block;">Continue to Chat</a></p>
+            <p><a href="/chat/{{ encoded_user_email }}/{{ user_email }}-session" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 12px 24px; border-radius: 25px; display: inline-block;">Continue to Chat</a></p>
           </div>
         </body>
       </html>
-    """, user_email=user_email)
+    """, user_email=user_email, encoded_user_email=encoded_user_email)
 
 
 # /agent  – calls run_agent which may invoke tools (Gmail, Calendar…)
@@ -975,9 +976,17 @@ def debug_check_tokens(user_id):
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def serve_frontend(path):
+    # Handle API routes - these should not be served as static files
+    if path.startswith("api/"):
+        return jsonify({"error": "API endpoint not found"}), 404
+    
+    # Handle static files (CSS, JS, images, etc.)
     full_path = os.path.join(app.static_folder, path)
     if path and os.path.exists(full_path):
         return send_from_directory(app.static_folder, path)
+    
+    # For all other routes (including /chat/...), serve the React app
+    # This allows React Router to handle client-side routing
     return send_from_directory(app.static_folder, "index.html")
 
 
