@@ -168,10 +168,19 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
       
       // Handle connect_google action
       if (res.data.action === "connect_google") {
-        setChat(prev => [...prev, { role: "assistant", text: "Redirecting to Google authentication..." }]);
+        setChat(prev => [...prev, { role: "assistant", text: "Opening Google authentication in system browser..." }]);
         setLoading(false);
-        // Direct redirect to Google OAuth
-        window.location.href = res.data.connect_url;
+        // Force system browser to comply with Google's secure browser policy
+        try {
+          const newWindow = window.open(res.data.connect_url, '_blank', 'noopener,noreferrer');
+          if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+            // Fallback to direct redirect
+            window.location.href = res.data.connect_url;
+          }
+        } catch (e) {
+          // Fallback to direct redirect
+          window.location.href = res.data.connect_url;
+        }
         return;
       }
       

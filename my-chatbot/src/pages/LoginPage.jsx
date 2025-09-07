@@ -14,8 +14,28 @@ export default function LoginPage() {
     `${BACKEND}/google/auth/${encodeURIComponent(loginName.trim().toLowerCase())}`;
 
   const handleGoogleAuth = () => {
-    // Direct redirect to Google OAuth - no modal needed
-    window.location.href = getGoogleAuthUrl();
+    // Force system browser to comply with Google's secure browser policy
+    const authUrl = getGoogleAuthUrl();
+    
+    // Detect mobile devices
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
+    if (isMobile) {
+      // On mobile, use direct redirect to ensure system browser
+      window.location.href = authUrl;
+    } else {
+      // On desktop, try popup first
+      try {
+        const newWindow = window.open(authUrl, '_blank', 'noopener,noreferrer');
+        if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+          // Fallback to direct redirect
+          window.location.href = authUrl;
+        }
+      } catch (e) {
+        // Fallback to direct redirect
+        window.location.href = authUrl;
+      }
+    }
   };
 
   const handleGuestLogin = () => {
