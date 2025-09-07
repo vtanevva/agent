@@ -3,7 +3,6 @@ import { useState, useRef, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import axios from "axios"
 import EmailList from "../components/EmailList"
-import ConnectGoogleModal from "../components/ConnectGoogleModal"
 
 export default function VoiceChat({ userId, sessionId, setUseVoice }) {
   const [chat, setChat] = useState([])
@@ -16,8 +15,6 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
   const [sessions, setSessions] = useState([])
   const [selectedSession, setSelectedSession] = useState(sessionId)
   const [emailChoices, setEmailChoices] = useState(null)
-  const [showGoogleModal, setShowGoogleModal] = useState(false)
-  const [googleConnectUrl, setGoogleConnectUrl] = useState("")
   const [showSidebar, setShowSidebar] = useState(false)
   const lastUserMessage = useRef("")
 
@@ -171,10 +168,10 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
       
       // Handle connect_google action
       if (res.data.action === "connect_google") {
-        setGoogleConnectUrl(res.data.connect_url);
-        setShowGoogleModal(true);
-        setChat(prev => [...prev, { role: "assistant", text: "To access your emails, please connect your Google account first." }]);
+        setChat(prev => [...prev, { role: "assistant", text: "Redirecting to Google authentication..." }]);
         setLoading(false);
+        // Direct redirect to Google OAuth
+        window.location.href = res.data.connect_url;
         return;
       }
       
@@ -276,14 +273,6 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
     setEmailChoices(null);
   }
 
-  // Handle Google OAuth success
-  const handleGoogleSuccess = () => {
-    setShowGoogleModal(false);
-    // Optionally retry the last message
-    if (lastUserMessage.current) {
-      handleSend(lastUserMessage.current);
-    }
-  };
 
   return (
     <div className="w-full max-w-full lg:max-w-full flex gap-6 h-[90vh] lg:h-[calc(100vh-2rem)] relative overflow-hidden">
@@ -883,13 +872,6 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </div>
       </div>
 
-      {/* Google Connect Modal */}
-      <ConnectGoogleModal
-        isOpen={showGoogleModal}
-        onRequestClose={() => setShowGoogleModal(false)}
-        connectUrl={googleConnectUrl}
-        onSuccess={handleGoogleSuccess}
-      />
     </div>
   )
 }

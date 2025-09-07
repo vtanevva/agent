@@ -142,39 +142,42 @@ export default function ConnectGoogleModal({
   };
 
   const getStatusIcon = () => {
+    const iconSize = isMobile ? 'w-12 h-12' : 'w-8 h-8';
+    const svgSize = isMobile ? 'w-8 h-8' : 'w-5 h-5';
+    
     switch (status) {
       case "connecting":
       case "redirect":
         return (
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <div className={`animate-spin rounded-full border-b-2 border-blue-600 ${iconSize}`}></div>
         );
       case "popup":
         return (
-          <div className="flex items-center justify-center w-8 h-8 bg-blue-100 rounded-full">
-            <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className={`flex items-center justify-center bg-blue-100 rounded-full ${iconSize}`}>
+            <svg className={`${svgSize} text-blue-600`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
             </svg>
           </div>
         );
       case "success":
         return (
-          <div className="flex items-center justify-center w-8 h-8 bg-green-100 rounded-full">
-            <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className={`flex items-center justify-center bg-green-100 rounded-full ${iconSize}`}>
+            <svg className={`${svgSize} text-green-600`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           </div>
         );
       case "error":
         return (
-          <div className="flex items-center justify-center w-8 h-8 bg-red-100 rounded-full">
-            <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className={`flex items-center justify-center bg-red-100 rounded-full ${iconSize}`}>
+            <svg className={`${svgSize} text-red-600`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </div>
         );
       default:
         return (
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <div className={`animate-spin rounded-full border-b-2 border-blue-600 ${iconSize}`}></div>
         );
     }
   };
@@ -185,12 +188,20 @@ export default function ConnectGoogleModal({
       <div className="fixed inset-0 bg-black bg-opacity-50 transition-opacity" />
       
       {/* Modal */}
-      <div className="flex min-h-full items-center justify-center p-4">
-        <div className="relative bg-white rounded-2xl shadow-xl max-w-md w-full mx-auto transform transition-all">
+      <div className={`flex min-h-full items-center justify-center ${
+        isMobile ? 'p-0' : 'p-4'
+      }`}>
+        <div className={`relative bg-white shadow-xl w-full mx-auto transform transition-all ${
+          isMobile ? 'h-full max-h-full rounded-none' : 'max-w-md rounded-2xl'
+        }`}>
           {/* Header */}
-          <div className="px-6 py-4 border-b border-gray-200">
+          <div className={`border-b border-gray-200 ${
+            isMobile ? 'px-4 py-6' : 'px-6 py-4'
+          }`}>
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900">
+              <h3 className={`font-semibold text-gray-900 ${
+                isMobile ? 'text-xl' : 'text-lg'
+              }`}>
                 Connect Google Account
               </h3>
               {status !== "connecting" && status !== "redirect" && (
@@ -199,7 +210,7 @@ export default function ConnectGoogleModal({
                   className="text-gray-400 hover:text-gray-600 transition-colors"
                   disabled={status === "popup"}
                 >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className={`${isMobile ? 'w-8 h-8' : 'w-6 h-6'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
                 </button>
@@ -208,30 +219,44 @@ export default function ConnectGoogleModal({
           </div>
 
           {/* Content */}
-          <div className="px-6 py-8">
+          <div className={`${
+            isMobile ? 'px-4 py-8 flex-1 flex flex-col justify-center' : 'px-6 py-8'
+          }`}>
             <div className="text-center">
               {/* Status Icon */}
-              <div className="flex justify-center mb-4">
+              <div className={`flex justify-center ${
+                isMobile ? 'mb-6' : 'mb-4'
+              }`}>
                 {getStatusIcon()}
               </div>
 
               {/* Status Message */}
-              <p className="text-gray-700 mb-6">
+              <p className={`text-gray-700 ${
+                isMobile ? 'text-lg mb-8' : 'mb-6'
+              }`}>
                 {getStatusMessage()}
               </p>
 
               {/* Additional Info */}
               {status === "popup" && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                  <p className="text-sm text-blue-800">
+                <div className={`bg-blue-50 border border-blue-200 rounded-lg mb-4 ${
+                  isMobile ? 'p-6' : 'p-4'
+                }`}>
+                  <p className={`text-blue-800 ${
+                    isMobile ? 'text-base' : 'text-sm'
+                  }`}>
                     <strong>Tip:</strong> If the popup doesn't appear, check if your browser is blocking popups for this site.
                   </p>
                 </div>
               )}
 
               {status === "redirect" && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
-                  <p className="text-sm text-yellow-800">
+                <div className={`bg-yellow-50 border border-yellow-200 rounded-lg mb-4 ${
+                  isMobile ? 'p-6' : 'p-4'
+                }`}>
+                  <p className={`text-yellow-800 ${
+                    isMobile ? 'text-base' : 'text-sm'
+                  }`}>
                     <strong>Mobile:</strong> Opening Google authentication in your system browser. Complete the authentication and return to this app.
                   </p>
                 </div>
@@ -239,8 +264,12 @@ export default function ConnectGoogleModal({
 
               {status === "error" && (
                 <div className="space-y-4">
-                  <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                    <p className="text-sm text-red-800">
+                  <div className={`bg-red-50 border border-red-200 rounded-lg ${
+                    isMobile ? 'p-6' : 'p-4'
+                  }`}>
+                    <p className={`text-red-800 ${
+                      isMobile ? 'text-base' : 'text-sm'
+                    }`}>
                       {error}
                     </p>
                   </div>
@@ -254,7 +283,9 @@ export default function ConnectGoogleModal({
                         window.location.href = connectUrl;
                       }, 100);
                     }}
-                    className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors"
+                    className={`w-full bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors ${
+                      isMobile ? 'py-4 px-6 text-lg' : 'py-2 px-4'
+                    }`}
                   >
                     Try Again
                   </button>
@@ -265,7 +296,9 @@ export default function ConnectGoogleModal({
               {status !== "success" && status !== "redirect" && (
                 <button
                   onClick={onRequestClose}
-                  className="text-gray-500 hover:text-gray-700 text-sm transition-colors"
+                  className={`text-gray-500 hover:text-gray-700 transition-colors ${
+                    isMobile ? 'text-base mt-4' : 'text-sm'
+                  }`}
                   disabled={status === "popup"}
                 >
                   Cancel

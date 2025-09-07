@@ -8,7 +8,6 @@ import ChatHeader from "../components/ChatHeader";
 import MessageList from "../components/MessageList";
 import EmailList from "../components/EmailList";
 import InputBar from "../components/InputBar";
-import ConnectGoogleModal from "../components/ConnectGoogleModal";
 import CalendarView from "../components/CalendarView";
 import CalendarEvent from "../components/CalendarEvent";
 
@@ -30,8 +29,6 @@ export default function ChatPage() {
   const [selectedSession, setSelectedSession] = useState(null);
   const [useVoice, setUseVoice] = useState(false);
   const [emailChoices, setEmailChoices] = useState(null);
-  const [showGoogleModal, setShowGoogleModal] = useState(false);
-  const [googleConnectUrl, setGoogleConnectUrl] = useState("");
   const [showCalendar, setShowCalendar] = useState(false);
   const [calendarEvents, setCalendarEvents] = useState([]);
   const [calendarEvent, setCalendarEvent] = useState(null);
@@ -199,10 +196,10 @@ export default function ChatPage() {
       
       // Handle connect_google action
       if (data.action === "connect_google") {
-        setGoogleConnectUrl(data.connect_url);
-        setShowGoogleModal(true);
-        setChat((c) => [...c, { role: "assistant", text: "To access your emails, please connect your Google account first." }]);
+        setChat((c) => [...c, { role: "assistant", text: "Redirecting to Google authentication..." }]);
         setLoading(false);
+        // Direct redirect to Google OAuth
+        window.location.href = data.connect_url;
         return;
       }
       
@@ -276,13 +273,6 @@ export default function ChatPage() {
     navigate("/");
   };
 
-  const handleGoogleSuccess = () => {
-    setShowGoogleModal(false);
-    // Optionally retry the last message
-    if (lastUserMessage.current) {
-      handleSend(lastUserMessage.current);
-    }
-  };
 
   // Handle check emails button click
   const handleCheckEmails = async () => {
@@ -559,13 +549,6 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* Google Connect Modal */}
-      <ConnectGoogleModal
-        isOpen={showGoogleModal}
-        onRequestClose={() => setShowGoogleModal(false)}
-        connectUrl={googleConnectUrl}
-        onSuccess={handleGoogleSuccess}
-      />
 
       {/* Calendar Modal */}
       {showCalendar && (

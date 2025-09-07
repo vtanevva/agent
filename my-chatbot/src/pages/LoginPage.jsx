@@ -1,14 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import ConnectGoogleModal from "../components/ConnectGoogleModal";
 
 /* helper */
 const genSession = (id) => `${id}-${crypto.randomUUID().slice(0, 8)}`;
 
 export default function LoginPage() {
   const [loginName, setLoginName] = useState("");
-  const [showGoogleModal, setShowGoogleModal] = useState(false);
-  const [googleConnectUrl, setGoogleConnectUrl] = useState("");
   const navigate = useNavigate();
 
   // build OAuth URL using loginName as the state param
@@ -16,23 +13,9 @@ export default function LoginPage() {
   const getGoogleAuthUrl = () =>
     `${BACKEND}/google/auth/${encodeURIComponent(loginName.trim().toLowerCase())}`;
 
-  const handleGoogleSuccess = async () => {
-    setShowGoogleModal(false);
-    let realEmail;
-    try {
-      const r = await fetch("/api/google-profile", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: loginName.trim().toLowerCase() }),
-      });
-      const { email } = await r.json();
-      realEmail = email;
-    } catch (err) {
-      console.error("could not fetch google profile:", err);
-    }
-    const id = realEmail || loginName.trim().toLowerCase();
-    const sessionId = genSession(id);
-    navigate(`/chat/${id}/${sessionId}`);
+  const handleGoogleAuth = () => {
+    // Direct redirect to Google OAuth - no modal needed
+    window.location.href = getGoogleAuthUrl();
   };
 
   const handleGuestLogin = () => {
@@ -43,12 +26,6 @@ export default function LoginPage() {
 
   return (
     <>
-      <ConnectGoogleModal
-        isOpen={showGoogleModal}
-        connectUrl={googleConnectUrl}
-        onRequestClose={() => setShowGoogleModal(false)}
-        onSuccess={handleGoogleSuccess}
-      />
 
       <div className="w-full max-w-none lg:max-w-full flex items-center justify-center h-[90vh] lg:h-[calc(100vh-2rem)] relative">
         <div className="glass-effect-strong rounded-3xl lg:rounded-2xl p-6 lg:p-16 max-w-md lg:max-w-full w-full text-center space-y-6 lg:space-y-6 border border-dark-500/10 max-h-[80vh] lg:max-h-none overflow-y-auto">
@@ -78,10 +55,7 @@ export default function LoginPage() {
           {/* Sign in with Google */}
           <button
             disabled={!loginName.trim()}
-            onClick={() => {
-              setGoogleConnectUrl(getGoogleAuthUrl());
-              setShowGoogleModal(true);
-            }}
+            onClick={handleGoogleAuth}
             className="w-auto max-w-sm lg:w-auto lg:max-w-sm bg-gradient-to-r from-secondary-500 to-secondary-600 hover:from-secondary-600 hover:to-secondary-700 text-primary-50 px-4 py-3 lg:px-6 lg:py-3.5 rounded-xl disabled:opacity-50 btn-hover font-semibold flex items-center justify-center gap-3 shadow-lg border border-secondary-600/30 text-base lg:text-base"
           >
             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
