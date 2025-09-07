@@ -441,14 +441,41 @@ def google_callback():
             </html>
             """, error=error)
         
-        redirect_uri = url_for("google_callback", _external=True)
+        # Use the same redirect URI as in the auth request
+        if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https':
+            redirect_uri = "https://web-production-0b6ce.up.railway.app/google/oauth2callback"
+        else:
+            redirect_uri = url_for("google_callback", _external=True)
         print(f"DEBUG: Building flow with redirect_uri: {redirect_uri}", flush=True)
         
         flow = _build_flow(redirect_uri, state=state)
         print("DEBUG: Flow built, fetching token...", flush=True)
+        print(f"DEBUG: Authorization response URL: {request.url}", flush=True)
         
-        flow.fetch_token(authorization_response=request.url)
-        print("DEBUG: Token fetched successfully", flush=True)
+        try:
+            flow.fetch_token(authorization_response=request.url)
+            print("DEBUG: Token fetched successfully", flush=True)
+        except Exception as token_error:
+            print(f"ERROR: Token fetch failed: {token_error}", flush=True)
+            print(f"ERROR: Request URL: {request.url}", flush=True)
+            print(f"ERROR: Redirect URI: {redirect_uri}", flush=True)
+            return render_template_string("""
+            <!doctype html>
+            <html>
+              <head><title>OAuth Token Error</title></head>
+              <body>
+                <h1>Authentication Error</h1>
+                <p>Error: {{ error }}</p>
+                <p>This might be due to:</p>
+                <ul>
+                  <li>Authorization code expired (try again)</li>
+                  <li>Authorization code already used</li>
+                  <li>Clock synchronization issue</li>
+                </ul>
+                <a href="/">Back to App</a>
+              </body>
+            </html>
+            """, error=str(token_error))
         
         creds = flow.credentials
         cred_json = json.loads(creds.to_json())
@@ -864,10 +891,21 @@ def debug_token_info():
     For each user_id in tokens, load their creds and hit Gmail's getProfile
     to see which emailAddress is in use.
     """
+    if tokens is None:
+        return jsonify({"error": "MongoDB not available"})
+        
     results = []
     for doc in tokens.find({}, {"user_id": 1}):
         uid = doc.get("user_id")
-        info = {"user_id": uid, "email_address": None, "error": None}
+        info = {"user_id": uid, "email_address": None, "error": None, "has_google_creds": False}
+        
+        # Check if user has Google credentials
+        user_doc = tokens.find_one({"user_id": uid})
+        if user_doc and "google" in user_doc:
+            info["has_google_creds"] = True
+            info["token_expiry"] = user_doc["google"].get("expiry")
+            info["scopes"] = user_doc["google"].get("scopes", [])
+        
         creds = load_google_credentials(uid)
         if not creds:
             info["error"] = "no credentials"
@@ -882,6 +920,35 @@ def debug_token_info():
                 info["error"] = str(e)
         results.append(info)
     return jsonify(results)
+
+@app.get("/debug/check-tokens/<user_id>")
+def debug_check_tokens(user_id):
+    """Check token storage for a specific user."""
+    if tokens is None:
+        return jsonify({"error": "MongoDB not available"})
+    
+    # Check if user exists in tokens collection
+    user_doc = tokens.find_one({"user_id": user_id})
+    if not user_doc:
+        return jsonify({"error": f"No tokens found for user: {user_id}"})
+    
+    result = {
+        "user_id": user_id,
+        "has_google_creds": "google" in user_doc,
+        "google_creds": {}
+    }
+    
+    if "google" in user_doc:
+        google_creds = user_doc["google"]
+        result["google_creds"] = {
+            "has_token": "token" in google_creds,
+            "has_refresh_token": "refresh_token" in google_creds,
+            "expiry": google_creds.get("expiry"),
+            "scopes": google_creds.get("scopes", []),
+            "client_id": google_creds.get("client_id", "not_found")
+        }
+    
+    return jsonify(result)
 
 
 
