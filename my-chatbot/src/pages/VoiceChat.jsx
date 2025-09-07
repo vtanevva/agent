@@ -351,7 +351,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
           </h3>
           <button
             onClick={() => setShowChat(!showChat)}
-            className="w-full px-5 py-4 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-accent-500 to-accent-600 text-primary-50 btn-hover text-lg"
+            className="w-full px-5 py-4 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-dark-500 to-dark-600 text-primary-50 btn-hover text-lg"
           >
             {showChat ? "Hide Chat" : "Show Chat"}
           </button>
@@ -418,7 +418,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
             Voice Settings
           </h3>
           <div className="space-y-3">
-            <div className="bg-primary-200/30 rounded-lg px-4 py-6 border border-dark-500/5">
+            <div className="bg-accent-500/20 rounded-lg px-4 py-6 border border-dark-500/5">
               <div className="text-primary-900 text-lg">
                 <div className="flex items-center gap-2 mb-1">
                   <div className="w-2 h-2 bg-secondary-500 rounded-full"></div>
@@ -429,7 +429,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
                 </div>
               </div>
             </div>
-            <div className="bg-primary-200/30 rounded-lg px-4 py-6 border border-dark-500/5">
+            <div className="bg-accent-500/20 rounded-lg px-4 py-6 border border-dark-500/5">
               <div className="text-primary-900 text-lg">
                 <div className="flex items-center gap-2 mb-1">
                   <div className="w-2 h-2 bg-accent-500 rounded-full"></div>
@@ -470,7 +470,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
             Smart Insights
           </h3>
           <div className="space-y-3">
-            <div className="bg-primary-200/30 rounded-lg px-4 py-6 border border-dark-500/5">
+            <div className="bg-accent-500/20 rounded-lg px-4 py-6 border border-dark-500/5">
               <div className="text-primary-900 text-lg">
                 <div className="flex items-center gap-2 mb-1">
                   <div className="w-2 h-2 bg-secondary-500 rounded-full"></div>
@@ -481,7 +481,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
                 </div>
               </div>
             </div>
-            <div className="bg-primary-200/30 rounded-lg px-4 py-6 border border-dark-500/5">
+            <div className="bg-accent-500/20 rounded-lg px-4 py-6 border border-dark-500/5">
               <div className="text-primary-900 text-lg">
                 <div className="flex items-center gap-2 mb-1">
                   <div className="w-2 h-2 bg-accent-500 rounded-full"></div>
@@ -492,7 +492,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
                 </div>
               </div>
             </div>
-            <div className="bg-primary-200/30 rounded-lg px-4 py-6 border border-dark-500/5">
+            <div className="bg-accent-500/20 rounded-lg px-4 py-6 border border-dark-500/5">
               <div className="text-primary-900 text-lg">
                 <div className="flex items-center gap-2 mb-1">
                   <div className="w-2 h-2 bg-dark-500 rounded-full"></div>
@@ -634,8 +634,9 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         {!showChat && isSpeaking && (
           <div className="flex-1 flex items-center justify-center" style={{ minHeight: '400px' }}>
             <div className="text-center space-y-6">
-              
-              <div className="text-primary-900/80 text-lg font-medium text-right pr-8 -mt-4">
+              <div className="w-32 h-32 bg-gradient-to-br from-dark-500/40 via-dark-600/40 to-dark-700/40 rounded-full flex items-center justify-center mx-auto">
+              </div>
+              <div className="text-primary-900/80 text-lg font-medium text-center">
                 AI is speaking...
               </div>
             </div>
@@ -647,10 +648,27 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
           <div className="flex-1 flex items-center justify-center" style={{ minHeight: '400px' }}>
             <div className="text-center space-y-6">
               <div className="w-32 h-32 bg-gradient-to-br from-accent-500/20 via-secondary-500/20 to-dark-500/20 rounded-full flex items-center justify-center mx-auto">
-                <div className="text-4xl">Voice</div>
               </div>
               <div className="text-primary-900/60 text-lg">
-                Click the microphone to start speaking
+                Click to start speaking
+              </div>
+              
+              {/* Microphone Section */}
+              <div className="flex flex-col items-center gap-2">
+                <button
+                  onClick={isListening ? stopListening : startListening}
+                  disabled={!isSupported}
+                  className={`w-16 h-16 lg:w-18 lg:h-18 rounded-full font-semibold flex items-center justify-center shadow-lg transition-all duration-300 ${
+                    isListening
+                      ? "bg-white hover:bg-gray-100 text-secondary-600 animate-pulse"
+                      : "bg-gradient-to-r from-secondary-500 to-secondary-600 hover:from-secondary-600 hover:to-secondary-700 text-primary-50"
+                  } ${!isSupported ? "opacity-50 cursor-not-allowed" : "btn-hover"}`}
+                >
+                  <svg className="w-6 h-6 lg:w-7 lg:h-7" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                  </svg>
+                </button>
               </div>
             </div>
           </div>
