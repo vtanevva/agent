@@ -4,6 +4,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Prevent mobile overflow */
+@media (max-width: 1023px) {
+  html, body {
+    height: 100vh;
+    overflow: hidden;
+    position: fixed;
+    width: 100%;
+  }
+}
+
 /* Custom bubble animations */
 @keyframes bubble-pulse {
   0% {

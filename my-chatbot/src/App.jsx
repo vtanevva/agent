@@ -4,7 +4,7 @@ import ChatPage from "./pages/ChatPage";
 
 export default function App() {
   return (
-    <div className="min-h-screen relative overflow-hidden bg-secondary-500/20">
+    <div className="h-screen relative overflow-hidden bg-secondary-500/20">
       {/* Minimalistic Background */}
       <div className="fixed inset-0">
         {/* Base background */}
@@ -51,7 +51,7 @@ export default function App() {
       </div>
 
       {/* Main content */}
-      <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-2 lg:p-4 lg:items-stretch lg:justify-start">
+      <div className="relative z-10 h-full flex flex-col items-center justify-center p-2 lg:p-4 lg:items-stretch lg:justify-start overflow-hidden">
         <Routes>
           <Route path="/" element={<LoginPage />} />
           <Route path="/chat/:userId/:sessionId" element={<ChatPage />} />
