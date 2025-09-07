@@ -202,7 +202,7 @@ def _build_flow(redirect_uri: str, state: str | None = None):
     if google_client_id and google_client_secret:
         # Use environment variables
         google_project_id = os.getenv("GOOGLE_PROJECT_ID", "gmail-agent-466700")
-        google_redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/google/oauth2callback/demo")
+        google_redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "https://web-production-0b6ce.up.railway.app/google/oauth2callback/demo")
         
         client_config = {
             "web": {

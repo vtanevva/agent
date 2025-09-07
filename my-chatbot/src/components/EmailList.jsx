@@ -6,11 +6,11 @@ export default function EmailList({ emails, onSelect }) {
         <p className="text-primary-900/60 text-sm">Select an email to reply to</p>
       </div>
       
-      <div className="grid gap-3 max-h-96 overflow-y-auto custom-scrollbar">
+      <div className="grid gap-3 max-h-96 overflow-y-auto custom-scrollbar px-2 sm:px-3 md:px-4">
         {emails.map((email, index) => (
           <div
             key={email.threadId}
-            className="group cursor-pointer glass-effect p-4 rounded-xl border border-dark-500/20 hover:border-accent-500/50 transition-all duration-300 hover:bg-primary-200/20 card-hover"
+            className="group cursor-pointer glass-effect pl-3 pr-4 py-4 rounded-xl border border-dark-500/20 hover:border-accent-500/50 transition-all duration-300 hover:bg-primary-200/20 card-hover w-full"
             onClick={() => onSelect(email.threadId, email.from)}
           >
             <div className="flex items-start gap-3">

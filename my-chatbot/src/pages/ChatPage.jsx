@@ -46,6 +46,25 @@ export default function ChatPage() {
     }
   }, [chat, emailChoices]);
 
+  // Function to extract email choices from chat history
+  const extractEmailChoicesFromChat = useCallback((chatHistory) => {
+    // Look for the last assistant message that contains email data
+    for (let i = chatHistory.length - 1; i >= 0; i--) {
+      const msg = chatHistory[i];
+      if (msg.role === "assistant") {
+        const cleaned = msg.text.replace(/```json\n?|\n?```/g, '').trim();
+        let parsed = null;
+        try { 
+          parsed = JSON.parse(cleaned); 
+        } catch {}
+        if (Array.isArray(parsed) && parsed[0]?.threadId) {
+          return parsed;
+        }
+      }
+    }
+    return null;
+  }, []);
+
   // Function to load chat history for a session
   const loadSessionChat = useCallback(async (sessionId) => {
     if (!sessionId || !userId) {
@@ -77,12 +96,17 @@ export default function ChatPage() {
       }
       
       setChat(normal);
+      
+      // Check if there are email choices in the chat history
+      const emailData = extractEmailChoicesFromChat(normal);
+      setEmailChoices(emailData);
     } catch (e) {
       console.error("Error loading session chat:", e);
       // If loading fails, start with empty chat (new session)
       setChat([]);
+      setEmailChoices(null);
     }
-  }, [userId]);
+  }, [userId, extractEmailChoicesFromChat]);
 
   async function fetchSessions(id = userId) {
     if (!id || id === 'undefined' || id === 'null') {
@@ -129,7 +153,6 @@ export default function ChatPage() {
     
     console.log("Session changed:", { sessionId, userId, sessionsCount: sessions.length });
     
-    setEmailChoices(null);
     setSelectedSession(sessionId);
     
     // Always try to load chat history first
@@ -179,17 +202,28 @@ export default function ChatPage() {
         setGoogleConnectUrl(data.connect_url);
         setShowGoogleModal(true);
         setChat((c) => [...c, { role: "assistant", text: "To access your emails, please connect your Google account first." }]);
+        setLoading(false);
         return;
       }
       
-      const { reply } = data;
-      const cleaned = reply.replace(/```json|```/gi, "").trim();
+      let reply = (data && typeof data.reply !== 'undefined') ? data.reply : undefined;
+      if (!reply && Array.isArray(data)) {
+        // Backend might have returned the array directly
+        reply = JSON.stringify(data);
+      }
+      if (reply == null) reply = "";
+      if (typeof reply !== 'string') {
+        try { reply = JSON.stringify(reply); } catch { reply = String(reply); }
+      }
+      const cleaned = String(reply).replace(/```json|```/gi, "").trim();
       let parsed = null;
       try { parsed = JSON.parse(cleaned); } catch {}
       
       // Handle email choices
       if (Array.isArray(parsed) && parsed[0]?.threadId) {
         setEmailChoices(parsed);
+        // Also add the assistant message so inline UI can render at the correct position
+        setChat((c) => [...c, { role: "assistant", text: reply }]);
       } 
       // Handle calendar events
       else if (parsed && parsed.success && parsed.events) {
@@ -370,7 +404,6 @@ export default function ChatPage() {
                         setShowSidebar(false); // Close menu on mobile FIRST
                         const id = session.session_id || session;
                         setSelectedSession(id);
-                        setEmailChoices(null);
                         navigate(`/chat/${userId}/${id}`);
                         
                         // Refresh sessions list to ensure we have the latest data
@@ -502,8 +535,7 @@ export default function ChatPage() {
 
         {/* Chat Messages */}
         <div ref={chatRef} className="flex-1 overflow-y-auto custom-scrollbar p-3 lg:p-4">
-          <MessageList chat={chat} loading={loading} />
-          {emailChoices && <EmailList emails={emailChoices} onSelect={handleEmailSelect} />}
+          <MessageList chat={chat} loading={loading} onEmailSelect={handleEmailSelect} />
           {calendarEvent && (
             <div className="mt-4">
               <CalendarEvent 

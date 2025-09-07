@@ -80,10 +80,26 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
     }
   }, [userId]);
 
-  // Clear email choices when session changes
-  useEffect(() => {
-    setEmailChoices(null);
-  }, [sessionId]);
+  // Note: Email choices are now restored from chat history when loading sessions
+
+  // Function to extract email choices from chat history
+  const extractEmailChoicesFromChat = (chatHistory) => {
+    // Look for the last assistant message that contains email data
+    for (let i = chatHistory.length - 1; i >= 0; i--) {
+      const msg = chatHistory[i];
+      if (msg.role === "assistant") {
+        const cleaned = msg.text.replace(/```json\n?|\n?```/g, '').trim();
+        let parsed = null;
+        try { 
+          parsed = JSON.parse(cleaned); 
+        } catch {}
+        if (Array.isArray(parsed) && parsed[0]?.threadId) {
+          return parsed;
+        }
+      }
+    }
+    return null;
+  };
 
   // Load current session's chat when component mounts or sessionId changes
   useEffect(() => {
@@ -98,10 +114,15 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
           const { chat: dbChat = [] } = await r.json();
           const normal = dbChat.map((m) => ({ role: m.role === "bot" ? "assistant" : m.role, text: m.text }));
           setChat(normal);
+          
+          // Only set email choices for the current session
+          const emailData = extractEmailChoicesFromChat(normal);
+          setEmailChoices(emailData);
         } catch (e) {
           console.error("load session chat", e);
           // If session doesn't exist yet, start with empty chat
           setChat([]);
+          setEmailChoices(null);
         }
       };
       loadSessionChat();
@@ -157,15 +178,40 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         return;
       }
       
-      const reply = res.data.reply
-      const cleaned = reply.replace(/```json|```/gi, "").trim();
+      let reply = (res.data && typeof res.data.reply !== 'undefined') ? res.data.reply : undefined;
+      if (!reply && Array.isArray(res.data)) {
+        reply = JSON.stringify(res.data);
+      }
+      if (reply == null) reply = "";
+      if (typeof reply !== 'string') {
+        try { reply = JSON.stringify(reply); } catch { reply = String(reply); }
+      }
+      const cleaned = String(reply).replace(/```json|```/gi, "").trim();
       let parsed = null;
       try { parsed = JSON.parse(cleaned); } catch {}
       if (Array.isArray(parsed) && parsed[0]?.threadId) {
         setEmailChoices(parsed);
-      } else {
-        setEmailChoices(null);
+        // Also push assistant reply so inline UI can render at the right place
         setChat(prev => [...prev, { role: "assistant", text: reply }])
+      } else {
+        // Try markdown formatted list (e.g., numbered with **From:** etc.)
+        const md = cleaned.replace(/\r\n/g, '\n');
+        const re = /\n?\s*\d+\.\s+\*\*From:\*\*\s*([\s\S]*?)\n\s*\*\*Subject:\*\*\s*([\s\S]*?)\n\s*\*\*Snippet:\*\*\s*([\s\S]*?)(?=\n\s*\d+\.\s|$)/g;
+        let m; let idx = 1; const items = [];
+        while ((m = re.exec(md)) !== null) {
+          const from = m[1].trim();
+          const subject = m[2].trim();
+          const snippet = m[3].trim();
+          items.push({ idx, from, subject, snippet, threadId: `md-${idx}` });
+          idx += 1;
+        }
+        if (items.length > 0) {
+          setEmailChoices(items);
+          setChat(prev => [...prev, { role: "assistant", text: reply }])
+        } else {
+          setEmailChoices(null);
+          setChat(prev => [...prev, { role: "assistant", text: reply }])
+        }
       }
       
       // If this was the first message in a new session, refresh the sessions list
@@ -404,7 +450,6 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
                         setShowSidebar(false); // Close menu on mobile FIRST
                         const id = session.session_id || session;
                         setSelectedSession(id);
-                        setEmailChoices(null); // Clear emails when switching sessions
                         navigate(`/chat/${userId}/${id}`);
                         try {
                           const r = await fetch("/api/session_chat", {
@@ -415,8 +460,17 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
                           const { chat: dbChat = [] } = await r.json();
                           const normal = dbChat.map((m) => ({ role: m.role === "bot" ? "assistant" : m.role, text: m.text }));
                           setChat(normal);
+                          
+                          // Only set email choices if this is the current session, not for past conversations
+                          if (id === sessionId) {
+                            const emailData = extractEmailChoicesFromChat(normal);
+                            setEmailChoices(emailData);
+                          } else {
+                            setEmailChoices(null);
+                          }
                         } catch (e) {
                           console.error("load session", e);
+                          setEmailChoices(null);
                         }
                       }}
                       className={`w-full text-left px-5 py-4 rounded-lg text-lg transition-all duration-200 ${
@@ -646,17 +700,70 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
                         }`}>
                           {msg.role === "user" ? "You" : "Mindful AI"}
                         </div>
-                        <div className={`text-sm leading-relaxed whitespace-pre-wrap ${
-                          msg.role === "user" ? "text-primary-900" : "text-primary-900"
-                        }`}>
-                          {msg.text}
-                        </div>
+                        {(() => {
+                          if (msg.role === "assistant" && typeof msg.text === "string") {
+                            const sanitize = (s) => s.replace(/,\s*(?=[}\]])/g, "").replace(/'/g, '"');
+                            const noFences = msg.text.replace(/```[a-zA-Z]*\r?\n?|```/g, '').trim();
+                            // Try full parse first
+                            try {
+                              const parsed = JSON.parse(noFences);
+                              if (Array.isArray(parsed) && (parsed[0]?.threadId || parsed.find?.(e=>e?.threadId))) {
+                                return (
+                                  <div className="mt-1">
+                                    <EmailList emails={parsed} onSelect={handleEmailSelect} />
+                                  </div>
+                                );
+                              }
+                            } catch {}
+                            // Try to extract first balanced array
+                            const start = noFences.indexOf('[');
+                            if (start !== -1) {
+                              let depth = 0;
+                              for (let i = start; i < noFences.length; i++) {
+                                const ch = noFences[i];
+                                if (ch === '[') depth++; else if (ch === ']') depth--;
+                                if (depth === 0) {
+                                  let candidate = noFences.slice(start, i + 1);
+                                  candidate = sanitize(candidate);
+                                  try {
+                                    const parsed = JSON.parse(candidate);
+                                    if (Array.isArray(parsed) && (parsed[0]?.threadId || parsed.find?.(e=>e?.threadId))) {
+                                      return (
+                                        <div className="mt-1">
+                                          <EmailList emails={parsed} onSelect={handleEmailSelect} />
+                                        </div>
+                                      );
+                                    }
+                                  } catch {}
+                                  break;
+                                }
+                              }
+                            }
+                            // Last resort: sanitize whole
+                            try {
+                              const parsed = JSON.parse(sanitize(noFences));
+                              if (Array.isArray(parsed) && (parsed[0]?.threadId || parsed.find?.(e=>e?.threadId))) {
+                                return (
+                                  <div className="mt-1">
+                                    <EmailList emails={parsed} onSelect={handleEmailSelect} />
+                                  </div>
+                                );
+                              }
+                            } catch {}
+                          }
+                          return (
+                            <div className={`text-sm leading-relaxed whitespace-pre-wrap ${
+                              msg.role === "user" ? "text-primary-900" : "text-primary-900"
+                            }`}>
+                              {msg.text}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
                 </div>
               ))}
-              
               {loading && (
                 <div className="flex justify-start">
                   <div className="glass-effect-emerald text-primary-900 rounded-2xl rounded-bl-md shadow-glow-emerald px-6 py-4 border border-secondary-500/20">
@@ -671,8 +778,6 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
                   </div>
                 </div>
               )}
-              
-              {emailChoices && <EmailList emails={emailChoices} onSelect={handleEmailSelect} />}
             </div>
           </div>
         )}

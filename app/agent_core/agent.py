@@ -27,7 +27,8 @@ def run_agent(user_id: str, message: str, history: list):
             "Invent a polite subject/body if missing.\n\n"
             # ── inbox listing ─────────────────────────────────────────
             "If the user asks to see recent mail, ALWAYS call the "
-            "list_recent_emails tool once and reply ONLY with its raw JSON.\n\n"
+            "list_recent_emails tool once and reply ONLY with its raw JSON. "
+            "This applies even if emails were shown before in the conversation.\n\n"
             # ── replying inside a thread ─────────────────────────────
             "If the user asks to reply to a Gmail thread and provides a threadId "
             "(or the UI pre‑fills 'Reply to thread <ID> to <email>: <body>'), "
@@ -49,12 +50,28 @@ def run_agent(user_id: str, message: str, history: list):
     wants_list = any(
         phrase in lower
         for phrase in (
+            # existing
             "recent email",
             "last email",
             "last 5 emails",
             "latest emails",
             "show my emails",
             "show inbox",
+            # new synonyms
+            "check emails",
+            "check my emails",
+            "check inbox",
+            "past email",
+            "past emails",
+            "check past email",
+            "check past emails",
+            "old emails",
+            "older emails",
+            # additional phrases
+            "past messages",
+            "show past messages",
+            "check past messages",
+            "show me past messages",
         )
     )
     
@@ -71,6 +88,7 @@ def run_agent(user_id: str, message: str, history: list):
             "calendar events",
         )
     )
+    print(f"Email detection: wants_list={wants_list}, message='{message}'")
     print(f"Calendar detection: wants_calendar={wants_calendar}, message='{message}'")
     
     # Debug: Print available tools
@@ -79,6 +97,7 @@ def run_agent(user_id: str, message: str, history: list):
     
     if wants_list:
         forced_choice = {"type": "function", "function": {"name": "list_recent_emails"}}
+        print(f"Forcing email list tool choice: {forced_choice}")
     elif wants_calendar:
         forced_choice = {"type": "function", "function": {"name": "list_calendar_events"}}
         print(f"Forcing calendar tool choice: {forced_choice}")
@@ -126,6 +145,8 @@ def run_agent(user_id: str, message: str, history: list):
         # ── NEW: short‑circuit for inbox listing ───────────────
         if fn_name == "list_recent_emails":
             print("Short-circuiting for list_recent_emails")
+            print(f"Tool result type: {type(tool_result)}")
+            print(f"Tool result content: {tool_result[:200] if len(str(tool_result)) > 200 else tool_result}")
             return tool_result                  # raw JSON back to UI
         # ── NEW: short‑circuit for calendar listing ───────────────
         if fn_name == "list_calendar_events":
