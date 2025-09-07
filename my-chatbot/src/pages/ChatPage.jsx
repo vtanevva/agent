@@ -526,7 +526,7 @@ export default function ChatPage() {
       </div>
 
       {/* Main Chat Area */}
-      <div className="flex-1 w-full h-full lg:flex-1 lg:w-auto lg:h-auto flex flex-col glass-effect-strong rounded-3xl lg:rounded-2xl border border-dark-500/20 lg:ml-0 ml-0 max-w-full overflow-hidden">
+      <div className="flex-1 w-full h-full lg:flex-1 lg:w-auto lg:h-auto flex flex-col glass-effect-strong rounded-3xl lg:rounded-3xl border border-dark-500/20 lg:ml-0 ml-0 max-w-full overflow-hidden">
         {/* Chat Header */}
         <div className="p-3 lg:p-4 border-b border-dark-500/10">
           <div className="flex justify-between items-center">
