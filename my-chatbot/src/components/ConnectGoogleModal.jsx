@@ -22,14 +22,33 @@ export default function ConnectGoogleModal({
 
     const handleOAuth = () => {
       try {
-        console.log("ConnectGoogleModal: Opening OAuth with URL:", connectUrl);
-        
+    console.log("ConnectGoogleModal: Opening OAuth with URL:", connectUrl);
+    
         if (mobile) {
-          console.log("Mobile device detected, using direct redirect");
+          console.log("Mobile device detected, using system browser");
           setStatus("redirect");
           // Small delay to show the redirect message
           setTimeout(() => {
-            window.location.href = connectUrl;
+            // For mobile, we need to open in system browser, not webview
+            // Try multiple methods to ensure it opens in system browser
+            try {
+              // Method 1: Use window.open with _blank
+              const newWindow = window.open(connectUrl, '_blank', 'noopener,noreferrer');
+              if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+                // Method 2: Create a link and click it
+                const link = document.createElement('a');
+                link.href = connectUrl;
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+              }
+            } catch (e) {
+              console.error("Failed to open system browser:", e);
+              // Fallback: direct redirect
+              window.location.href = connectUrl;
+            }
           }, 1000);
           return;
         }
@@ -45,19 +64,19 @@ export default function ConnectGoogleModal({
           console.log("Popup blocked or failed, using direct redirect");
           setStatus("redirect");
           setTimeout(() => {
-            window.location.href = connectUrl;
+      window.location.href = connectUrl;
           }, 1000);
-          return;
-        }
+      return;
+    }
 
-        console.log("Popup opened successfully");
+    console.log("Popup opened successfully");
         setStatus("popup");
         
-        const timer = setInterval(() => {
+    const timer = setInterval(() => {
           try {
-            if (popup.closed) {
-              clearInterval(timer);
-              console.log("Popup closed, calling success callback");
+      if (popup.closed) {
+        clearInterval(timer);
+        console.log("Popup closed, calling success callback");
               setStatus("success");
               setTimeout(() => {
                 onRequestClose();
@@ -70,11 +89,11 @@ export default function ConnectGoogleModal({
             clearInterval(timer);
             setStatus("success");
             setTimeout(() => {
-              onRequestClose();
-              onSuccess();
+        onRequestClose();
+        onSuccess();
             }, 1000);
-          }
-        }, 500);
+      }
+    }, 500);
 
         // Timeout after 5 minutes
         const timeout = setTimeout(() => {
@@ -213,7 +232,7 @@ export default function ConnectGoogleModal({
               {status === "redirect" && (
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
                   <p className="text-sm text-yellow-800">
-                    <strong>Mobile:</strong> You'll be redirected to Google for authentication.
+                    <strong>Mobile:</strong> Opening Google authentication in your system browser. Complete the authentication and return to this app.
                   </p>
                 </div>
               )}

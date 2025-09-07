@@ -12,7 +12,7 @@ export default function LoginPage() {
   const navigate = useNavigate();
 
   // build OAuth URL using loginName as the state param
-  const BACKEND = import.meta.env.VITE_API_BASE_URL || "http://localhost:10000";
+  const BACKEND = import.meta.env.VITE_API_BASE_URL || "https://web-production-0b6ce.up.railway.app";
   const getGoogleAuthUrl = () =>
     `${BACKEND}/google/auth/${encodeURIComponent(loginName.trim().toLowerCase())}`;
 
