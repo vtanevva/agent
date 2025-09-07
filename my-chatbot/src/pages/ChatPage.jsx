@@ -327,7 +327,7 @@ export default function ChatPage() {
 
     /* ── MAIN CHAT ── */
   return (
-    <div className="w-full max-w-full lg:max-w-full flex gap-6 h-[90vh] lg:h-[calc(100vh-2rem)] relative overflow-hidden">
+    <div className="w-full max-w-full lg:max-w-full flex gap-6 h-[80vh] lg:h-[calc(100vh-2rem)] relative overflow-hidden">
       {/* Mobile overlay */}
       {showSidebar && (
         <div 
@@ -345,12 +345,12 @@ export default function ChatPage() {
         w-full lg:w-80 
         h-full 
         z-50 lg:z-0
-        flex flex-col gap-4 
+        flex flex-col gap-3 
         overflow-y-auto custom-scrollbar
         bg-white lg:bg-transparent 
         backdrop-blur-none
         transition-transform duration-300 ease-in-out
-        p-3 lg:p-0
+        p-2 lg:p-0
       `}>
         <div className="w-96 sm:w-[28rem] lg:w-full mx-auto">
         {/* Mobile close button */}
