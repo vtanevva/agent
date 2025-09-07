@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 /* helper */
-const genSession = (id) => `${id}-${crypto.randomUUID().slice(0, 8)}`;
+const genSession = (id) => `${id}-${Math.random().toString(36).substring(2, 8)}`;
 
 export default function LoginPage() {
   const [loginName, setLoginName] = useState("");
@@ -13,10 +13,10 @@ export default function LoginPage() {
     const handleMessage = (event) => {
       if (event.data.type === 'GOOGLE_AUTH_SUCCESS') {
         const userEmail = event.data.userEmail;
-        const sessionId = genSession(userEmail);
-        // Create URL-safe user ID
-        const userID = userEmail.replace('@', '-at-').replace(/\./g, '-');
-        navigate(`/chat/${userID}/${sessionId}`);
+        // Extract username from the current login name (this should be the username they entered)
+        const username = loginName.trim().toLowerCase();
+        const sessionId = genSession(username);
+        navigate(`/chat/${username}/${sessionId}`);
       }
     };
 

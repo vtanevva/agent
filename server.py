@@ -546,10 +546,9 @@ def google_callback():
             } else {
               // For mobile/redirect, redirect to chat with the authenticated user
               const userEmail = "{{ user_email }}";
-              // Create a URL-safe user ID by replacing @ with - and removing dots
-              const userID = userEmail.replace('@', '-at-').replace(/\./g, '-');
-              const sessionId = userID + "-" + Math.random().toString(36).substring(2, 10);
-              window.location.href = window.location.origin + "/chat/" + userID + "/" + sessionId;
+              const username = "{{ username }}";
+              const sessionId = username + "-" + Math.random().toString(36).substring(2, 8);
+              window.location.href = window.location.origin + "/chat/" + username + "/" + sessionId;
             }
           </script>
         </head>
@@ -558,11 +557,11 @@ def google_callback():
             <h1 style="font-size: 2.5em; margin-bottom: 20px;">✅ Connected to Google!</h1>
             <p style="font-size: 1.2em; margin-bottom: 30px;">You can now use Gmail and Calendar features.</p>
             <p style="font-size: 1em; margin-bottom: 20px;">Redirecting to chat...</p>
-            <p><a href="{{ request.url_root }}chat/{{ user_id_safe }}/{{ user_id_safe }}-session" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 12px 24px; border-radius: 25px; display: inline-block;">Continue to Chat</a></p>
+            <p><a href="{{ request.url_root }}chat/{{ username }}/{{ username }}-session" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 12px 24px; border-radius: 25px; display: inline-block;">Continue to Chat</a></p>
           </div>
         </body>
       </html>
-    """, user_email=user_email, user_id_safe=user_id_safe)
+    """, user_email=user_email, username=state)
 
 
 # /agent  – calls run_agent which may invoke tools (Gmail, Calendar…)

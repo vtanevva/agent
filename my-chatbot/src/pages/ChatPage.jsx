@@ -15,24 +15,8 @@ export default function ChatPage() {
   const { userId: rawUserId, sessionId } = useParams();
   const navigate = useNavigate();
   
-  // Decode the userId - handle both URL encoding and URL-safe format
-  const userId = rawUserId ? (() => {
-    try {
-      // First try URL decoding
-      const decoded = decodeURIComponent(rawUserId);
-      // If it contains -at-, it's our URL-safe format, convert back to email
-      if (decoded.includes('-at-')) {
-        return decoded.replace('-at-', '@').replace(/-/g, '.');
-      }
-      return decoded;
-    } catch {
-      // If URL decoding fails, try URL-safe format conversion
-      if (rawUserId.includes('-at-')) {
-        return rawUserId.replace('-at-', '@').replace(/-/g, '.');
-      }
-      return rawUserId;
-    }
-  })() : rawUserId;
+  // Use the userId directly (now it's the username, not email)
+  const userId = rawUserId ? decodeURIComponent(rawUserId) : rawUserId;
 
   // Listen for OAuth success messages from popup
   useEffect(() => {
@@ -296,7 +280,7 @@ export default function ChatPage() {
   }
 
   const handleNewChat = () => {
-    const newSessionId = `${userId}-${crypto.randomUUID().slice(0, 8)}`;
+    const newSessionId = `${userId}-${Math.random().toString(36).substring(2, 8)}`;
     setEmailChoices(null);
     setChat([]);
     setSelectedSession(newSessionId);
@@ -304,9 +288,7 @@ export default function ChatPage() {
     // Add the new session to the sessions list immediately
     setSessions(prev => [...prev, newSessionId]);
     
-    // Create URL-safe user ID for navigation
-    const userID = userId.replace('@', '-at-').replace(/\./g, '-');
-    navigate(`/chat/${userID}/${newSessionId}`);
+    navigate(`/chat/${userId}/${newSessionId}`);
     
     // Refresh sessions list after a short delay to get the latest from server
     setTimeout(() => {
@@ -439,9 +421,7 @@ export default function ChatPage() {
                         setShowSidebar(false); // Close menu on mobile FIRST
                         const id = session.session_id || session;
                         setSelectedSession(id);
-                        // Create URL-safe user ID for navigation
-                        const userID = userId.replace('@', '-at-').replace(/\./g, '-');
-                        navigate(`/chat/${userID}/${id}`);
+                        navigate(`/chat/${userId}/${id}`);
                         
                         // Refresh sessions list to ensure we have the latest data
                         setTimeout(() => {
