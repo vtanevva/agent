@@ -199,6 +199,12 @@ def _build_flow(redirect_uri: str, state: str | None = None):
     google_client_id = os.getenv("GOOGLE_CLIENT_ID")
     google_client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
     
+    # Set a proper user agent for Google OAuth requests
+    import requests
+    requests.Session().headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    })
+    
     if google_client_id and google_client_secret:
         # Use environment variables
         google_project_id = os.getenv("GOOGLE_PROJECT_ID", "gmail-agent-466700")
@@ -383,6 +389,13 @@ def google_auth(user_id):
             access_type="offline",
             state=user_id,
         )
+        
+        # Add user agent parameter to ensure Google accepts the request
+        if "?" in auth_url:
+            auth_url += "&user_agent=web"
+        else:
+            auth_url += "?user_agent=web"
+            
         print(f"DEBUG: Auth URL generated: {auth_url}", flush=True)
 
         return redirect(auth_url)
@@ -825,6 +838,13 @@ def debug_oauth_test(user_id):
             access_type="offline",
             state=user_id,
         )
+        
+        # Add user agent parameter to ensure Google accepts the request
+        if "?" in auth_url:
+            auth_url += "&user_agent=web"
+        else:
+            auth_url += "?user_agent=web"
+            
         return jsonify({
             "status": "success",
             "redirect_uri": redirect_uri,
