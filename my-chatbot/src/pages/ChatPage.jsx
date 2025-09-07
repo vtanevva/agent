@@ -12,8 +12,11 @@ import CalendarView from "../components/CalendarView";
 import CalendarEvent from "../components/CalendarEvent";
 
 export default function ChatPage() {
-  const { userId, sessionId } = useParams();
+  const { userId: rawUserId, sessionId } = useParams();
   const navigate = useNavigate();
+  
+  // Decode the userId if it's URL encoded
+  const userId = rawUserId ? decodeURIComponent(rawUserId) : rawUserId;
 
   // Listen for OAuth success messages from popup
   useEffect(() => {

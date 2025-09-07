@@ -545,7 +545,9 @@ def google_callback():
               // For mobile/redirect, redirect to chat with the authenticated user
               const userEmail = "{{ user_email }}";
               const sessionId = userEmail + "-" + Math.random().toString(36).substr(2, 8);
-              window.location.href = "/chat/" + encodeURIComponent(userEmail) + "/" + sessionId;
+              // Use a more URL-friendly approach
+              const encodedEmail = encodeURIComponent(userEmail);
+              window.location.href = "/chat/" + encodedEmail + "/" + sessionId;
             }
           </script>
         </head>

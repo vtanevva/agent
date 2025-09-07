@@ -4,7 +4,9 @@ import { useNavigate } from "react-router-dom"
 import axios from "axios"
 import EmailList from "../components/EmailList"
 
-export default function VoiceChat({ userId, sessionId, setUseVoice }) {
+export default function VoiceChat({ userId: rawUserId, sessionId, setUseVoice }) {
+  // Decode the userId if it's URL encoded
+  const userId = rawUserId ? decodeURIComponent(rawUserId) : rawUserId;
   const [chat, setChat] = useState([])
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
