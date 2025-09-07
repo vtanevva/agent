@@ -76,7 +76,7 @@ export default function LoginPage() {
   return (
     <>
 
-      <div className="w-full max-w-none lg:max-w-full flex items-center justify-center h-[85vh] lg:h-[calc(100vh-2rem)] relative">
+      <div className="w-full max-w-none lg:max-w-full flex items-center justify-center h-[87vh] lg:h-[calc(100vh-2rem)] relative overflow-y-hidden">
         <div className="glass-effect-strong rounded-3xl lg:rounded-2xl p-6 lg:p-16 w-full h-full lg:max-w-full lg:w-full lg:h-auto text-center space-y-6 lg:space-y-6 border border-dark-500/10 overflow-y-auto flex flex-col justify-center">
         {/* Logo and title */}
         <div className="space-y-4 lg:space-y-6">
