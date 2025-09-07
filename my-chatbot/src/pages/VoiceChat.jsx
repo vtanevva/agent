@@ -22,6 +22,21 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
   const chatContainerRef = useRef(null)
   const navigate = useNavigate()
 
+  // Listen for OAuth success messages from popup
+  useEffect(() => {
+    const handleMessage = (event) => {
+      if (event.data.type === 'GOOGLE_AUTH_SUCCESS') {
+        // User successfully authenticated, retry the last message
+        if (lastUserMessage.current) {
+          handleSend(lastUserMessage.current);
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
   // Fetch sessions function
   async function fetchSessions(id = userId) {
     if (!id || id === 'undefined' || id === 'null') {

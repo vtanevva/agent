@@ -14,6 +14,21 @@ import CalendarEvent from "../components/CalendarEvent";
 export default function ChatPage() {
   const { userId, sessionId } = useParams();
   const navigate = useNavigate();
+
+  // Listen for OAuth success messages from popup
+  useEffect(() => {
+    const handleMessage = (event) => {
+      if (event.data.type === 'GOOGLE_AUTH_SUCCESS') {
+        // User successfully authenticated, retry the last message
+        if (lastUserMessage.current) {
+          handleSend(lastUserMessage.current);
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
   
   // Add error boundary
   if (!userId) {

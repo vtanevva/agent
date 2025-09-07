@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 /* helper */
@@ -7,6 +7,20 @@ const genSession = (id) => `${id}-${crypto.randomUUID().slice(0, 8)}`;
 export default function LoginPage() {
   const [loginName, setLoginName] = useState("");
   const navigate = useNavigate();
+
+  // Listen for OAuth success messages from popup
+  useEffect(() => {
+    const handleMessage = (event) => {
+      if (event.data.type === 'GOOGLE_AUTH_SUCCESS') {
+        const userEmail = event.data.userEmail;
+        const sessionId = genSession(userEmail);
+        navigate(`/chat/${encodeURIComponent(userEmail)}/${sessionId}`);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [navigate]);
 
   // build OAuth URL using loginName as the state param
   const BACKEND = import.meta.env.VITE_API_BASE_URL || "https://web-production-0b6ce.up.railway.app";
