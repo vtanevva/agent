@@ -275,7 +275,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </button>
 
         {/* User Profile Section */}
-        <div className="glass-effect-strong rounded-2xl p-4 sm:p-5 md:p-6 border border-dark-500/10 mb-5 sm:mb-6">
+        <div className="glass-effect-strong rounded-2xl p-5 sm:p-6 md:p-8 border border-dark-500/10 mb-6 sm:mb-8">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 bg-gradient-to-br from-accent-500 via-secondary-500 to-dark-500 rounded-full flex items-center justify-center text-primary-50 font-bold text-lg shadow-lg">
               {userId.charAt(0).toUpperCase()}
@@ -293,13 +293,13 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
           <div className="mt-4 flex gap-2">
             <button
               onClick={() => setUseVoice(false)}
-              className="flex-1 px-5 py-3 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-secondary-500 to-secondary-600 text-primary-50 btn-hover text-base"
+              className="flex-1 px-6 py-4 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-secondary-500 to-secondary-600 text-primary-50 btn-hover text-lg"
             >
               Text Mode
             </button>
             <button
               onClick={handleLogout}
-              className="px-5 py-3 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-dark-500 to-dark-600 text-primary-50 btn-hover text-base"
+              className="px-6 py-4 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-dark-500 to-dark-600 text-primary-50 btn-hover text-lg"
             >
               Logout
             </button>
@@ -307,15 +307,15 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </div>
 
         {/* Voice Controls */}
-        <div className="glass-effect-strong rounded-2xl p-4 sm:p-5 md:p-6 border border-dark-500/10 mb-5 sm:mb-6">
-          <h3 className="text-primary-900 font-semibold text-xl sm:text-2xl md:text-3xl mb-4 sm:mb-5 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-5 sm:p-6 md:p-8 border border-dark-500/10 mb-6 sm:mb-8">
+          <h3 className="text-primary-900 font-semibold text-2xl sm:text-3xl md:text-4xl mb-5 sm:mb-6 flex items-center gap-2">
             Voice Controls
           </h3>
-          <div className="space-y-3">
+          <div className="space-y-4">
             <button
               onClick={isListening ? stopListening : startListening}
               disabled={!isSupported}
-              className={`w-full py-4 rounded-lg flex items-center justify-center gap-2 font-medium transition-all duration-300 ${
+              className={`w-full py-5 rounded-lg flex items-center justify-center gap-2 font-medium transition-all duration-300 ${
                 isListening
                   ? "bg-gradient-to-r from-dark-500 to-dark-600 text-primary-50 animate-pulse"
                   : "bg-gradient-to-r from-secondary-500 to-secondary-600 text-primary-50 hover:from-secondary-600 hover:to-secondary-700"
@@ -327,7 +327,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
             {isSpeaking && (
               <button 
                 onClick={stopSpeaking} 
-                className="w-full py-4 rounded-lg flex items-center justify-center gap-2 font-medium transition-all duration-300 bg-gradient-to-r from-accent-500 to-accent-600 text-primary-50 btn-hover"
+                className="w-full py-5 rounded-lg flex items-center justify-center gap-2 font-medium transition-all duration-300 bg-gradient-to-r from-accent-500 to-accent-600 text-primary-50 btn-hover"
               >
                 Stop Speaking
               </button>
@@ -345,33 +345,33 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </div>
 
         {/* Chat Toggle */}
-        <div className="glass-effect-strong rounded-2xl p-4 sm:p-5 md:p-6 border border-dark-500/10 mb-5 sm:mb-6">
-          <h3 className="text-primary-900 font-semibold text-xl sm:text-2xl md:text-3xl mb-4 sm:mb-5 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-5 sm:p-6 md:p-8 border border-dark-500/10 mb-6 sm:mb-8">
+          <h3 className="text-primary-900 font-semibold text-2xl sm:text-3xl md:text-4xl mb-5 sm:mb-6 flex items-center gap-2">
             Chat Display
           </h3>
           <button
             onClick={() => setShowChat(!showChat)}
-            className="w-full px-5 py-4 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-dark-500 to-dark-600 text-primary-50 btn-hover text-lg"
+            className="w-full px-6 py-5 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-dark-500 to-dark-600 text-primary-50 btn-hover text-xl"
           >
             {showChat ? "Hide Chat" : "Show Chat"}
           </button>
         </div>
 
         {/* Voice Sessions */}
-        <div className="glass-effect-strong rounded-2xl p-4 sm:p-5 md:p-6 border border-dark-500/10 mb-5 sm:mb-6">
-          <h3 className="text-primary-900 font-semibold text-xl sm:text-2xl md:text-3xl mb-4 sm:mb-5 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-5 sm:p-6 md:p-8 border border-dark-500/10 mb-6 sm:mb-8">
+          <h3 className="text-primary-900 font-semibold text-2xl sm:text-3xl md:text-4xl mb-5 sm:mb-6 flex items-center gap-2">
             Mindful Voice
           </h3>
-          <div className="space-y-3">
+          <div className="space-y-4">
             <button 
               onClick={handleNewChat}
-              className="w-full text-left px-5 py-4 rounded-lg bg-secondary-500/20 text-secondary-700 hover:bg-secondary-500/30 transition-all duration-200 text-lg"
+              className="w-full text-left px-6 py-5 rounded-lg bg-secondary-500/20 text-secondary-700 hover:bg-secondary-500/30 transition-all duration-200 text-xl"
             >
               New Voice Session
             </button>
             {sessions.length > 0 && (
-              <div className="space-y-3">
-                <div className="text-secondary-600 text-lg">Past Sessions:</div>
+              <div className="space-y-4">
+                <div className="text-secondary-600 text-xl">Past Sessions:</div>
                 <div className="max-h-64 overflow-y-auto custom-scrollbar space-y-2">
                   {sessions.map((session) => (
                     <button
@@ -394,7 +394,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
                           console.error("load session", e);
                         }
                       }}
-                      className={`w-full text-left px-5 py-4 rounded-lg text-lg transition-all duration-200 ${
+                      className={`w-full text-left px-6 py-5 rounded-lg text-xl transition-all duration-200 ${
                         selectedSession === (session.session_id || session)
                           ? "bg-secondary-500/30 text-secondary-700"
                           : "bg-secondary-500/10 text-secondary-600/70 hover:bg-secondary-500/20 hover:text-secondary-700"
@@ -413,29 +413,29 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </div>
 
         {/* Voice Settings */}
-        <div className="glass-effect-strong rounded-2xl p-4 sm:p-5 md:p-6 border border-dark-500/10 mb-5 sm:mb-6">
-          <h3 className="text-primary-900 font-semibold text-xl sm:text-2xl md:text-3xl mb-4 sm:mb-5 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-5 sm:p-6 md:p-8 border border-dark-500/10 mb-6 sm:mb-8">
+          <h3 className="text-primary-900 font-semibold text-2xl sm:text-3xl md:text-4xl mb-5 sm:mb-6 flex items-center gap-2">
             Voice Settings
           </h3>
-          <div className="space-y-3">
-            <div className="bg-accent-500/20 rounded-lg px-4 py-6 border border-dark-500/5">
-              <div className="text-primary-900 text-lg">
+          <div className="space-y-4">
+            <div className="bg-accent-500/20 rounded-lg px-5 py-7 border border-dark-500/5">
+              <div className="text-primary-900 text-xl">
                 <div className="flex items-center gap-2 mb-1">
                   <div className="w-2 h-2 bg-secondary-500 rounded-full"></div>
                   <span className="font-medium">Auto-playback</span>
                 </div>
-                <div className="text-sm text-primary-900/60">
+                <div className="text-base text-primary-900/60">
                   AI responses play automatically
                 </div>
               </div>
             </div>
-            <div className="bg-accent-500/20 rounded-lg px-4 py-6 border border-dark-500/5">
-              <div className="text-primary-900 text-lg">
+            <div className="bg-accent-500/20 rounded-lg px-5 py-7 border border-dark-500/5">
+              <div className="text-primary-900 text-xl">
                 <div className="flex items-center gap-2 mb-1">
                   <div className="w-2 h-2 bg-accent-500 rounded-full"></div>
                   <span className="font-medium">Voice Recognition</span>
                 </div>
-                <div className="text-sm text-primary-900/60">
+                <div className="text-base text-primary-900/60">
                   High accuracy mode enabled
                 </div>
               </div>
@@ -444,61 +444,61 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </div>
 
         {/* Email Integration */}
-        <div className="glass-effect-strong rounded-2xl p-4 sm:p-5 md:p-6 border border-dark-500/10 mb-5 sm:mb-6">
-          <h3 className="text-primary-900 font-semibold text-xl sm:text-2xl md:text-3xl mb-4 sm:mb-5 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-5 sm:p-6 md:p-8 border border-dark-500/10 mb-6 sm:mb-8">
+          <h3 className="text-primary-900 font-semibold text-2xl sm:text-3xl md:text-4xl mb-5 sm:mb-6 flex items-center gap-2">
             Quick Actions
           </h3>
-          <div className="space-y-3">
+          <div className="space-y-4">
             <button 
               onClick={handleCheckEmails}
-              className="w-full text-left px-5 py-4 rounded-lg bg-accent-500/20 text-accent-700 hover:bg-accent-500/30 transition-all duration-200 text-lg"
+              className="w-full text-left px-6 py-5 rounded-lg bg-accent-500/20 text-accent-700 hover:bg-accent-500/30 transition-all duration-200 text-xl"
             >
               Check Emails
             </button>
-            <button className="w-full text-left px-5 py-4 rounded-lg bg-secondary-500/20 text-secondary-700 hover:bg-secondary-500/30 transition-all duration-200 text-lg">
+            <button className="w-full text-left px-6 py-5 rounded-lg bg-secondary-500/20 text-secondary-700 hover:bg-secondary-500/30 transition-all duration-200 text-xl">
               Calendar Events
             </button>
-            <button className="w-full text-left px-5 py-4 rounded-lg bg-dark-500/20 text-dark-600 hover:bg-dark-500/30 transition-all duration-200 text-lg">
+            <button className="w-full text-left px-6 py-5 rounded-lg bg-dark-500/20 text-dark-600 hover:bg-dark-500/30 transition-all duration-200 text-xl">
               Compose Email
             </button>
           </div>
         </div>
 
         {/* Smart Insights */}
-        <div className="glass-effect-strong rounded-2xl p-4 sm:p-5 md:p-6 border border-dark-500/10 mb-5 sm:mb-6">
-          <h3 className="text-primary-900 font-semibold text-xl sm:text-2xl md:text-3xl mb-4 sm:mb-5 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-5 sm:p-6 md:p-8 border border-dark-500/10 mb-6 sm:mb-8">
+          <h3 className="text-primary-900 font-semibold text-2xl sm:text-3xl md:text-4xl mb-5 sm:mb-6 flex items-center gap-2">
             Smart Insights
           </h3>
-          <div className="space-y-3">
-            <div className="bg-accent-500/20 rounded-lg px-4 py-6 border border-dark-500/5">
-              <div className="text-primary-900 text-lg">
+          <div className="space-y-4">
+            <div className="bg-accent-500/20 rounded-lg px-5 py-7 border border-dark-500/5">
+              <div className="text-primary-900 text-xl">
                 <div className="flex items-center gap-2 mb-1">
                   <div className="w-2 h-2 bg-secondary-500 rounded-full"></div>
                   <span className="font-medium">Voice Session Active</span>
                 </div>
-                <div className="text-sm text-primary-900/60">
+                <div className="text-base text-primary-900/60">
                   {chat.length} messages in current session
                 </div>
               </div>
             </div>
-            <div className="bg-accent-500/20 rounded-lg px-4 py-6 border border-dark-500/5">
-              <div className="text-primary-900 text-lg">
+            <div className="bg-accent-500/20 rounded-lg px-5 py-7 border border-dark-500/5">
+              <div className="text-primary-900 text-xl">
                 <div className="flex items-center gap-2 mb-1">
                   <div className="w-2 h-2 bg-accent-500 rounded-full"></div>
                   <span className="font-medium">Voice Mode</span>
                 </div>
-                <div className="text-sm text-primary-900/60">
+                <div className="text-base text-primary-900/60">
                   {isSupported ? "Fully supported" : "Limited support"}
                 </div>
               </div>
             </div>
-            <div className="bg-accent-500/20 rounded-lg px-4 py-6 border border-dark-500/5">
-              <div className="text-primary-900 text-lg">
+            <div className="bg-accent-500/20 rounded-lg px-5 py-7 border border-dark-500/5">
+              <div className="text-primary-900 text-xl">
                 <div className="flex items-center gap-2 mb-1">
                   <div className="w-2 h-2 bg-dark-500 rounded-full"></div>
                   <span className="font-medium">Sessions</span>
                 </div>
-                <div className="text-sm text-primary-900/60">
+                <div className="text-base text-primary-900/60">
                   {sessions.length} conversations saved
                 </div>
               </div>
@@ -507,26 +507,26 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </div>
 
         {/* Voice Status */}
-        <div className="glass-effect-strong rounded-2xl p-4 sm:p-5 md:p-6 border border-dark-500/10 mb-5 sm:mb-6">
-          <h3 className="text-primary-900 font-semibold text-xl sm:text-2xl md:text-3xl mb-4 sm:mb-5 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-5 sm:p-6 md:p-8 border border-dark-500/10 mb-6 sm:mb-8">
+          <h3 className="text-primary-900 font-semibold text-2xl sm:text-3xl md:text-4xl mb-5 sm:mb-6 flex items-center gap-2">
             Status
           </h3>
-          <div className="space-y-3 text-lg">
+          <div className="space-y-4 text-xl">
             <div className="flex justify-between">
-              <span className="text-primary-900/70 text-lg">Chat:</span>
-              <span className={`text-lg ${showChat ? "text-secondary-600" : "text-primary-900/40"}`}>
+              <span className="text-primary-900/70 text-xl">Chat:</span>
+              <span className={`text-xl ${showChat ? "text-secondary-600" : "text-primary-900/40"}`}>
                 {showChat ? "Visible" : "Hidden"}
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-primary-900/70 text-lg">Speaking:</span>
-              <span className={`text-lg ${isSpeaking ? "text-secondary-600" : "text-primary-900/40"}`}>
+              <span className="text-primary-900/70 text-xl">Speaking:</span>
+              <span className={`text-xl ${isSpeaking ? "text-secondary-600" : "text-primary-900/40"}`}>
                 {isSpeaking ? "Yes" : "No"}
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-primary-900/70 text-lg">Listening:</span>
-              <span className={`text-lg ${isListening ? "text-secondary-600" : "text-primary-900/40"}`}>
+              <span className="text-primary-900/70 text-xl">Listening:</span>
+              <span className={`text-xl ${isListening ? "text-secondary-600" : "text-primary-900/40"}`}>
                 {isListening ? "Yes" : "No"}
               </span>
             </div>
