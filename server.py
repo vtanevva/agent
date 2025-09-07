@@ -544,11 +544,9 @@ def google_callback():
               }
               window.close();
             } else {
-              // For mobile/redirect, redirect to chat with the authenticated user
-              const userEmail = "{{ user_email }}";
+              // For mobile/redirect, redirect to root with username parameter
               const username = "{{ username }}";
-              const sessionId = username + "-" + Math.random().toString(36).substring(2, 8);
-              window.location.href = window.location.origin + "/chat/" + username + "/" + sessionId;
+              window.location.href = "/?username=" + encodeURIComponent(username) + "&email=" + encodeURIComponent("{{ user_email }}");
             }
           </script>
         </head>

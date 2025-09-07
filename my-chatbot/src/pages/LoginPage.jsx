@@ -8,6 +8,19 @@ export default function LoginPage() {
   const [loginName, setLoginName] = useState("");
   const navigate = useNavigate();
 
+  // Check for OAuth redirect parameters
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const username = urlParams.get('username');
+    const email = urlParams.get('email');
+    
+    if (username && email) {
+      // OAuth redirect detected, navigate to chat
+      const sessionId = genSession(username);
+      navigate(`/chat/${username}/${sessionId}`);
+    }
+  }, [navigate]);
+
   // Listen for OAuth success messages from popup
   useEffect(() => {
     const handleMessage = (event) => {
