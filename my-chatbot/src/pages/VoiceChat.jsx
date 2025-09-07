@@ -713,7 +713,7 @@ export default function VoiceChat({ userId: rawUserId, sessionId, setUseVoice })
                         <div className={`text-sm font-semibold mb-2 ${
                           msg.role === "user" ? "text-accent-700" : "text-secondary-700"
                         }`}>
-                          {msg.role === "user" ? "You" : "Mindful AI"}
+                          {msg.role === "user" ? "You" : "Aivis"}
                         </div>
                         {(() => {
                           if (msg.role === "assistant" && typeof msg.text === "string") {

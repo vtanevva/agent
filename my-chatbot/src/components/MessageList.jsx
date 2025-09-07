@@ -102,14 +102,9 @@ export default function MessageList({ chat, loading, onEmailSelect }) {
                   : "bg-gradient-to-br from-secondary-500 to-secondary-600 shadow-lg text-primary-50"
               }`}>
                 {msg.role === "user" ? (
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-                  </svg>
+                  <i className="fa-regular fa-user text-primary-50 text-sm"></i>
                 ) : (
-                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 2a8 8 0 100 16 8 8 0 000-16zM7 8a1 1 0 100-2 1 1 0 000 2zM7 12a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-                    <path d="M8 6h4v1H8V6z" />
-                  </svg>
+                  <i className="fa-solid fa-circle-notch text-primary-50 text-sm"></i>
                 )}
               </div>
               
@@ -118,7 +113,7 @@ export default function MessageList({ chat, loading, onEmailSelect }) {
                 <div className={`text-sm font-semibold mb-2 ${
                   msg.role === "user" ? "text-accent-700" : "text-secondary-700"
                 }`}>
-                  {msg.role === "user" ? "You" : "Mindful AI"}
+                  {msg.role === "user" ? "You" : "Aivis"}
                 </div>
                 {emailsFromJson ? (
                   <div className="mt-1 -mx-6">
