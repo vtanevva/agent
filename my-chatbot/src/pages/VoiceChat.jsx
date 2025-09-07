@@ -301,7 +301,7 @@ export default function VoiceChat({ userId: rawUserId, sessionId, setUseVoice })
 
 
   return (
-    <div className="w-full max-w-full lg:max-w-full flex gap-6 h-[87vh] lg:h-[calc(100vh-2rem)] relative overflow-hidden overflow-y-hidden">
+    <div className="w-full max-w-full lg:max-w-full flex gap-6 h-[98vh] lg:h-[calc(100vh-2rem)] relative overflow-hidden overflow-y-hidden">
       {/* Mobile overlay */}
       {showSidebar && (
         <div 

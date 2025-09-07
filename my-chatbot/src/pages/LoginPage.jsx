@@ -78,7 +78,7 @@ export default function LoginPage() {
       {/* White screen overlay for desktop */}
       <div className="lg:fixed lg:inset-0 lg:bg-white lg:z-20"></div>
 
-      <div className="w-full max-w-none lg:max-w-full flex items-center justify-center h-[87vh] lg:h-[calc(100vh-2rem)] relative overflow-y-hidden lg:z-30">
+      <div className="w-full max-w-none lg:max-w-full flex items-center justify-center h-[98vh] lg:h-[calc(100vh-2rem)] relative overflow-y-hidden lg:z-30">
         <div className="glass-effect-strong lg:bg-white lg:shadow-none rounded-3xl lg:rounded-3xl p-6 lg:p-16 w-full h-full lg:max-w-full lg:w-full lg:h-auto text-center space-y-6 lg:space-y-6 border border-dark-500/10 lg:border-0 overflow-y-auto flex flex-col justify-center">
         {/* Logo and title */}
         <div className="space-y-4 lg:space-y-6">
