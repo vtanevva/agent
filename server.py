@@ -410,11 +410,66 @@ def google_callback():
     else:
         print(f"[WARNING] Cannot save Google credentials - MongoDB not available", flush=True)
 
-    # close the popup
+    # Handle both popup (desktop) and redirect (mobile) flows
     return render_template_string("""
       <!doctype html>
-      <html><head><script>window.close();</script></head>
-      <body>✅ Connected! This window will close automatically.</body></html>
+      <html>
+        <head>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Google Connected</title>
+          <style>
+            body { 
+              font-family: Arial, sans-serif; 
+              text-align: center; 
+              padding: 50px; 
+              background: #f5f5f5;
+            }
+            .container {
+              background: white;
+              padding: 30px;
+              border-radius: 10px;
+              box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+              max-width: 400px;
+              margin: 0 auto;
+            }
+            .success { color: #4CAF50; font-size: 24px; margin-bottom: 20px; }
+            .message { color: #333; margin-bottom: 20px; }
+            .button {
+              background: #4285f4;
+              color: white;
+              padding: 12px 24px;
+              border: none;
+              border-radius: 5px;
+              cursor: pointer;
+              font-size: 16px;
+              text-decoration: none;
+              display: inline-block;
+            }
+            .button:hover { background: #3367d6; }
+          </style>
+          <script>
+            // Try to close popup (desktop)
+            if (window.opener) {
+              window.close();
+            }
+            
+            // For mobile, redirect back to app after a delay
+            setTimeout(function() {
+              if (!window.opener) {
+                window.location.href = '/';
+              }
+            }, 3000);
+          </script>
+        </head>
+        <body>
+          <div class="container">
+            <div class="success">✅</div>
+            <div class="message">Successfully connected to Google!</div>
+            <p>You can now use Gmail features in your app.</p>
+            <a href="/" class="button">Continue to App</a>
+          </div>
+        </body>
+      </html>
     """)
 
 
