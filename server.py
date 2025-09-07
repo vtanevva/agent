@@ -993,6 +993,13 @@ def debug_check_tokens(user_id):
 # ------------------------------------------------------------------------------
 # Serve built React frontend
 # ------------------------------------------------------------------------------
+
+# Specific route for chat paths
+@app.route("/chat/<path:chat_path>")
+def serve_chat(chat_path):
+    print(f"[DEBUG] Chat route called with path: '{chat_path}'", flush=True)
+    return send_from_directory(app.static_folder, "index.html")
+
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def serve_frontend(path):
@@ -1009,7 +1016,7 @@ def serve_frontend(path):
         print(f"[DEBUG] Serving static file: {path}", flush=True)
         return send_from_directory(app.static_folder, path)
     
-    # For all other routes (including /chat/...), serve the React app
+    # For all other routes, serve the React app
     # This allows React Router to handle client-side routing
     print(f"[DEBUG] Serving React app for path: {path}", flush=True)
     return send_from_directory(app.static_folder, "index.html")
