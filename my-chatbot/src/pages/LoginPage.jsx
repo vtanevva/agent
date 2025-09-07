@@ -77,7 +77,7 @@ export default function LoginPage() {
     <>
 
       <div className="w-full max-w-none lg:max-w-full flex items-center justify-center h-[90vh] lg:h-[calc(100vh-2rem)] relative">
-        <div className="glass-effect-strong rounded-3xl lg:rounded-2xl p-6 lg:p-16 max-w-md lg:max-w-full w-full text-center space-y-6 lg:space-y-6 border border-dark-500/10 max-h-[80vh] lg:max-h-none overflow-y-auto">
+        <div className="glass-effect-strong rounded-3xl lg:rounded-2xl p-6 lg:p-16 w-full h-full lg:max-w-full lg:w-full lg:h-auto text-center space-y-6 lg:space-y-6 border border-dark-500/10 overflow-y-auto flex flex-col justify-center">
         {/* Logo and title */}
         <div className="space-y-4 lg:space-y-6">
           <div className="relative">
@@ -107,7 +107,7 @@ export default function LoginPage() {
             onClick={handleGoogleAuth}
             className="w-auto max-w-sm lg:w-auto lg:max-w-sm bg-gradient-to-r from-secondary-500 to-secondary-600 hover:from-secondary-600 hover:to-secondary-700 text-primary-50 px-4 py-3 lg:px-6 lg:py-3.5 rounded-xl disabled:opacity-50 btn-hover font-semibold flex items-center justify-center gap-3 shadow-lg border border-secondary-600/30 text-base lg:text-base"
           >
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+            <svg className="w-6 h-6 lg:w-7 lg:h-7" fill="currentColor" viewBox="0 0 24 24">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
               <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
               <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
@@ -136,14 +136,14 @@ export default function LoginPage() {
         <div className="flex justify-center items-center gap-4 lg:gap-12 pt-4 lg:pt-6">
           <div className="text-center">
             <div className="w-12 h-12 lg:w-16 lg:h-16 bg-primary-200/60 rounded-full flex items-center justify-center mx-auto mb-2 border border-dark-500/10 text-lg lg:text-xl">
-              <svg className="w-4 h-4 lg:w-6 lg:h-6 text-black" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="w-6 h-6 lg:w-8 lg:h-8 text-black" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4l4 4 4-4h4c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
               </svg>
             </div>
           </div>
           <div className="text-center">
             <div className="w-12 h-12 lg:w-16 lg:h-16 bg-primary-200/60 rounded-full flex items-center justify-center mx-auto mb-2 border border-dark-500/10 text-lg lg:text-xl">
-              <svg className="w-4 h-4 lg:w-6 lg:h-6 text-black" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="w-6 h-6 lg:w-8 lg:h-8 text-black" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
                 <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
               </svg>
@@ -151,7 +151,7 @@ export default function LoginPage() {
           </div>
           <div className="text-center">
             <div className="w-12 h-12 lg:w-16 lg:h-16 bg-primary-200/60 rounded-full flex items-center justify-center mx-auto mb-2 border border-dark-500/10 text-lg lg:text-xl">
-              <svg className="w-4 h-4 lg:w-6 lg:h-6 text-black" fill="currentColor" viewBox="0 0 24 24">
+              <svg className="w-6 h-6 lg:w-8 lg:h-8 text-black" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
               </svg>
             </div>
