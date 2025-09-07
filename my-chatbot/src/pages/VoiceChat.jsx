@@ -275,7 +275,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </button>
 
         {/* User Profile Section */}
-        <div className="glass-effect-strong rounded-2xl p-5 sm:p-6 md:p-8 border border-dark-500/10 mb-6 sm:mb-8">
+        <div className="glass-effect-strong rounded-2xl p-4 sm:p-5 md:p-6 border border-dark-500/10 mb-5 sm:mb-6">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 bg-gradient-to-br from-accent-500 via-secondary-500 to-dark-500 rounded-full flex items-center justify-center text-primary-50 font-bold text-lg shadow-lg">
               {userId.charAt(0).toUpperCase()}
@@ -292,14 +292,21 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
           
           <div className="mt-4 flex gap-2">
             <button
-              onClick={() => setUseVoice(false)}
-              className="flex-1 px-6 py-4 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-secondary-500 to-secondary-600 text-primary-50 btn-hover text-lg"
+              onClick={() => {
+                console.log('Text Mode clicked - closing sidebar');
+                setUseVoice(false);
+                setShowSidebar(false);
+              }}
+              className="flex-1 px-5 py-3 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-secondary-500 to-secondary-600 text-primary-50 btn-hover text-base"
             >
               Text Mode
             </button>
             <button
-              onClick={handleLogout}
-              className="px-6 py-4 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-dark-500 to-dark-600 text-primary-50 btn-hover text-lg"
+              onClick={() => {
+                handleLogout();
+                setShowSidebar(false);
+              }}
+              className="px-5 py-3 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-dark-500 to-dark-600 text-primary-50 btn-hover text-base"
             >
               Logout
             </button>
@@ -307,13 +314,20 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </div>
 
         {/* Voice Controls */}
-        <div className="glass-effect-strong rounded-2xl p-5 sm:p-6 md:p-8 border border-dark-500/10 mb-6 sm:mb-8">
-          <h3 className="text-primary-900 font-semibold text-2xl sm:text-3xl md:text-4xl mb-5 sm:mb-6 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-4 sm:p-5 md:p-6 border border-dark-500/10 mb-5 sm:mb-6">
+          <h3 className="text-primary-900 font-semibold text-xl sm:text-2xl md:text-3xl mb-4 sm:mb-5 flex items-center gap-2">
             Voice Controls
           </h3>
           <div className="space-y-4">
             <button
-              onClick={isListening ? stopListening : startListening}
+              onClick={() => {
+                if (isListening) {
+                  stopListening();
+                } else {
+                  startListening();
+                }
+                setShowSidebar(false);
+              }}
               disabled={!isSupported}
               className={`w-full py-5 rounded-lg flex items-center justify-center gap-2 font-medium transition-all duration-300 ${
                 isListening
@@ -326,7 +340,10 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
             
             {isSpeaking && (
               <button 
-                onClick={stopSpeaking} 
+                onClick={() => {
+                  stopSpeaking();
+                  setShowSidebar(false);
+                }} 
                 className="w-full py-5 rounded-lg flex items-center justify-center gap-2 font-medium transition-all duration-300 bg-gradient-to-r from-accent-500 to-accent-600 text-primary-50 btn-hover"
               >
                 Stop Speaking
@@ -345,38 +362,46 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </div>
 
         {/* Chat Toggle */}
-        <div className="glass-effect-strong rounded-2xl p-5 sm:p-6 md:p-8 border border-dark-500/10 mb-6 sm:mb-8">
-          <h3 className="text-primary-900 font-semibold text-2xl sm:text-3xl md:text-4xl mb-5 sm:mb-6 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-4 sm:p-5 md:p-6 border border-dark-500/10 mb-5 sm:mb-6">
+          <h3 className="text-primary-900 font-semibold text-xl sm:text-2xl md:text-3xl mb-4 sm:mb-5 flex items-center gap-2">
             Chat Display
           </h3>
           <button
-            onClick={() => setShowChat(!showChat)}
-            className="w-full px-6 py-5 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-dark-500 to-dark-600 text-primary-50 btn-hover text-xl"
+            onClick={() => {
+              setShowChat(!showChat);
+              setShowSidebar(false);
+            }}
+            className="w-full px-5 py-4 rounded-lg font-medium transition-all duration-300 bg-gradient-to-r from-dark-500 to-dark-600 text-primary-50 btn-hover text-lg"
           >
             {showChat ? "Hide Chat" : "Show Chat"}
           </button>
         </div>
 
         {/* Voice Sessions */}
-        <div className="glass-effect-strong rounded-2xl p-5 sm:p-6 md:p-8 border border-dark-500/10 mb-6 sm:mb-8">
-          <h3 className="text-primary-900 font-semibold text-2xl sm:text-3xl md:text-4xl mb-5 sm:mb-6 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-4 sm:p-5 md:p-6 border border-dark-500/10 mb-5 sm:mb-6">
+          <h3 className="text-primary-900 font-semibold text-xl sm:text-2xl md:text-3xl mb-4 sm:mb-5 flex items-center gap-2">
             Mindful Voice
           </h3>
           <div className="space-y-4">
             <button 
-              onClick={handleNewChat}
-              className="w-full text-left px-6 py-5 rounded-lg bg-secondary-500/20 text-secondary-700 hover:bg-secondary-500/30 transition-all duration-200 text-xl"
+              onClick={() => {
+                handleNewChat();
+                setShowSidebar(false);
+              }}
+              className="w-full text-left px-5 py-4 rounded-lg bg-secondary-500/20 text-secondary-700 hover:bg-secondary-500/30 transition-all duration-200 text-lg"
             >
               New Voice Session
             </button>
             {sessions.length > 0 && (
               <div className="space-y-4">
-                <div className="text-secondary-600 text-xl">Past Sessions:</div>
+                <div className="text-secondary-600 text-lg">Past Sessions:</div>
                 <div className="max-h-64 overflow-y-auto custom-scrollbar space-y-2">
                   {sessions.map((session) => (
                     <button
                       key={session.session_id || session}
                       onClick={async () => {
+                        console.log('Past conversation clicked - closing sidebar');
+                        setShowSidebar(false); // Close menu on mobile FIRST
                         const id = session.session_id || session;
                         setSelectedSession(id);
                         setEmailChoices(null); // Clear emails when switching sessions
@@ -394,7 +419,7 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
                           console.error("load session", e);
                         }
                       }}
-                      className={`w-full text-left px-6 py-5 rounded-lg text-xl transition-all duration-200 ${
+                      className={`w-full text-left px-5 py-4 rounded-lg text-lg transition-all duration-200 ${
                         selectedSession === (session.session_id || session)
                           ? "bg-secondary-500/30 text-secondary-700"
                           : "bg-secondary-500/10 text-secondary-600/70 hover:bg-secondary-500/20 hover:text-secondary-700"
@@ -413,8 +438,8 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </div>
 
         {/* Voice Settings */}
-        <div className="glass-effect-strong rounded-2xl p-5 sm:p-6 md:p-8 border border-dark-500/10 mb-6 sm:mb-8">
-          <h3 className="text-primary-900 font-semibold text-2xl sm:text-3xl md:text-4xl mb-5 sm:mb-6 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-4 sm:p-5 md:p-6 border border-dark-500/10 mb-5 sm:mb-6">
+          <h3 className="text-primary-900 font-semibold text-xl sm:text-2xl md:text-3xl mb-4 sm:mb-5 flex items-center gap-2">
             Voice Settings
           </h3>
           <div className="space-y-4">
@@ -444,29 +469,42 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </div>
 
         {/* Email Integration */}
-        <div className="glass-effect-strong rounded-2xl p-5 sm:p-6 md:p-8 border border-dark-500/10 mb-6 sm:mb-8">
-          <h3 className="text-primary-900 font-semibold text-2xl sm:text-3xl md:text-4xl mb-5 sm:mb-6 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-4 sm:p-5 md:p-6 border border-dark-500/10 mb-5 sm:mb-6">
+          <h3 className="text-primary-900 font-semibold text-xl sm:text-2xl md:text-3xl mb-4 sm:mb-5 flex items-center gap-2">
             Quick Actions
           </h3>
           <div className="space-y-4">
             <button 
-              onClick={handleCheckEmails}
-              className="w-full text-left px-6 py-5 rounded-lg bg-accent-500/20 text-accent-700 hover:bg-accent-500/30 transition-all duration-200 text-xl"
+              onClick={() => {
+                handleCheckEmails();
+                setShowSidebar(false);
+              }}
+              className="w-full text-left px-5 py-4 rounded-lg bg-accent-500/20 text-accent-700 hover:bg-accent-500/30 transition-all duration-200 text-lg"
             >
               Check Emails
             </button>
-            <button className="w-full text-left px-6 py-5 rounded-lg bg-secondary-500/20 text-secondary-700 hover:bg-secondary-500/30 transition-all duration-200 text-xl">
+            <button 
+              onClick={() => {
+                setShowSidebar(false);
+              }}
+              className="w-full text-left px-5 py-4 rounded-lg bg-secondary-500/20 text-secondary-700 hover:bg-secondary-500/30 transition-all duration-200 text-lg"
+            >
               Calendar Events
             </button>
-            <button className="w-full text-left px-6 py-5 rounded-lg bg-dark-500/20 text-dark-600 hover:bg-dark-500/30 transition-all duration-200 text-xl">
+            <button 
+              onClick={() => {
+                setShowSidebar(false);
+              }}
+              className="w-full text-left px-5 py-4 rounded-lg bg-dark-500/20 text-dark-600 hover:bg-dark-500/30 transition-all duration-200 text-lg"
+            >
               Compose Email
             </button>
           </div>
         </div>
 
         {/* Smart Insights */}
-        <div className="glass-effect-strong rounded-2xl p-5 sm:p-6 md:p-8 border border-dark-500/10 mb-6 sm:mb-8">
-          <h3 className="text-primary-900 font-semibold text-2xl sm:text-3xl md:text-4xl mb-5 sm:mb-6 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-4 sm:p-5 md:p-6 border border-dark-500/10 mb-5 sm:mb-6">
+          <h3 className="text-primary-900 font-semibold text-xl sm:text-2xl md:text-3xl mb-4 sm:mb-5 flex items-center gap-2">
             Smart Insights
           </h3>
           <div className="space-y-4">
@@ -507,8 +545,8 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
         </div>
 
         {/* Voice Status */}
-        <div className="glass-effect-strong rounded-2xl p-5 sm:p-6 md:p-8 border border-dark-500/10 mb-6 sm:mb-8">
-          <h3 className="text-primary-900 font-semibold text-2xl sm:text-3xl md:text-4xl mb-5 sm:mb-6 flex items-center gap-2">
+        <div className="glass-effect-strong rounded-2xl p-4 sm:p-5 md:p-6 border border-dark-500/10 mb-5 sm:mb-6">
+          <h3 className="text-primary-900 font-semibold text-xl sm:text-2xl md:text-3xl mb-4 sm:mb-5 flex items-center gap-2">
             Status
           </h3>
           <div className="space-y-4 text-xl">
@@ -589,7 +627,16 @@ export default function VoiceChat({ userId, sessionId, setUseVoice }) {
                           ? "bg-gradient-to-br from-accent-500 to-accent-600 shadow-lg text-primary-50" 
                           : "bg-gradient-to-br from-secondary-500 to-secondary-600 shadow-lg text-primary-50"
                       }`}>
-                        {msg.role === "user" ? "U" : "AI"}
+                        {msg.role === "user" ? (
+                          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                          </svg>
+                        ) : (
+                          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M10 2a8 8 0 100 16 8 8 0 000-16zM7 8a1 1 0 100-2 1 1 0 000 2zm6 0a1 1 0 100-2 1 1 0 000 2zM7 12a1 1 0 100-2 1 1 0 000 2zm6 0a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                            <path d="M8 6h4v1H8V6z" />
+                          </svg>
+                        )}
                       </div>
                       
                       {/* Message content */}

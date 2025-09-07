@@ -349,7 +349,11 @@ export default function ChatPage() {
           </h3>
           <div className="space-y-3">
             <button 
-              onClick={handleNewChat}
+              onClick={() => {
+                console.log('New conversation clicked - closing sidebar');
+                setShowSidebar(false); // Close menu on mobile FIRST
+                handleNewChat();
+              }}
               className="w-full text-left px-5 py-4 rounded-lg bg-secondary-500/20 text-secondary-700 hover:bg-secondary-500/30 transition-all duration-200 text-lg"
             >
               New Conversation
@@ -362,6 +366,8 @@ export default function ChatPage() {
                     <button
                       key={session.session_id || session}
                       onClick={() => {
+                        console.log('Past conversation clicked - closing sidebar');
+                        setShowSidebar(false); // Close menu on mobile FIRST
                         const id = session.session_id || session;
                         setSelectedSession(id);
                         setEmailChoices(null);

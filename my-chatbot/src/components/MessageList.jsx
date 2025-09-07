@@ -27,7 +27,16 @@ export default function MessageList({ chat, loading }) {
                   ? "bg-gradient-to-br from-accent-500 to-accent-600 shadow-lg text-primary-50" 
                   : "bg-gradient-to-br from-secondary-500 to-secondary-600 shadow-lg text-primary-50"
               }`}>
-                {msg.role === "user" ? "U" : ""}
+                {msg.role === "user" ? (
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 2a8 8 0 100 16 8 8 0 000-16zM7 8a1 1 0 100-2 1 1 0 000 2zm6 0a1 1 0 100-2 1 1 0 000 2zM7 12a1 1 0 100-2 1 1 0 000 2zm6 0a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
+                    <path d="M8 6h4v1H8V6z" />
+                  </svg>
+                )}
               </div>
               
               {/* Message content */}
