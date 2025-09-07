@@ -378,7 +378,7 @@ def google_auth(user_id):
             access_type="offline",
             state=user_id,
         )
-        print(f"DEBUG: Auth URL generated: {auth_url[:100]}...", flush=True)
+        print(f"DEBUG: Auth URL generated: {auth_url}", flush=True)
 
         return redirect(auth_url)
     except Exception as e:
@@ -394,6 +394,7 @@ def google_auth(user_id):
           </body>
         </html>
         """, error=str(e))
+
 
 
 from flask import render_template_string
@@ -801,6 +802,30 @@ def debug_mobile_test():
         "user_agent": request.headers.get("User-Agent", "Unknown"),
         "timestamp": datetime.now().isoformat()
     })
+
+@app.get("/debug/oauth-test/<user_id>")
+def debug_oauth_test(user_id):
+    """Test OAuth URL generation without redirecting."""
+    try:
+        redirect_uri = url_for("google_callback", _external=True)
+        flow = _build_flow(redirect_uri)
+        auth_url, _ = flow.authorization_url(
+            prompt="consent select_account",
+            access_type="offline",
+            state=user_id,
+        )
+        return jsonify({
+            "status": "success",
+            "redirect_uri": redirect_uri,
+            "auth_url": auth_url,
+            "user_id": user_id
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error": str(e),
+            "user_id": user_id
+        })
 
 @app.get("/debug/token-info")
 def debug_token_info():

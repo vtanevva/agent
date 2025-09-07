@@ -10,18 +10,20 @@ export default function ConnectGoogleModal({
 }) {
   if (!isOpen || !connectUrl) return null;
 
-  // Always use popup for now (we'll handle mobile differently)
   useEffect(() => {
-    console.log("Opening Google OAuth popup:", connectUrl);
+    console.log("ConnectGoogleModal: Opening OAuth with URL:", connectUrl);
+    
+    // Try popup first
     const popup = window.open(connectUrl, "GoogleAuth", "width=500,height=600,scrollbars=yes,resizable=yes");
     
     if (!popup) {
-      console.error("Popup blocked! Trying direct redirect...");
-      // If popup is blocked, try direct redirect
+      console.log("Popup blocked, using direct redirect");
+      // If popup is blocked, use direct redirect
       window.location.href = connectUrl;
       return;
     }
 
+    console.log("Popup opened successfully");
     const timer = setInterval(() => {
       if (popup.closed) {
         clearInterval(timer);
