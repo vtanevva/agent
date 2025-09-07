@@ -366,7 +366,12 @@ def chat():
 def google_auth(user_id):
     """Redirect browser to Google OAuth consent screen."""
     try:
-        redirect_uri = url_for("google_callback", _external=True)
+        # Force HTTPS redirect URI for production
+        if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https':
+            redirect_uri = "https://web-production-0b6ce.up.railway.app/google/oauth2callback"
+        else:
+            redirect_uri = url_for("google_callback", _external=True)
+            
         print(f"DEBUG: Building OAuth flow for user {user_id}", flush=True)
         print(f"DEBUG: Redirect URI: {redirect_uri}", flush=True)
         
@@ -807,7 +812,12 @@ def debug_mobile_test():
 def debug_oauth_test(user_id):
     """Test OAuth URL generation without redirecting."""
     try:
-        redirect_uri = url_for("google_callback", _external=True)
+        # Force HTTPS redirect URI for production
+        if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https':
+            redirect_uri = "https://web-production-0b6ce.up.railway.app/google/oauth2callback"
+        else:
+            redirect_uri = url_for("google_callback", _external=True)
+            
         flow = _build_flow(redirect_uri)
         auth_url, _ = flow.authorization_url(
             prompt="consent select_account",
