@@ -877,6 +877,16 @@ def debug_route_test(test_path):
         "timestamp": datetime.now().isoformat()
     })
 
+@app.get("/debug/catch-all-test")
+def debug_catch_all_test():
+    """Test if basic routing is working."""
+    return jsonify({
+        "status": "success",
+        "message": "Catch-all test route working",
+        "static_folder": app.static_folder,
+        "timestamp": datetime.now().isoformat()
+    })
+
 @app.get("/debug/oauth-test/<user_id>")
 def debug_oauth_test(user_id):
     """Test OAuth URL generation without redirecting."""
