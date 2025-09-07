@@ -14,8 +14,9 @@ export default function LoginPage() {
       if (event.data.type === 'GOOGLE_AUTH_SUCCESS') {
         const userEmail = event.data.userEmail;
         const sessionId = genSession(userEmail);
-        // Encode the email for URL safety
-        navigate(`/chat/${encodeURIComponent(userEmail)}/${sessionId}`);
+        // Create URL-safe user ID
+        const userID = userEmail.replace('@', '-at-').replace(/\./g, '-');
+        navigate(`/chat/${userID}/${sessionId}`);
       }
     };
 

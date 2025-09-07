@@ -15,8 +15,24 @@ export default function ChatPage() {
   const { userId: rawUserId, sessionId } = useParams();
   const navigate = useNavigate();
   
-  // Decode the userId if it's URL encoded
-  const userId = rawUserId ? decodeURIComponent(rawUserId) : rawUserId;
+  // Decode the userId - handle both URL encoding and URL-safe format
+  const userId = rawUserId ? (() => {
+    try {
+      // First try URL decoding
+      const decoded = decodeURIComponent(rawUserId);
+      // If it contains -at-, it's our URL-safe format, convert back to email
+      if (decoded.includes('-at-')) {
+        return decoded.replace('-at-', '@').replace(/-/g, '.');
+      }
+      return decoded;
+    } catch {
+      // If URL decoding fails, try URL-safe format conversion
+      if (rawUserId.includes('-at-')) {
+        return rawUserId.replace('-at-', '@').replace(/-/g, '.');
+      }
+      return rawUserId;
+    }
+  })() : rawUserId;
 
   // Listen for OAuth success messages from popup
   useEffect(() => {
@@ -288,7 +304,9 @@ export default function ChatPage() {
     // Add the new session to the sessions list immediately
     setSessions(prev => [...prev, newSessionId]);
     
-    navigate(`/chat/${userId}/${newSessionId}`);
+    // Create URL-safe user ID for navigation
+    const userID = userId.replace('@', '-at-').replace(/\./g, '-');
+    navigate(`/chat/${userID}/${newSessionId}`);
     
     // Refresh sessions list after a short delay to get the latest from server
     setTimeout(() => {
@@ -421,7 +439,9 @@ export default function ChatPage() {
                         setShowSidebar(false); // Close menu on mobile FIRST
                         const id = session.session_id || session;
                         setSelectedSession(id);
-                        navigate(`/chat/${userId}/${id}`);
+                        // Create URL-safe user ID for navigation
+                        const userID = userId.replace('@', '-at-').replace(/\./g, '-');
+                        navigate(`/chat/${userID}/${id}`);
                         
                         // Refresh sessions list to ensure we have the latest data
                         setTimeout(() => {
