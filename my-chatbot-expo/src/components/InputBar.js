@@ -36,7 +36,7 @@ export default function InputBar({input, setInput, loading, onSend, showConnectB
         <TextInput
           value={input}
           onChangeText={setInput}
-          placeholder="Share your thoughts, feelings, or ask me anything..."
+          placeholder="You can ask me anything here..."
           placeholderTextColor={colors.primary[900] + '60'}
           style={styles.input}
           multiline

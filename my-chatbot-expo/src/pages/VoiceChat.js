@@ -41,6 +41,8 @@ export default function VoiceChat() {
   const [selectedSession, setSelectedSession] = useState(sessionId);
   const [emailChoices, setEmailChoices] = useState(null);
   const [showSidebar, setShowSidebar] = useState(false);
+  const [speechRate, setSpeechRate] = useState(0.5);
+  const [voiceAccent, setVoiceAccent] = useState('en-US');
   const lastUserMessage = useRef('');
   const sidebarAnim = useRef(new Animated.Value(-280)).current;
 
@@ -183,9 +185,9 @@ export default function VoiceChat() {
     Speech.stop();
     setIsSpeaking(true);
     Speech.speak(text, {
-      language: 'en-US',
+      language: voiceAccent,
       pitch: 1.0,
-      rate: 0.5,
+      rate: speechRate,
       onDone: () => setIsSpeaking(false),
       onStopped: () => setIsSpeaking(false),
     });
@@ -516,69 +518,85 @@ export default function VoiceChat() {
               </TouchableOpacity>
             </View>
 
-            {/* Voice Sessions */}
-            <View style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>Mindful Voice</Text>
-              <TouchableOpacity 
-                onPress={() => {
-                  handleNewChat();
-                  setShowSidebar(false);
-                }}
-                style={styles.actionButton}>
-                <Text style={styles.actionText}>New Voice Session</Text>
-              </TouchableOpacity>
-              
-              {sessions.length > 0 && (
-                <View style={styles.sessionsList}>
-                  <Text style={styles.sessionsLabel}>Past Sessions:</Text>
-                  {sessions.map((session) => {
-                    const id = session.session_id || session;
-                    return (
-                      <TouchableOpacity
-                        key={id}
-                        onPress={async () => {
-                          setShowSidebar(false);
-                          setSelectedSession(id);
-                          navigation.replace('VoiceChat', {userId, sessionId: id});
-                          await loadSessionChat(id);
-                        }}
-                        style={[
-                          styles.sessionButton,
-                          selectedSession === id && styles.sessionButtonActive,
-                        ]}>
-                        <Text
-                          style={[
-                            styles.sessionText,
-                            selectedSession === id && styles.sessionTextActive,
-                          ]}>
-                          {id.slice(-8)}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
-              <View style={styles.infoCard}>
-                <Text style={styles.infoText}>Voice conversations are saved automatically</Text>
-              </View>
-            </View>
-
             {/* Voice Settings */}
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Voice Settings</Text>
+              
+              {/* Speech Rate Control */}
+              <View style={styles.voiceSettingItem}>
+                <View style={styles.voiceSettingHeader}>
+                  <Text style={styles.voiceSettingLabel}>Speech Speed</Text>
+                  <Text style={styles.voiceSettingValue}>
+                    {speechRate === 0.25 ? 'Very Slow' : 
+                     speechRate === 0.5 ? 'Slow' : 
+                     speechRate === 0.75 ? 'Normal' : 
+                     speechRate === 1.0 ? 'Fast' : 
+                     speechRate === 1.5 ? 'Very Fast' : 
+                     speechRate.toFixed(2)}
+                  </Text>
+                </View>
+                <View style={styles.speedButtons}>
+                  {[
+                    {value: 0.25, label: 'Very Slow'},
+                    {value: 0.5, label: 'Slow'},
+                    {value: 0.75, label: 'Normal'},
+                    {value: 1.0, label: 'Fast'},
+                    {value: 1.5, label: 'Very Fast'},
+                  ].map((speed) => (
+                    <TouchableOpacity
+                      key={speed.value}
+                      onPress={() => setSpeechRate(speed.value)}
+                      style={[
+                        styles.speedButton,
+                        speechRate === speed.value && styles.speedButtonActive,
+                      ]}>
+                      <Text
+                        style={[
+                          styles.speedButtonText,
+                          speechRate === speed.value && styles.speedButtonTextActive,
+                        ]}>
+                        {speed.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* Accent/Voice Control */}
+              <View style={styles.voiceSettingItem}>
+                <Text style={styles.voiceSettingLabel}>Voice Accent</Text>
+                <View style={styles.accentButtons}>
+                  {[
+                    {code: 'en-US', name: 'US English'},
+                    {code: 'en-GB', name: 'UK English'},
+                    {code: 'en-AU', name: 'Australian'},
+                    {code: 'en-IN', name: 'Indian English'},
+                  ].map((accent) => (
+                    <TouchableOpacity
+                      key={accent.code}
+                      onPress={() => setVoiceAccent(accent.code)}
+                      style={[
+                        styles.accentButton,
+                        voiceAccent === accent.code && styles.accentButtonActive,
+                      ]}>
+                      <Text
+                        style={[
+                          styles.accentButtonText,
+                          voiceAccent === accent.code && styles.accentButtonTextActive,
+                        ]}>
+                        {accent.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
               <View style={styles.insightCard}>
                 <View style={styles.insightRow}>
                   <View style={[styles.indicator, {backgroundColor: colors.secondary[500]}]} />
                   <Text style={styles.insightTitle}>Auto-playback</Text>
                 </View>
                 <Text style={styles.insightSubtext}>AI responses play automatically</Text>
-              </View>
-              <View style={styles.insightCard}>
-                <View style={styles.insightRow}>
-                  <View style={styles.indicator} />
-                  <Text style={styles.insightTitle}>Voice Recognition</Text>
-                </View>
-                <Text style={styles.insightSubtext}>High accuracy mode enabled</Text>
               </View>
             </View>
 
@@ -633,6 +651,53 @@ export default function VoiceChat() {
                   <Text style={styles.insightTitle}>Sessions</Text>
                 </View>
                 <Text style={styles.insightSubtext}>{sessions.length} conversations saved</Text>
+              </View>
+            </View>
+
+            {/* Voice Sessions */}
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>Mindful Voice</Text>
+              <TouchableOpacity 
+                onPress={() => {
+                  handleNewChat();
+                  setShowSidebar(false);
+                }}
+                style={styles.actionButton}>
+                <Text style={styles.actionText}>New Voice Session</Text>
+              </TouchableOpacity>
+              
+              {sessions.length > 0 && (
+                <View style={styles.sessionsList}>
+                  <Text style={styles.sessionsLabel}>Past Sessions:</Text>
+                  {sessions.map((session) => {
+                    const id = session.session_id || session;
+                    return (
+                      <TouchableOpacity
+                        key={id}
+                        onPress={async () => {
+                          setShowSidebar(false);
+                          setSelectedSession(id);
+                          navigation.replace('VoiceChat', {userId, sessionId: id});
+                          await loadSessionChat(id);
+                        }}
+                        style={[
+                          styles.sessionButton,
+                          selectedSession === id && styles.sessionButtonActive,
+                        ]}>
+                        <Text
+                          style={[
+                            styles.sessionText,
+                            selectedSession === id && styles.sessionTextActive,
+                          ]}>
+                          {id.slice(-8)}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+              <View style={styles.infoCard}>
+                <Text style={styles.infoText}>Voice conversations are saved automatically</Text>
               </View>
             </View>
 
@@ -1084,6 +1149,88 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.dark[600],
     textAlign: 'center',
+  },
+  voiceSettingItem: {
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.dark[500] + '10',
+  },
+  voiceSettingHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  voiceSettingLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary[900],
+  },
+  voiceSettingValue: {
+    fontSize: 12,
+    color: colors.secondary[600],
+    fontWeight: '500',
+  },
+  speedButtons: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  speedButton: {
+    flex: 1,
+    minWidth: '30%',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: colors.primary[200] + '40',
+    borderWidth: 1,
+    borderColor: colors.dark[500] + '20',
+    alignItems: 'center',
+  },
+  speedButtonActive: {
+    backgroundColor: colors.secondary[500] + '30',
+    borderColor: colors.secondary[600],
+  },
+  speedButtonText: {
+    fontSize: 11,
+    color: colors.primary[900] + '80',
+    fontWeight: '500',
+  },
+  speedButtonTextActive: {
+    color: colors.secondary[700],
+    fontWeight: '600',
+  },
+  accentButtons: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
+  },
+  accentButton: {
+    flex: 1,
+    minWidth: '45%',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: colors.primary[200] + '40',
+    borderWidth: 1,
+    borderColor: colors.dark[500] + '20',
+    alignItems: 'center',
+  },
+  accentButtonActive: {
+    backgroundColor: colors.secondary[500] + '30',
+    borderColor: colors.secondary[600],
+  },
+  accentButtonText: {
+    fontSize: 12,
+    color: colors.primary[900] + '80',
+    fontWeight: '500',
+  },
+  accentButtonTextActive: {
+    color: colors.secondary[700],
+    fontWeight: '600',
   },
 });
 
