@@ -1,52 +1,28 @@
 """Calendar management tool for the mental health AI assistant"""
 
-import os
 import json
 import re
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
+
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from googleapiclient.errors import HttpError
 
 from app.agent_core.tool_registry import register, ToolSchema
+from app.utils import db_utils, oauth_utils
 
-# Use the same MongoDB connection as server.py
-from pymongo import MongoClient
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-MONGO_URI = os.getenv("MONGO_URI")
-
-# Initialize MongoDB connection
-client = None
-tokens = None
-
-if MONGO_URI:
-    try:
-        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-        client.admin.command('ping')
-        db = client.get_database()
-        tokens = db["tokens"]
-    except Exception as e:
-        print(f"[WARNING] MongoDB connection failed: {e}")
-        tokens = None
-else:
-    print("[WARNING] MONGO_URI not set.")
 
 def _service(user_id: str):
     """Get Google Calendar service for user"""
+    tokens = db_utils.get_tokens_collection()
     if tokens is None:
         raise RuntimeError("MongoDB is not available. Calendar features are disabled.")
     
     try:
-        doc = tokens.find_one({"user_id": user_id}, {"google": 1})
-        if not doc or "google" not in doc:
+        creds = oauth_utils.load_google_credentials(user_id)
+        if not creds:
             raise FileNotFoundError(f"Google OAuth token for user '{user_id}' not found.")
-        
-        creds_info = doc["google"]
-        creds = Credentials.from_authorized_user_info(creds_info)
         return build("calendar", "v3", credentials=creds, cache_discovery=False)
     except Exception as e:
         raise RuntimeError(f"Failed to load Calendar service: {e}")
@@ -93,7 +69,12 @@ def create_calendar_event(
         }
         
         # Insert into database
-        calendar_collection = db["calendar_events"]
+        calendar_collection = db_utils.get_calendar_events_collection()
+        if calendar_collection is None:
+            return {
+                "success": False,
+                "error": "Database not available"
+            }
         result = calendar_collection.insert_one(event_doc)
         
         return {
@@ -118,15 +99,12 @@ def list_calendar_events(
 ) -> Dict:
     """List upcoming calendar events from app's internal calendar"""
     try:
-        # Use the same MongoDB connection as server.py
-        if tokens is None:
+        calendar_collection = db_utils.get_calendar_events_collection()
+        if calendar_collection is None:
             return {
                 "success": False,
                 "error": "Database not available"
             }
-        
-        # Get events from the app's calendar collection
-        calendar_collection = db["calendar_events"]
         
         # Default to next 7 days if no time range specified
         if not time_min:

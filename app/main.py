@@ -1,10 +1,13 @@
+"""CLI interface for testing the chatbot (debug/test script)"""
+
 import os
 import uuid
-from chatbot import chat_with_gpt
-from memory import save_message
-from .chat_embeddings import save_chat_to_memory, search_chat_memory
 import openai
 from dotenv import load_dotenv
+
+from .chatbot import chat_with_gpt
+from .memory import save_message
+from .chat_embeddings import save_chat_to_memory, search_chat_memory, extract_facts_with_gpt
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 load_dotenv()
@@ -60,7 +63,6 @@ while True:
         print("Bot:", reply)
 
         save_message(session_id, user_input, reply, emotion, suicide_flag)
-        from chat_embeddings import extract_facts_with_gpt
 
         extracted = extract_facts_with_gpt(user_input)
         for line in extracted.split("\n"):

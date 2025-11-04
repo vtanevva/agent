@@ -11,22 +11,34 @@ Body:
 }
 """
 
-import os, pickle, requests, json
+import json
 from datetime import datetime
-from app.agent_core.tool_registry import register, ToolSchema
 
-TOKEN_PATH = "tokens/{user_id}_ig.pkl"
+import requests
+
+from app.agent_core.tool_registry import register, ToolSchema
+from ..utils import db_utils
 
 def _get_auth(user_id: str):
-    path = TOKEN_PATH.format(user_id=user_id)
-    if not os.path.exists(path):
-        raise FileNotFoundError(
-            f"Instagram token for user '{user_id}' not found. "
-            "Ask the user to connect Instagram first."
+    """Get Instagram authentication from MongoDB"""
+    tokens = db_utils.get_tokens_collection()
+    if tokens is None:
+        raise RuntimeError(
+            "MongoDB is not available. Instagram features are disabled. "
+            "Please set up a database connection."
         )
-    with open(path, "rb") as f:
-        data = pickle.load(f)           # {page_id, ig_user_id, access_token}
-    return data["ig_user_id"], data["access_token"]
+    
+    try:
+        doc = tokens.find_one({"user_id": user_id}, {"instagram": 1})
+        if not doc or "instagram" not in doc:
+            raise FileNotFoundError(
+                f"Instagram token for user '{user_id}' not found. "
+                "Ask the user to connect Instagram first."
+            )
+        instagram_data = doc["instagram"]
+        return instagram_data["ig_user_id"], instagram_data["access_token"]
+    except Exception as e:
+        raise RuntimeError(f"Failed to load Instagram credentials: {e}")
 
 def send_ig_dm(user_id: str, recipient_id: str, text: str):
     ig_uid, token = _get_auth(user_id)

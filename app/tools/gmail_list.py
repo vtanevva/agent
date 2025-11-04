@@ -6,65 +6,34 @@ Returns JSON like:
     "threadId": "1983025185d299de",
     "from": "Deya Ivanova <ivanova.deq06@gmail.com>",
     "subject": "Re: Come Join Me",
-    "snippet": "No thanks. I don’t like you" },
+    "snippet": "No thanks. I don't like you" },
   ...
 ]
 """
 
-import os
 import json
 from collections import OrderedDict
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
-from pymongo import MongoClient
 
 from ..agent_core.tool_registry import register, ToolSchema
-
-# -----------------------
-# MongoDB tokens setup
-# -----------------------
-# Use the same MongoDB connection as server.py
-from pymongo import MongoClient
-import os
-from dotenv import load_dotenv
-
-load_dotenv()
-MONGO_URI = os.getenv("MONGO_URI")
-
-# Initialize MongoDB connection
-client = None
-tokens = None
-
-if MONGO_URI:
-    try:
-        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-        client.admin.command('ping')
-        db = client.get_database()
-        tokens = db["tokens"]
-    except Exception as e:
-        print(f"[WARNING] MongoDB connection failed: {e}")
-        tokens = None
-else:
-    print("[WARNING] MONGO_URI not set.")
+from ..utils import db_utils, oauth_utils
 
 
 def _service(user_id: str):
-    # Check if MongoDB is available
+    """Get Gmail service for user"""
+    tokens = db_utils.get_tokens_collection()
     if tokens is None:
         raise RuntimeError(
             "MongoDB is not available. Gmail features are disabled. Please set up a database connection."
         )
     
     try:
-        # Load stored Google OAuth credentials from MongoDB
-        doc = tokens.find_one({"user_id": user_id}, {"google": 1})
-        if not doc or "google" not in doc:
+        creds = oauth_utils.load_google_credentials(user_id)
+        if not creds:
             raise FileNotFoundError(
                 f"Google OAuth token for user '{user_id}' not found. Ask the user to connect Gmail first."
             )
-        creds_info = doc["google"]
-        # Rehydrate to Credentials
-        creds = Credentials.from_authorized_user_info(creds_info)
         return build("gmail", "v1", credentials=creds, cache_discovery=False)
     except Exception as e:
         raise RuntimeError(f"Failed to load Gmail service: {e}")

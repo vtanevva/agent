@@ -1,7 +1,11 @@
-import os, json, openai
+"""Agent core module for tool-calling and agent orchestration"""
+
+import os
+import json
+import openai
 from dotenv import load_dotenv
 
-from app.agent_core.tool_registry import all_openai_schemas, call   # package‑relative
+from app.agent_core.tool_registry import all_openai_schemas, call
 
 # Import calendar tools to register them
 try:
