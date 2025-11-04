@@ -275,7 +275,7 @@ export default function ChatPage() {
   function handleEmailSelect(threadId, from) {
     const m = /<([^>]+)>/.exec(from);
     const to = m ? m[1] : from;
-    setInput(`Reply to thread ${threadId} to ${to}: `);
+    setInput(`Reply to ${to}: `);
     setEmailChoices(null);
   }
 

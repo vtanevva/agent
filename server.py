@@ -372,6 +372,10 @@ def chat():
 def google_auth(user_id):
     """Redirect browser to Google OAuth consent screen."""
     try:
+        # Check if request came from Expo app (check referer or query param)
+        expo_app = request.args.get('expo_app', 'false').lower() == 'true'
+        expo_redirect = request.args.get('expo_redirect', 'http://localhost:8081')
+        
         # Force HTTPS redirect URI for production
         if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https':
             redirect_uri = "https://web-production-0b6ce.up.railway.app/google/oauth2callback"
@@ -380,14 +384,18 @@ def google_auth(user_id):
             
         print(f"DEBUG: Building OAuth flow for user {user_id}", flush=True)
         print(f"DEBUG: Redirect URI: {redirect_uri}", flush=True)
+        print(f"DEBUG: Expo app: {expo_app}, Expo redirect: {expo_redirect}", flush=True)
         
         flow = _build_flow(redirect_uri)
         print("DEBUG: Flow built successfully", flush=True)
 
+        # Store expo redirect info in state for callback
+        state_with_expo = f"{user_id}|expo:{expo_app}|redirect:{expo_redirect}" if expo_app else user_id
+        
         auth_url, _ = flow.authorization_url(
             prompt="consent select_account",
             access_type="offline",
-            state=user_id,
+            state=state_with_expo,
         )
         
         # Add user agent parameter to ensure Google accepts the request
@@ -424,8 +432,36 @@ def google_callback():
         print(f"DEBUG: Request URL: {request.url}", flush=True)
         print(f"DEBUG: Request args: {dict(request.args)}", flush=True)
         
-        state = request.args.get("state")                # your temp "vani"
+        state_raw = request.args.get("state")                # your temp "vani" or "vani|expo:true|redirect:http://localhost:8081"
         error = request.args.get("error")
+        
+        if not state_raw:
+            return render_template_string("""
+            <!doctype html>
+            <html>
+              <head><title>OAuth Error</title></head>
+              <body>
+                <h1>OAuth Error</h1>
+                <p>Missing state parameter</p>
+                <a href="/">Back to App</a>
+              </body>
+            </html>
+            """), 400
+        
+        # Parse state to extract expo info
+        expo_app = False
+        expo_redirect = None
+        state = state_raw
+        if "|expo:" in state_raw:
+            parts = state_raw.split("|")
+            state = parts[0]  # Original user_id
+            for part in parts[1:]:
+                if part.startswith("expo:"):
+                    expo_app = part.split(":")[1].lower() == "true"
+                elif part.startswith("redirect:"):
+                    expo_redirect = part.split(":", 1)[1]
+        
+        print(f"DEBUG: Parsed state: user_id={state}, expo_app={expo_app}, expo_redirect={expo_redirect}", flush=True)
         
         if error:
             print(f"ERROR: OAuth error: {error}", flush=True)
@@ -448,11 +484,17 @@ def google_callback():
             redirect_uri = url_for("google_callback", _external=True)
         print(f"DEBUG: Building flow with redirect_uri: {redirect_uri}", flush=True)
         
-        flow = _build_flow(redirect_uri, state=state)
+        # Build flow with the state that was used in authorization_url
+        # This ensures fetch_token can validate the state correctly
+        flow = _build_flow(redirect_uri, state=state_raw)
+        print("DEBUG: Flow built with state:", state_raw, flush=True)
         print("DEBUG: Flow built, fetching token...", flush=True)
         print(f"DEBUG: Authorization response URL: {request.url}", flush=True)
+        print(f"DEBUG: State from URL: {state_raw}", flush=True)
         
         try:
+            # fetch_token will extract the state from the authorization_response URL 
+            # and validate it matches the state stored in the flow object
             flow.fetch_token(authorization_response=request.url)
             print("DEBUG: Token fetched successfully", flush=True)
         except Exception as token_error:
@@ -523,6 +565,14 @@ def google_callback():
     # Create a URL-safe user ID by replacing @ with -at- and removing dots
     user_id_safe = user_email.replace('@', '-at-').replace('.', '-')
     
+    # Determine redirect URL based on whether it's Expo app
+    if expo_app and expo_redirect:
+        redirect_url = f"{expo_redirect}/?username={state}&email={user_email}"
+        print(f"DEBUG: Redirecting to Expo app: {redirect_url}", flush=True)
+    else:
+        redirect_url = f"/?username={state}&email={user_email}"
+        print(f"DEBUG: Redirecting to web app: {redirect_url}", flush=True)
+    
     # Simple success page that works for both popup and redirect
     return render_template_string("""
       <!doctype html>
@@ -544,9 +594,9 @@ def google_callback():
               }
               window.close();
             } else {
-              // For mobile/redirect, redirect to root with username parameter
-              const username = "{{ username }}";
-              window.location.href = "/?username=" + encodeURIComponent(username) + "&email=" + encodeURIComponent("{{ user_email }}");
+              // For mobile/redirect, redirect with username parameter
+              const redirectUrl = "{{ redirect_url }}";
+              window.location.href = redirectUrl;
             }
           </script>
         </head>
@@ -554,12 +604,12 @@ def google_callback():
           <div style="background: rgba(255,255,255,0.1); padding: 40px; border-radius: 20px; backdrop-filter: blur(10px);">
             <h1 style="font-size: 2.5em; margin-bottom: 20px;">✅ Connected to Google!</h1>
             <p style="font-size: 1.2em; margin-bottom: 30px;">You can now use Gmail and Calendar features.</p>
-            <p style="font-size: 1em; margin-bottom: 20px;">Redirecting to chat...</p>
-            <p><a href="{{ request.url_root }}chat/{{ username }}/{{ username }}-session" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 12px 24px; border-radius: 25px; display: inline-block;">Continue to Chat</a></p>
+            <p style="font-size: 1em; margin-bottom: 20px;">Redirecting...</p>
+            <p><a href="{{ redirect_url }}" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 12px 24px; border-radius: 25px; display: inline-block;">Continue to Chat</a></p>
           </div>
         </body>
       </html>
-    """, user_email=user_email, username=state)
+    """, user_email=user_email, username=state, redirect_url=redirect_url)
 
 
 # /agent  – calls run_agent which may invoke tools (Gmail, Calendar…)
