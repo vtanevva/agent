@@ -6,6 +6,8 @@ import {SafeAreaProvider} from 'react-native-safe-area-context';
 import LoginPage from './src/pages/LoginPage';
 import ChatPage from './src/pages/ChatPage';
 import VoiceChat from './src/pages/VoiceChat';
+import SettingsPage from './src/pages/SettingsPage';
+import MenuPage from './src/pages/MenuPage';
 
 const Stack = createNativeStackNavigator();
 
@@ -22,6 +24,8 @@ export default function App() {
           <Stack.Screen name="Login" component={LoginPage} />
           <Stack.Screen name="Chat" component={ChatPage} />
           <Stack.Screen name="VoiceChat" component={VoiceChat} />
+          <Stack.Screen name="Settings" component={SettingsPage} />
+          <Stack.Screen name="Menu" component={MenuPage} />
         </Stack.Navigator>
       </NavigationContainer>
     </SafeAreaProvider>

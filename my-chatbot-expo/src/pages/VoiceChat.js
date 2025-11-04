@@ -277,10 +277,10 @@ export default function VoiceChat() {
         }
         if (items.length > 0) {
           setEmailChoices(items);
-          setChat((prev) => [...prev, {role: 'assistant', text: reply}]);
-        } else {
-          setEmailChoices(null);
-          setChat((prev) => [...prev, {role: 'assistant', text: reply}]);
+        setChat((prev) => [...prev, {role: 'assistant', text: reply}]);
+      } else {
+        setEmailChoices(null);
+        setChat((prev) => [...prev, {role: 'assistant', text: reply}]);
         }
       }
       
@@ -402,20 +402,21 @@ export default function VoiceChat() {
             {/* Profile */}
             <View style={styles.profileCard}>
               <View style={styles.profileHeader}>
-                <LinearGradient
-                  colors={[colors.accent[500], colors.secondary[500], colors.dark[500]]}
-                  style={styles.avatar}>
-                  <Text style={styles.avatarText}>
-                    {userId?.charAt(0)?.toUpperCase() || 'U'}
-                  </Text>
-                </LinearGradient>
-                <View style={styles.profileInfo}>
-                  <Text style={styles.profileName}>{userId}</Text>
-                  <Text style={styles.profileSubtext}>
-                    Voice Session: {sessionId?.slice(-8) || 'New'}
-                  </Text>
-                </View>
+              <LinearGradient
+                colors={[colors.accent[500], colors.secondary[500], colors.dark[500]]}
+                style={styles.avatar}>
+                <Text style={styles.avatarText}>
+                  {userId?.charAt(0)?.toUpperCase() || 'U'}
+                </Text>
+              </LinearGradient>
+                <Text style={styles.dateText}>
+                  {new Date().getDate()}/{new Date().getMonth() + 1}
+                </Text>
               </View>
+              <Text style={styles.profileName}>{userId}</Text>
+              <Text style={styles.profileSubtext}>
+                Voice Session: {sessionId?.slice(-8) || 'New'}
+              </Text>
               
               <View style={styles.profileButtons}>
                 <TouchableOpacity
@@ -423,20 +424,59 @@ export default function VoiceChat() {
                     navigation.navigate('Chat', {userId, sessionId});
                     setShowSidebar(false);
                   }}
-                  style={styles.profileButton}>
-                  <LinearGradient
-                    colors={[colors.secondary[500], colors.secondary[600]]}
-                    style={styles.buttonGradient}>
-                    <Text style={styles.buttonText}>Text Mode</Text>
-                  </LinearGradient>
+                  style={styles.iconButton}>
+                  <View style={styles.iconButtonInner}>
+                    <Svg width="20" height="20" viewBox="0 0 24 24" fill={colors.secondary[600]}>
+                      <Path d="M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4l4 4 4-4h4c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
+                    </Svg>
+                  </View>
                 </TouchableOpacity>
                 
-                <TouchableOpacity onPress={handleLogout} style={styles.profileButton}>
-                  <LinearGradient
-                    colors={[colors.dark[500], colors.dark[600]]}
-                    style={styles.buttonGradient}>
-                    <Text style={styles.buttonText}>Logout</Text>
-                  </LinearGradient>
+                <TouchableOpacity
+                  onPress={() => {
+                    handleNewChat();
+                    setShowSidebar(false);
+                  }}
+                  style={styles.iconButton}>
+                  <View style={styles.iconButtonInner}>
+                    <Svg width="20" height="20" viewBox="0 0 24 24" fill={colors.accent[600]}>
+                      <Path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+                    </Svg>
+                  </View>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  onPress={() => {
+                    navigation.navigate('Settings', {userId, sessionId});
+                    setShowSidebar(false);
+                  }}
+                  style={styles.iconButton}>
+                  <View style={styles.iconButtonInner}>
+                    <Svg width="20" height="20" viewBox="0 0 24 24" fill={colors.primary[600]}>
+                      <Path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94L14.4 2.81c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+                    </Svg>
+              </View>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  onPress={() => {
+                    navigation.navigate('Menu', {userId, sessionId});
+                    setShowSidebar(false);
+                  }}
+                  style={styles.iconButton}>
+                  <View style={styles.iconButtonInner}>
+                    <Svg width="20" height="20" viewBox="0 0 24 24" fill={colors.secondary[600]}>
+                      <Path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+                    </Svg>
+                  </View>
+                </TouchableOpacity>
+                
+                <TouchableOpacity onPress={handleLogout} style={styles.iconButton}>
+                  <View style={[styles.iconButtonInner, styles.iconButtonDanger]}>
+                    <Svg width="20" height="20" viewBox="0 0 24 24" fill={colors.dark[600]}>
+                      <Path d="M13 3h-2v10h2V3zm4.83 2.17l-1.42 1.42C17.99 7.86 19 9.81 19 12c0 3.87-3.13 7-7 7s-7-3.13-7-7c0-2.19 1.01-4.14 2.59-5.41L6.17 5.17C4.23 6.82 3 9.26 3 12c0 4.97 4.03 9 9 9s9-4.03 9-9c0-2.74-1.23-5.18-3.17-6.83z"/>
+                    </Svg>
+                  </View>
                 </TouchableOpacity>
               </View>
             </View>
@@ -445,7 +485,7 @@ export default function VoiceChat() {
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Voice Controls</Text>
               <View style={styles.voiceControlsContainer}>
-                <TouchableOpacity
+              <TouchableOpacity
                   onPress={() => {
                     if (isListening) {
                       stopListening();
@@ -454,39 +494,39 @@ export default function VoiceChat() {
                     }
                     setShowSidebar(false);
                   }}
-                  disabled={!isSupported}
-                  style={[
-                    styles.voiceButton,
-                    isListening && styles.voiceButtonActive,
-                    !isSupported && styles.voiceButtonDisabled,
-                  ]}>
-                  <LinearGradient
-                    colors={
-                      isListening
-                        ? [colors.dark[500], colors.dark[600]]
-                        : [colors.secondary[500], colors.secondary[600]]
-                    }
-                    style={styles.buttonGradient}>
-                    <Text style={styles.buttonText}>
-                      {isListening ? 'Stop Listening' : 'Start Listening'}
-                    </Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-                
-                {isSpeaking && (
+                disabled={!isSupported}
+                style={[
+                  styles.voiceButton,
+                  isListening && styles.voiceButtonActive,
+                  !isSupported && styles.voiceButtonDisabled,
+                ]}>
+                <LinearGradient
+                  colors={
+                    isListening
+                      ? [colors.dark[500], colors.dark[600]]
+                      : [colors.secondary[500], colors.secondary[600]]
+                  }
+                  style={styles.buttonGradient}>
+                  <Text style={styles.buttonText}>
+                    {isListening ? 'Stop Listening' : 'Start Listening'}
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+              
+              {isSpeaking && (
                   <TouchableOpacity 
                     onPress={() => {
                       stopSpeaking();
                       setShowSidebar(false);
                     }}
                     style={styles.voiceButton}>
-                    <LinearGradient
-                      colors={[colors.accent[500], colors.accent[600]]}
-                      style={styles.buttonGradient}>
-                      <Text style={styles.buttonText}>Stop Speaking</Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                )}
+                  <LinearGradient
+                    colors={[colors.accent[500], colors.accent[600]]}
+                    style={styles.buttonGradient}>
+                    <Text style={styles.buttonText}>Stop Speaking</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              )}
                 
                 <View style={styles.voiceStatusCard}>
                   <Text style={styles.voiceStatusText}>
@@ -652,7 +692,7 @@ export default function VoiceChat() {
                 </View>
                 <Text style={styles.insightSubtext}>{sessions.length} conversations saved</Text>
               </View>
-            </View>
+        </View>
 
             {/* Voice Sessions */}
             <View style={styles.sectionCard}>
@@ -736,13 +776,13 @@ export default function VoiceChat() {
           {/* Header */}
           <View style={styles.chatHeader}>
             <View style={styles.chatHeaderContent}>
-              <TouchableOpacity
-                onPress={() => setShowSidebar(true)}
-                style={styles.menuButton}>
-                <Text style={styles.menuIcon}>☰</Text>
-              </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setShowSidebar(true)}
+              style={styles.menuButton}>
+              <Text style={styles.menuIcon}>☰</Text>
+            </TouchableOpacity>
               <View>
-                <Text style={styles.chatTitle}>Voice Chat</Text>
+            <Text style={styles.chatTitle}>Voice Chat</Text>
                 <Text style={styles.chatSubtitle}>Session: {sessionId?.slice(-8) || 'New'}</Text>
               </View>
             </View>
@@ -760,17 +800,17 @@ export default function VoiceChat() {
           {/* AI Speaking Animation (when chat is hidden) */}
           {!showChat && isSpeaking && (
             <View style={styles.voiceStatus}>
-              <View style={styles.statusContent}>
-                <View style={styles.speakingIndicator} />
-                <Text style={styles.statusText}>AI is speaking...</Text>
-              </View>
+                <View style={styles.statusContent}>
+                  <View style={styles.speakingIndicator} />
+                  <Text style={styles.statusText}>AI is speaking...</Text>
+                </View>
             </View>
           )}
 
           {/* Placeholder when chat is hidden and AI is not speaking */}
           {!showChat && !isSpeaking && (
             <View style={styles.voiceStatus}>
-              <View style={styles.statusContent}>
+                <View style={styles.statusContent}>
                 <View style={styles.placeholderCircle} />
                 <Text style={styles.placeholderText}>Click to start speaking</Text>
                 
@@ -856,8 +896,8 @@ const styles = StyleSheet.create({
   profileHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 16,
+    justifyContent: 'space-between',
+    marginBottom: 8,
   },
   avatar: {
     width: 48,
@@ -872,27 +912,48 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
-  profileInfo: {
-    flex: 1,
-  },
   profileName: {
     fontSize: 18,
     fontWeight: '600',
     color: colors.primary[900],
-    marginBottom: 2,
+    marginBottom: 4,
   },
   profileSubtext: {
     fontSize: 12,
     color: colors.primary[900] + '60',
+    marginBottom: 8,
+  },
+  dateText: {
+    fontSize: 12,
+    color: colors.primary[900] + '90',
+    marginLeft: 'auto',
   },
   profileButtons: {
-    width: '100%',
+    flexDirection: 'row',
     gap: 8,
+    justifyContent: 'center',
+    marginTop: 4,
   },
-  profileButton: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    ...commonStyles.shadowSm,
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconButtonInner: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.secondary[500] + '20',
+    borderWidth: 1,
+    borderColor: colors.secondary[500] + '40',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconButtonDanger: {
+    backgroundColor: colors.dark[500] + '20',
+    borderColor: colors.dark[500] + '40',
   },
   buttonGradient: {
     paddingVertical: 12,
