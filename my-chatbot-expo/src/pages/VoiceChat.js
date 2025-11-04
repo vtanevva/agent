@@ -9,10 +9,12 @@ import {
   Linking,
   PermissionsAndroid,
   Platform,
+  Animated,
 } from 'react-native';
 import {useRoute, useNavigation} from '@react-navigation/native';
 import {LinearGradient} from 'expo-linear-gradient';
 import {SafeAreaView} from 'react-native-safe-area-context';
+import {Svg, Path} from 'react-native-svg';
 import * as Speech from 'expo-speech';
 // Note: Voice recognition in progress - temporarily disabled
 // Will need alternative for voice input
@@ -33,13 +35,14 @@ export default function VoiceChat() {
   const [loading, setLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isSupported, setIsSupported] = useState(true);
+  const [isSupported, setIsSupported] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [selectedSession, setSelectedSession] = useState(sessionId);
   const [emailChoices, setEmailChoices] = useState(null);
   const [showSidebar, setShowSidebar] = useState(false);
   const lastUserMessage = useRef('');
+  const sidebarAnim = useRef(new Animated.Value(-280)).current;
 
   // Initialize TTS with Expo Speech
   useEffect(() => {
@@ -165,6 +168,15 @@ export default function VoiceChat() {
     }
   }, [userId, sessionId, loadSessionChat]);
 
+  // Animate sidebar
+  useEffect(() => {
+    Animated.timing(sidebarAnim, {
+      toValue: showSidebar ? 0 : -280,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
+  }, [showSidebar]);
+
   // Speak text
   const speak = (text) => {
     if (!text) return;
@@ -185,7 +197,8 @@ export default function VoiceChat() {
     if (last?.role === 'assistant' && !isSpeaking && last.text) {
       // Don't speak email JSON or markdown
       const isJson = /^\[.*\]$/.test(last.text.trim()) || last.text.includes('threadId');
-      if (!isJson) {
+      const isMarkdownEmail = /\*\*From:\*\*/i.test(last.text);
+      if (!isJson && !isMarkdownEmail) {
         speak(last.text);
       }
     }
@@ -247,11 +260,30 @@ export default function VoiceChat() {
         setEmailChoices(parsed);
         setChat((prev) => [...prev, {role: 'assistant', text: reply}]);
       } else {
-        setEmailChoices(null);
-        setChat((prev) => [...prev, {role: 'assistant', text: reply}]);
+        // Try markdown formatted list (e.g., numbered with **From:** etc.)
+        const md = cleaned.replace(/\r\n/g, '\n');
+        const re = /\n?\s*\d+\.\s+\*\*From:\*\*\s*([\s\S]*?)\n\s*\*\*Subject:\*\*\s*([\s\S]*?)\n\s*\*\*Snippet:\*\*\s*([\s\S]*?)(?=\n\s*\d+\.\s|$)/g;
+        let m;
+        let idx = 1;
+        const items = [];
+        while ((m = re.exec(md)) !== null) {
+          const from = m[1].trim();
+          const subject = m[2].trim();
+          const snippet = m[3].trim();
+          items.push({idx, from, subject, snippet, threadId: `md-${idx}`});
+          idx += 1;
+        }
+        if (items.length > 0) {
+          setEmailChoices(items);
+          setChat((prev) => [...prev, {role: 'assistant', text: reply}]);
+        } else {
+          setEmailChoices(null);
+          setChat((prev) => [...prev, {role: 'assistant', text: reply}]);
+        }
       }
       
-      if (chat.length === 0) {
+      const isFirstMessage = chat.length === 0;
+      if (isFirstMessage) {
         setTimeout(() => fetchSessions(userId), 1000);
       }
     } catch (err) {
@@ -263,14 +295,63 @@ export default function VoiceChat() {
   };
 
   // Voice controls
+  const recognitionRef = useRef(null);
+
+  // Initialize Web Speech Recognition for web platform
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        setIsSupported(true);
+        recognitionRef.current = new SpeechRecognition();
+        recognitionRef.current.continuous = false;
+        recognitionRef.current.interimResults = false;
+        recognitionRef.current.lang = 'en-US';
+
+        recognitionRef.current.onresult = (event) => {
+          const transcript = event.results[0][0].transcript;
+          setInput(transcript);
+          setIsListening(false);
+          setTimeout(() => handleSend(transcript), 100);
+        };
+
+        recognitionRef.current.onerror = (event) => {
+          console.error('Speech recognition error:', event);
+          setIsListening(false);
+          Alert.alert('Speech Recognition Error', 'Failed to recognize speech. Please try again.');
+        };
+
+        recognitionRef.current.onend = () => {
+          setIsListening(false);
+        };
+      } else {
+        setIsSupported(false);
+      }
+    }
+  }, []);
+
   const startListening = async () => {
     if (isListening) return;
-    // TODO: Implement with Expo voice recognition
-    Alert.alert('Voice Input', 'Voice recognition coming soon!');
+    
+    if (Platform.OS === 'web' && recognitionRef.current) {
+      try {
+        setIsListening(true);
+        recognitionRef.current.start();
+      } catch (error) {
+        console.error('Error starting speech recognition:', error);
+        setIsListening(false);
+        Alert.alert('Error', 'Failed to start voice recognition. Please try again.');
+      }
+    } else {
+      // For mobile, show alert (needs native implementation)
+      Alert.alert('Voice Input', 'Voice recognition coming soon for mobile!');
+    }
   };
 
   const stopListening = async () => {
-    // TODO: Implement with Expo voice recognition
+    if (Platform.OS === 'web' && recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
     setIsListening(false);
   };
 
@@ -314,18 +395,25 @@ export default function VoiceChat() {
           />
         )}
         
-        <View style={[styles.sidebar, showSidebar && styles.sidebarVisible]}>
+        <Animated.View style={[styles.sidebar, {transform: [{translateX: sidebarAnim}]}]}>
           <ScrollView style={styles.sidebarContent} showsVerticalScrollIndicator={false}>
             {/* Profile */}
             <View style={styles.profileCard}>
-              <LinearGradient
-                colors={[colors.accent[500], colors.secondary[500], colors.dark[500]]}
-                style={styles.avatar}>
-                <Text style={styles.avatarText}>
-                  {userId?.charAt(0)?.toUpperCase() || 'U'}
-                </Text>
-              </LinearGradient>
-              <Text style={styles.profileName}>{userId}</Text>
+              <View style={styles.profileHeader}>
+                <LinearGradient
+                  colors={[colors.accent[500], colors.secondary[500], colors.dark[500]]}
+                  style={styles.avatar}>
+                  <Text style={styles.avatarText}>
+                    {userId?.charAt(0)?.toUpperCase() || 'U'}
+                  </Text>
+                </LinearGradient>
+                <View style={styles.profileInfo}>
+                  <Text style={styles.profileName}>{userId}</Text>
+                  <Text style={styles.profileSubtext}>
+                    Voice Session: {sessionId?.slice(-8) || 'New'}
+                  </Text>
+                </View>
+              </View>
               
               <View style={styles.profileButtons}>
                 <TouchableOpacity
@@ -354,43 +442,69 @@ export default function VoiceChat() {
             {/* Voice Controls */}
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Voice Controls</Text>
-              <TouchableOpacity
-                onPress={isListening ? stopListening : startListening}
-                disabled={!isSupported}
-                style={[
-                  styles.voiceButton,
-                  isListening && styles.voiceButtonActive,
-                  !isSupported && styles.voiceButtonDisabled,
-                ]}>
-                <LinearGradient
-                  colors={
-                    isListening
-                      ? [colors.dark[500], colors.dark[600]]
-                      : [colors.secondary[500], colors.secondary[600]]
-                  }
-                  style={styles.buttonGradient}>
-                  <Text style={styles.buttonText}>
-                    {isListening ? 'Stop Listening' : 'Start Listening'}
-                  </Text>
-                </LinearGradient>
-              </TouchableOpacity>
-              
-              {isSpeaking && (
-                <TouchableOpacity onPress={stopSpeaking} style={styles.voiceButton}>
+              <View style={styles.voiceControlsContainer}>
+                <TouchableOpacity
+                  onPress={() => {
+                    if (isListening) {
+                      stopListening();
+                    } else {
+                      startListening();
+                    }
+                    setShowSidebar(false);
+                  }}
+                  disabled={!isSupported}
+                  style={[
+                    styles.voiceButton,
+                    isListening && styles.voiceButtonActive,
+                    !isSupported && styles.voiceButtonDisabled,
+                  ]}>
                   <LinearGradient
-                    colors={[colors.accent[500], colors.accent[600]]}
+                    colors={
+                      isListening
+                        ? [colors.dark[500], colors.dark[600]]
+                        : [colors.secondary[500], colors.secondary[600]]
+                    }
                     style={styles.buttonGradient}>
-                    <Text style={styles.buttonText}>Stop Speaking</Text>
+                    <Text style={styles.buttonText}>
+                      {isListening ? 'Stop Listening' : 'Start Listening'}
+                    </Text>
                   </LinearGradient>
                 </TouchableOpacity>
-              )}
+                
+                {isSpeaking && (
+                  <TouchableOpacity 
+                    onPress={() => {
+                      stopSpeaking();
+                      setShowSidebar(false);
+                    }}
+                    style={styles.voiceButton}>
+                    <LinearGradient
+                      colors={[colors.accent[500], colors.accent[600]]}
+                      style={styles.buttonGradient}>
+                      <Text style={styles.buttonText}>Stop Speaking</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                )}
+                
+                <View style={styles.voiceStatusCard}>
+                  <Text style={styles.voiceStatusText}>
+                    {isListening ? 'Listening...' : isSpeaking ? 'Speaking...' : 'Ready to listen'}
+                  </Text>
+                  <Text style={styles.voiceStatusSubtext}>
+                    {isListening ? 'Speak now...' : isSpeaking ? 'AI is responding...' : 'Click to start'}
+                  </Text>
+                </View>
+              </View>
             </View>
 
             {/* Chat Toggle */}
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Chat Display</Text>
               <TouchableOpacity
-                onPress={() => setShowChat(!showChat)}
+                onPress={() => {
+                  setShowChat(!showChat);
+                  setShowSidebar(false);
+                }}
                 style={styles.voiceButton}>
                 <LinearGradient
                   colors={[colors.dark[500], colors.dark[600]]}
@@ -402,26 +516,171 @@ export default function VoiceChat() {
               </TouchableOpacity>
             </View>
 
+            {/* Voice Sessions */}
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>Mindful Voice</Text>
+              <TouchableOpacity 
+                onPress={() => {
+                  handleNewChat();
+                  setShowSidebar(false);
+                }}
+                style={styles.actionButton}>
+                <Text style={styles.actionText}>New Voice Session</Text>
+              </TouchableOpacity>
+              
+              {sessions.length > 0 && (
+                <View style={styles.sessionsList}>
+                  <Text style={styles.sessionsLabel}>Past Sessions:</Text>
+                  {sessions.map((session) => {
+                    const id = session.session_id || session;
+                    return (
+                      <TouchableOpacity
+                        key={id}
+                        onPress={async () => {
+                          setShowSidebar(false);
+                          setSelectedSession(id);
+                          navigation.replace('VoiceChat', {userId, sessionId: id});
+                          await loadSessionChat(id);
+                        }}
+                        style={[
+                          styles.sessionButton,
+                          selectedSession === id && styles.sessionButtonActive,
+                        ]}>
+                        <Text
+                          style={[
+                            styles.sessionText,
+                            selectedSession === id && styles.sessionTextActive,
+                          ]}>
+                          {id.slice(-8)}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+              <View style={styles.infoCard}>
+                <Text style={styles.infoText}>Voice conversations are saved automatically</Text>
+              </View>
+            </View>
+
+            {/* Voice Settings */}
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>Voice Settings</Text>
+              <View style={styles.insightCard}>
+                <View style={styles.insightRow}>
+                  <View style={[styles.indicator, {backgroundColor: colors.secondary[500]}]} />
+                  <Text style={styles.insightTitle}>Auto-playback</Text>
+                </View>
+                <Text style={styles.insightSubtext}>AI responses play automatically</Text>
+              </View>
+              <View style={styles.insightCard}>
+                <View style={styles.insightRow}>
+                  <View style={styles.indicator} />
+                  <Text style={styles.insightTitle}>Voice Recognition</Text>
+                </View>
+                <Text style={styles.insightSubtext}>High accuracy mode enabled</Text>
+              </View>
+            </View>
+
             {/* Quick Actions */}
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Quick Actions</Text>
-              <TouchableOpacity onPress={handleCheckEmails} style={styles.actionButton}>
+              <TouchableOpacity 
+                onPress={() => {
+                  handleCheckEmails();
+                  setShowSidebar(false);
+                }}
+                style={styles.actionButton}>
                 <Text style={styles.actionText}>Check Emails</Text>
               </TouchableOpacity>
+              <TouchableOpacity 
+                onPress={() => {
+                  handleSend('Show my calendar events');
+                  setShowSidebar(false);
+                }}
+                style={styles.actionButton}>
+                <Text style={styles.actionText}>Calendar Events</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                onPress={() => setShowSidebar(false)}
+                style={styles.actionButton}>
+                <Text style={styles.actionText}>Compose Email</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Smart Insights */}
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>Smart Insights</Text>
+              <View style={styles.insightCard}>
+                <View style={styles.insightRow}>
+                  <View style={[styles.indicator, {backgroundColor: colors.secondary[500]}]} />
+                  <Text style={styles.insightTitle}>Voice Session Active</Text>
+                </View>
+                <Text style={styles.insightSubtext}>{chat.length} messages in current session</Text>
+              </View>
+              <View style={styles.insightCard}>
+                <View style={styles.insightRow}>
+                  <View style={styles.indicator} />
+                  <Text style={styles.insightTitle}>Voice Mode</Text>
+                </View>
+                <Text style={styles.insightSubtext}>
+                  {isSupported ? 'Fully supported' : 'Limited support'}
+                </Text>
+              </View>
+              <View style={styles.insightCard}>
+                <View style={styles.insightRow}>
+                  <View style={[styles.indicator, {backgroundColor: colors.dark[500]}]} />
+                  <Text style={styles.insightTitle}>Sessions</Text>
+                </View>
+                <Text style={styles.insightSubtext}>{sessions.length} conversations saved</Text>
+              </View>
+            </View>
+
+            {/* Status */}
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>Status</Text>
+              <View style={styles.statsRow}>
+                <Text style={styles.statsLabel}>Chat:</Text>
+                <Text style={[styles.statsValue, {color: showChat ? colors.secondary[600] : colors.primary[900] + '60'}]}>
+                  {showChat ? 'Visible' : 'Hidden'}
+                </Text>
+              </View>
+              <View style={styles.statsRow}>
+                <Text style={styles.statsLabel}>Speaking:</Text>
+                <Text style={[styles.statsValue, {color: isSpeaking ? colors.secondary[600] : colors.primary[900] + '60'}]}>
+                  {isSpeaking ? 'Yes' : 'No'}
+                </Text>
+              </View>
+              <View style={styles.statsRow}>
+                <Text style={styles.statsLabel}>Listening:</Text>
+                <Text style={[styles.statsValue, {color: isListening ? colors.secondary[600] : colors.primary[900] + '60'}]}>
+                  {isListening ? 'Yes' : 'No'}
+                </Text>
+              </View>
+              {!isSupported && (
+                <View style={styles.warningCard}>
+                  <Text style={styles.warningText}>Voice features not supported</Text>
+                </View>
+              )}
             </View>
           </ScrollView>
-        </View>
+        </Animated.View>
 
         {/* Main Chat Area */}
         <View style={styles.chatArea}>
           {/* Header */}
           <View style={styles.chatHeader}>
-            <TouchableOpacity
-              onPress={() => setShowSidebar(true)}
-              style={styles.menuButton}>
-              <Text style={styles.menuIcon}>☰</Text>
-            </TouchableOpacity>
-            <Text style={styles.chatTitle}>Voice Chat</Text>
+            <View style={styles.chatHeaderContent}>
+              <TouchableOpacity
+                onPress={() => setShowSidebar(true)}
+                style={styles.menuButton}>
+                <Text style={styles.menuIcon}>☰</Text>
+              </TouchableOpacity>
+              <View>
+                <Text style={styles.chatTitle}>Voice Chat</Text>
+                <Text style={styles.chatSubtitle}>Session: {sessionId?.slice(-8) || 'New'}</Text>
+              </View>
+            </View>
           </View>
 
           {/* Chat Messages */}
@@ -433,16 +692,25 @@ export default function VoiceChat() {
             />
           )}
 
-          {/* Voice Status */}
-          {!showChat && (
+          {/* AI Speaking Animation (when chat is hidden) */}
+          {!showChat && isSpeaking && (
             <View style={styles.voiceStatus}>
-              {isSpeaking ? (
-                <View style={styles.statusContent}>
-                  <View style={styles.speakingIndicator} />
-                  <Text style={styles.statusText}>AI is speaking...</Text>
-                </View>
-              ) : (
-                <View style={styles.statusContent}>
+              <View style={styles.statusContent}>
+                <View style={styles.speakingIndicator} />
+                <Text style={styles.statusText}>AI is speaking...</Text>
+              </View>
+            </View>
+          )}
+
+          {/* Placeholder when chat is hidden and AI is not speaking */}
+          {!showChat && !isSpeaking && (
+            <View style={styles.voiceStatus}>
+              <View style={styles.statusContent}>
+                <View style={styles.placeholderCircle} />
+                <Text style={styles.placeholderText}>Click to start speaking</Text>
+                
+                {/* Microphone Section */}
+                <View style={styles.micSection}>
                   <TouchableOpacity
                     onPress={isListening ? stopListening : startListening}
                     disabled={!isSupported}
@@ -458,14 +726,14 @@ export default function VoiceChat() {
                           : [colors.secondary[500], colors.secondary[600]]
                       }
                       style={styles.micButtonGradient}>
-                      <Text style={styles.micIcon}>🎤</Text>
+                      <Svg width="24" height="24" viewBox="0 0 24 24" fill={isListening ? colors.secondary[600] : colors.primary[50]}>
+                        <Path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                        <Path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                      </Svg>
                     </LinearGradient>
                   </TouchableOpacity>
-                  <Text style={styles.statusText}>
-                    {isListening ? 'Listening...' : 'Click to start speaking'}
-                  </Text>
                 </View>
-              )}
+              </View>
             </View>
           )}
 
@@ -499,14 +767,12 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   sidebar: {
-    width: 300,
+    width: 280,
     backgroundColor: colors.primary[50],
     borderRightWidth: 1,
     borderRightColor: colors.dark[500] + '20',
     ...commonStyles.shadowMd,
     zIndex: 2,
-  },
-  sidebarVisible: {
     position: 'absolute',
     left: 0,
     top: 0,
@@ -519,29 +785,40 @@ const styles = StyleSheet.create({
   profileCard: {
     ...commonStyles.glassEffectStrong,
     padding: 16,
-    alignItems: 'center',
     marginBottom: 16,
     borderRadius: 12,
   },
+  profileHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
   avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
     ...commonStyles.shadowLg,
   },
   avatarText: {
     color: colors.primary[50],
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: 'bold',
+  },
+  profileInfo: {
+    flex: 1,
   },
   profileName: {
     fontSize: 18,
     fontWeight: '600',
     color: colors.primary[900],
-    marginBottom: 16,
+    marginBottom: 2,
+  },
+  profileSubtext: {
+    fontSize: 12,
+    color: colors.primary[900] + '60',
   },
   profileButtons: {
     width: '100%',
@@ -574,10 +851,12 @@ const styles = StyleSheet.create({
     color: colors.primary[900],
     marginBottom: 12,
   },
+  voiceControlsContainer: {
+    gap: 12,
+  },
   voiceButton: {
     borderRadius: 12,
     overflow: 'hidden',
-    marginBottom: 8,
     ...commonStyles.shadowSm,
   },
   voiceButtonActive: {
@@ -585,6 +864,25 @@ const styles = StyleSheet.create({
   },
   voiceButtonDisabled: {
     opacity: 0.5,
+  },
+  voiceStatusCard: {
+    backgroundColor: colors.secondary[500] + '30',
+    borderRadius: 8,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.dark[500] + '10',
+  },
+  voiceStatusText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.primary[900],
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  voiceStatusSubtext: {
+    fontSize: 12,
+    color: colors.primary[900] + '60',
+    textAlign: 'center',
   },
   actionButton: {
     backgroundColor: colors.accent[500] + '30',
@@ -606,15 +904,15 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   chatHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
     padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.dark[500] + '20',
     backgroundColor: colors.primary[50],
   },
+  chatHeaderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   menuButton: {
-    marginRight: 12,
     padding: 8,
   },
   menuIcon: {
@@ -625,12 +923,17 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: colors.primary[900],
+    marginBottom: 2,
+  },
+  chatSubtitle: {
+    fontSize: 12,
+    color: colors.primary[900] + '70',
   },
   voiceStatus: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 32,
+    minHeight: 400,
   },
   statusContent: {
     alignItems: 'center',
@@ -646,13 +949,31 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 18,
+    fontWeight: '500',
     color: colors.primary[900] + '80',
     textAlign: 'center',
   },
+  placeholderCircle: {
+    width: 128,
+    height: 128,
+    borderRadius: 64,
+    backgroundColor: colors.accent[500] + '30',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  placeholderText: {
+    fontSize: 18,
+    color: colors.primary[900] + '60',
+    textAlign: 'center',
+  },
+  micSection: {
+    alignItems: 'center',
+    gap: 8,
+  },
   micButton: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     overflow: 'hidden',
     ...commonStyles.shadowLg,
   },
@@ -668,8 +989,101 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  micIcon: {
-    fontSize: 48,
+  sessionsList: {
+    gap: 6,
+    marginTop: 12,
+  },
+  sessionsLabel: {
+    fontSize: 12,
+    color: colors.secondary[600],
+    marginBottom: 8,
+  },
+  sessionButton: {
+    backgroundColor: colors.secondary[500] + '15',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginBottom: 6,
+  },
+  sessionButtonActive: {
+    backgroundColor: colors.secondary[500] + '40',
+  },
+  sessionText: {
+    fontSize: 12,
+    color: colors.secondary[600] + '80',
+  },
+  sessionTextActive: {
+    color: colors.secondary[700],
+    fontWeight: '600',
+  },
+  infoCard: {
+    marginTop: 12,
+    padding: 10,
+    backgroundColor: colors.primary[200] + '40',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.dark[500] + '10',
+  },
+  infoText: {
+    fontSize: 11,
+    color: colors.primary[900] + '60',
+    textAlign: 'center',
+  },
+  insightCard: {
+    backgroundColor: colors.accent[500] + '30',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: colors.dark[500] + '10',
+  },
+  insightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+    gap: 8,
+  },
+  indicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.accent[500],
+  },
+  insightTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.accent[700],
+  },
+  insightSubtext: {
+    fontSize: 12,
+    color: colors.accent[700] + '80',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  statsLabel: {
+    fontSize: 14,
+    color: colors.primary[900] + '80',
+  },
+  statsValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.secondary[600],
+  },
+  warningCard: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: colors.dark[500] + '30',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.dark[500] + '50',
+  },
+  warningText: {
+    fontSize: 12,
+    color: colors.dark[600],
+    textAlign: 'center',
   },
 });
 

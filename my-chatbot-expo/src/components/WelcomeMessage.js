@@ -6,31 +6,31 @@ import {colors} from '../styles/colors';
 import {commonStyles} from '../styles/commonStyles';
 
 export default function WelcomeMessage() {
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const pulseOpacity = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     const pulse = Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 0.8,
-          duration: 1000,
+        Animated.timing(pulseOpacity, {
+          toValue: 0.5,
+          duration: 2000,
           useNativeDriver: true,
         }),
-        Animated.timing(pulseAnim, {
+        Animated.timing(pulseOpacity, {
           toValue: 1,
-          duration: 1000,
+          duration: 2000,
           useNativeDriver: true,
         }),
       ])
     );
     pulse.start();
     return () => pulse.stop();
-  }, [pulseAnim]);
+  }, [pulseOpacity]);
 
   return (
     <View style={styles.container}>
       <View style={styles.hero}>
-        <Animated.View style={{transform: [{scale: pulseAnim}]}}>
+        <Animated.View style={{opacity: pulseOpacity}}>
           <LinearGradient
             colors={[colors.accent[500], colors.secondary[500], colors.dark[500]]}
             style={styles.logo}>

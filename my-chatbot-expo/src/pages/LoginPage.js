@@ -10,9 +10,11 @@ import {
   ScrollView,
   Linking,
   AppState,
+  Animated,
 } from 'react-native';
 import {useNavigation, useFocusEffect} from '@react-navigation/native';
 import {LinearGradient} from 'expo-linear-gradient';
+import {Svg, Path} from 'react-native-svg';
 import {colors} from '../styles/colors';
 import {commonStyles} from '../styles/commonStyles';
 import {genSession, API_BASE_URL} from '../config/api';
@@ -22,6 +24,27 @@ export default function LoginPage() {
   const navigation = useNavigation();
   const appState = useRef(AppState.currentState);
   const pendingOAuthUsername = useRef(null);
+  const pulseOpacity = useRef(new Animated.Value(1)).current;
+
+  // Pulse animation for logo (matching Tailwind's animate-pulse)
+  useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseOpacity, {
+          toValue: 0.5,
+          duration: 2000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseOpacity, {
+          toValue: 1,
+          duration: 2000,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, [pulseOpacity]);
 
   // Check if Google is connected for a user
   const checkGoogleConnection = async (userId) => {
@@ -155,11 +178,12 @@ export default function LoginPage() {
           <View style={styles.content}>
             {/* Logo and title */}
             <View style={styles.header}>
-              <LinearGradient
-                colors={[colors.accent[500], colors.secondary[500], colors.dark[500]]}
-                style={styles.logo}>
-                <Text style={styles.logoEmoji}>🤖</Text>
-              </LinearGradient>
+              <Animated.View style={{opacity: pulseOpacity}}>
+                <LinearGradient
+                  colors={[colors.accent[500], colors.secondary[500], colors.dark[500]]}
+                  style={styles.logo}>
+                </LinearGradient>
+              </Animated.View>
               <Text style={styles.title}>Aivis</Text>
               <Text style={styles.subtitle}>
                 Your compassionate AI companion
@@ -225,17 +249,24 @@ export default function LoginPage() {
             <View style={styles.features}>
               <View style={styles.featureItem}>
                 <View style={styles.featureIcon}>
-                  <Text style={styles.featureEmoji}>💬</Text>
+                  <Svg width="24" height="24" viewBox="0 0 24 24" fill={colors.primary[900]}>
+                    <Path d="M20 2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4l4 4 4-4h4c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
+                  </Svg>
                 </View>
               </View>
               <View style={styles.featureItem}>
                 <View style={styles.featureIcon}>
-                  <Text style={styles.featureEmoji}>🎤</Text>
+                  <Svg width="24" height="24" viewBox="0 0 24 24" fill={colors.primary[900]}>
+                    <Path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                    <Path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                  </Svg>
                 </View>
               </View>
               <View style={styles.featureItem}>
                 <View style={styles.featureIcon}>
-                  <Text style={styles.featureEmoji}>📧</Text>
+                  <Svg width="24" height="24" viewBox="0 0 24 24" fill={colors.primary[900]}>
+                    <Path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
+                  </Svg>
                 </View>
               </View>
             </View>
@@ -275,9 +306,6 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     ...commonStyles.shadowLg,
   },
-  logoEmoji: {
-    fontSize: 48,
-  },
   title: {
     fontSize: 40,
     fontWeight: 'bold',
@@ -291,8 +319,9 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     width: '100%',
-    maxWidth: 400,
+    maxWidth: 384, // max-w-sm in Tailwind (24rem = 384px)
     gap: 16,
+    alignItems: 'center',
   },
   input: {
     backgroundColor: colors.secondary[500] + '20',
@@ -352,15 +381,12 @@ const styles = StyleSheet.create({
   featureIcon: {
     width: 64,
     height: 64,
-    borderRadius: 16,
+    borderRadius: 32,
     backgroundColor: colors.primary[200] + '80',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: colors.dark[500] + '20',
-  },
-  featureEmoji: {
-    fontSize: 32,
   },
 });
 

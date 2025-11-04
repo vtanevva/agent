@@ -1,10 +1,35 @@
-import React from 'react';
-import {View, TextInput, TouchableOpacity, StyleSheet, Text} from 'react-native';
+import React, {useEffect} from 'react';
+import {View, TextInput, TouchableOpacity, StyleSheet, Text, Platform} from 'react-native';
 import {LinearGradient} from 'expo-linear-gradient';
 import {colors} from '../styles/colors';
 import {commonStyles} from '../styles/commonStyles';
 
 export default function InputBar({input, setInput, loading, onSend, showConnectButton, onConnect}) {
+  // Add web-specific CSS to hide scrollbar
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      if (!document.head.querySelector('style[data-inputbar-scrollbar]')) {
+        const style = document.createElement('style');
+        style.setAttribute('data-inputbar-scrollbar', 'true');
+        style.textContent = `
+          textarea::-webkit-scrollbar {
+            width: 0px;
+            background: transparent;
+          }
+          textarea::-moz-scrollbar {
+            width: 0px;
+            background: transparent;
+          }
+          textarea {
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+          }
+        `;
+        document.head.appendChild(style);
+      }
+    }
+  }, []);
+
   return (
     <View style={styles.container}>
       <View style={styles.inputContainer}>
@@ -15,6 +40,7 @@ export default function InputBar({input, setInput, loading, onSend, showConnectB
           placeholderTextColor={colors.primary[900] + '60'}
           style={styles.input}
           multiline
+          maxHeight={100}
           maxLength={1000}
           editable={!loading}
         />
@@ -58,32 +84,35 @@ export default function InputBar({input, setInput, loading, onSend, showConnectB
 const styles = StyleSheet.create({
   container: {
     padding: 12,
-    borderTopWidth: 1,
-    borderTopColor: colors.dark[500] + '20',
     backgroundColor: colors.primary[50],
   },
   inputContainer: {
     flexDirection: 'row',
     gap: 10,
-    alignItems: 'flex-end',
+    alignItems: 'center',
   },
   input: {
     flex: 1,
     ...commonStyles.input,
-    minHeight: 44,
+    minHeight: 40,
     maxHeight: 100,
-    paddingTop: 10,
-    paddingBottom: 10,
+    paddingTop: 4,
+    paddingBottom: 4,
+    borderWidth: 0,
+    outlineWidth: 0,
+    textAlignVertical: 'center',
   },
   sendButton: {
     borderRadius: 10,
     overflow: 'hidden',
     ...commonStyles.shadowMd,
+    alignSelf: 'flex-end',
   },
   sendButtonGradient: {
     paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingVertical: 14,
     minWidth: 90,
+    minHeight: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },

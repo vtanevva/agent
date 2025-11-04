@@ -346,6 +346,39 @@ export default function ChatPage() {
               )}
             </View>
 
+            {/* Quick Actions */}
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>Quick Actions</Text>
+              <TouchableOpacity onPress={handleCheckEmails} style={styles.actionButton}>
+                <Text style={styles.actionText}>Check Emails</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleCheckCalendar} style={styles.actionButton}>
+                <Text style={styles.actionText}>Calendar Events</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.actionButton}>
+                <Text style={styles.actionText}>Compose Email</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Smart Insights */}
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>Smart Insights</Text>
+              <View style={styles.insightCard}>
+                <View style={styles.insightRow}>
+                  <View style={styles.indicator} />
+                  <Text style={styles.insightTitle}>Memory Active</Text>
+                </View>
+                <Text style={styles.insightSubtext}>{chat.length} messages in session</Text>
+              </View>
+              <View style={styles.insightCard}>
+                <View style={styles.insightRow}>
+                  <View style={styles.indicator} />
+                  <Text style={styles.insightTitle}>Context Aware</Text>
+                </View>
+                <Text style={styles.insightSubtext}>Personal facts remembered</Text>
+              </View>
+            </View>
+
             {/* Conversations */}
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Conversations</Text>
@@ -382,39 +415,6 @@ export default function ChatPage() {
                   })}
                 </View>
               )}
-            </View>
-
-            {/* Quick Actions */}
-            <View style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>Quick Actions</Text>
-              <TouchableOpacity onPress={handleCheckEmails} style={styles.actionButton}>
-                <Text style={styles.actionText}>Check Emails</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={handleCheckCalendar} style={styles.actionButton}>
-                <Text style={styles.actionText}>Calendar Events</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.actionButton}>
-                <Text style={styles.actionText}>Compose Email</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Smart Insights */}
-            <View style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>Smart Insights</Text>
-              <View style={styles.insightCard}>
-                <View style={styles.insightRow}>
-                  <View style={styles.indicator} />
-                  <Text style={styles.insightTitle}>Memory Active</Text>
-                </View>
-                <Text style={styles.insightSubtext}>{chat.length} messages in session</Text>
-              </View>
-              <View style={styles.insightCard}>
-                <View style={styles.insightRow}>
-                  <View style={styles.indicator} />
-                  <Text style={styles.insightTitle}>Context Aware</Text>
-                </View>
-                <Text style={styles.insightSubtext}>Personal facts remembered</Text>
-              </View>
             </View>
 
             {/* Session Stats */}
@@ -659,8 +659,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.dark[500] + '20',
     backgroundColor: colors.primary[50],
   },
   messagesContainer: {

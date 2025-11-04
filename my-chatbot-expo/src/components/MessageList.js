@@ -1,6 +1,7 @@
-import React from 'react';
+import React, {useEffect, useRef} from 'react';
 import {View, Text, ScrollView, StyleSheet} from 'react-native';
 import {LinearGradient} from 'expo-linear-gradient';
+import {Svg, Path, Circle} from 'react-native-svg';
 import {colors} from '../styles/colors';
 import {commonStyles} from '../styles/commonStyles';
 import TypingIndicator from './TypingIndicator';
@@ -8,6 +9,27 @@ import WelcomeMessage from './WelcomeMessage';
 import EmailList from './EmailList';
 
 export default function MessageList({chat, loading, onEmailSelect}) {
+  const scrollViewRef = useRef(null);
+
+  // Auto-scroll to bottom when new messages are added or when AI finishes responding
+  useEffect(() => {
+    if (scrollViewRef.current && chat.length > 0) {
+      // Small delay to ensure content is rendered
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({animated: true});
+      }, 100);
+    }
+  }, [chat.length, loading]);
+
+  // Also scroll when AI finishes responding (loading becomes false)
+  useEffect(() => {
+    if (scrollViewRef.current && !loading && chat.length > 0) {
+      // Delay to ensure the AI response is fully rendered
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({animated: true});
+      }, 200);
+    }
+  }, [loading, chat.length]);
   const sanitizeJson = (s) => {
     if (!s) return s;
     let out = s.replace(/,\s*(?=[}\]])/g, "");
@@ -83,7 +105,13 @@ export default function MessageList({chat, loading, onEmailSelect}) {
   }
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      ref={scrollViewRef}
+      style={styles.container}
+      showsVerticalScrollIndicator={false}
+      onContentSizeChange={() => {
+        scrollViewRef.current?.scrollToEnd({animated: true});
+      }}>
       {chat.map((msg, idx) => {
         const emailsFromJson = msg.role !== 'user' ? parseEmailJson(msg.text) : null;
         const emailsFromMd = !emailsFromJson && msg.role !== 'user' ? parseMarkdownEmailList(msg.text) : [];
@@ -108,9 +136,16 @@ export default function MessageList({chat, loading, onEmailSelect}) {
                       : [colors.secondary[500], colors.secondary[600]]
                   }
                   style={styles.avatar}>
-                  <Text style={styles.avatarText}>
-                    {msg.role === 'user' ? 'U' : 'AI'}
-                  </Text>
+                  {msg.role === 'user' ? (
+                    <Svg width="14" height="14" viewBox="0 0 24 24" fill={colors.primary[50]}>
+                      <Path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                    </Svg>
+                  ) : (
+                    <Svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                      <Circle cx="12" cy="12" r="10" stroke={colors.primary[50]} strokeWidth="2" fill="none" strokeDasharray="31.416" strokeDashoffset="23.562"/>
+                      <Circle cx="12" cy="12" r="6" stroke={colors.primary[50]} strokeWidth="1.5" fill="none" strokeDasharray="18.85" strokeDashoffset="14.137"/>
+                    </Svg>
+                  )}
                 </LinearGradient>
                 
                 <View style={styles.messageTextContainer}>
