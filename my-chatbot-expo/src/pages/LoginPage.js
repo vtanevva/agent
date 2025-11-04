@@ -197,7 +197,14 @@ export default function LoginPage() {
                 onChangeText={setLoginName}
                 placeholder="Choose a username"
                 placeholderTextColor={colors.primary[900] + '60'}
-                style={styles.input}
+                style={[
+                  styles.input,
+                  Platform.OS === 'web' && {
+                    outline: 'none',
+                    outlineWidth: 0,
+                    boxShadow: 'none',
+                  },
+                ]}
                 autoCapitalize="none"
                 autoCorrect={false}
               />
@@ -332,6 +339,7 @@ const styles = StyleSheet.create({
     color: colors.primary[900],
     textAlign: 'center',
     borderWidth: 0,
+    outlineWidth: 0,
   },
   button: {
     borderRadius: 12,
