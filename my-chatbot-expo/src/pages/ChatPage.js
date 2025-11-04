@@ -99,15 +99,26 @@ export default function ChatPage() {
     if (!userId) return;
     
     try {
-      const r = await fetch(`${API_BASE_URL}/api/google-profile`, {
+      const url = `${API_BASE_URL}/api/google-profile`;
+      console.log('Checking Google connection for:', userId);
+      console.log('API URL:', url);
+      
+      const r = await fetch(url, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({user_id: userId}),
       });
       
-      if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`);
+      console.log('Google profile response status:', r.status);
+      
+      if (!r.ok) {
+        const errorText = await r.text();
+        console.error('Google profile error response:', errorText);
+        throw new Error(`HTTP error! status: ${r.status}`);
+      }
       
       const data = await r.json();
+      console.log('Google profile data:', data);
       if (data.email) {
         setGoogleConnected(true);
         setGoogleEmail(data.email);
@@ -117,6 +128,7 @@ export default function ChatPage() {
       }
     } catch (e) {
       console.error('Error checking Google connection:', e);
+      console.error('Error details:', e.message);
       setGoogleConnected(false);
       setGoogleEmail(null);
     }
@@ -168,6 +180,13 @@ export default function ChatPage() {
       });
       
       console.log('Response status:', r.status);
+      console.log('Response headers:', Object.fromEntries(r.headers.entries()));
+      
+      if (!r.ok) {
+        const errorText = await r.text();
+        console.error('Error response:', errorText);
+        throw new Error(`HTTP ${r.status}: ${errorText}`);
+      }
       
       const data = await r.json();
       

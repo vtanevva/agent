@@ -49,18 +49,30 @@ export default function LoginPage() {
   // Check if Google is connected for a user
   const checkGoogleConnection = async (userId) => {
     try {
-      const r = await fetch(`${API_BASE_URL}/api/google-profile`, {
+      const url = `${API_BASE_URL}/api/google-profile`;
+      console.log('Checking Google connection for:', userId);
+      console.log('API URL:', url);
+      
+      const r = await fetch(url, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({user_id: userId}),
       });
       
-      if (!r.ok) return false;
+      console.log('Google profile response status:', r.status);
+      
+      if (!r.ok) {
+        const errorText = await r.text();
+        console.error('Google profile error response:', errorText);
+        return false;
+      }
       
       const data = await r.json();
+      console.log('Google profile data:', data);
       return data.email != null;
     } catch (e) {
       console.error('Error checking Google connection:', e);
+      console.error('Error details:', e.message);
       return false;
     }
   };
@@ -77,16 +89,23 @@ export default function LoginPage() {
         const username = pendingOAuthUsername.current;
         console.log('App returned from OAuth, checking connection for:', username);
         
-        // Wait a bit for OAuth to complete
-        setTimeout(async () => {
+        // Wait a bit for OAuth to complete and check multiple times
+        let attempts = 0;
+        const maxAttempts = 5;
+        const checkInterval = setInterval(async () => {
+          attempts++;
           const isConnected = await checkGoogleConnection(username);
           if (isConnected) {
             console.log('Google connected! Navigating to chat...');
             const sessionId = genSession(username);
             navigation.navigate('Chat', {userId: username, sessionId});
             pendingOAuthUsername.current = null;
+            clearInterval(checkInterval);
+          } else if (attempts >= maxAttempts) {
+            console.log('Max attempts reached, stopping check');
+            clearInterval(checkInterval);
           }
-        }, 2000);
+        }, 1000);
       }
       
       appState.current = nextAppState;
@@ -95,7 +114,7 @@ export default function LoginPage() {
     return () => {
       subscription?.remove();
     };
-  }, [navigation]);
+  }, [navigation, checkGoogleConnection]);
 
   // Check for OAuth redirect parameters (from URL query params)
   useEffect(() => {

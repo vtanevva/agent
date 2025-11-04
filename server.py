@@ -246,13 +246,27 @@ def _build_flow(redirect_uri: str, state: str | None = None):
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
-    data         = request.get_json(force=True, silent=True) or {}
-    user_message = (data.get("message") or "").strip()
-    user_id      = (data.get("user_id") or "anonymous").strip().lower()
-    session_id   = data.get("session_id") or f"{user_id}-{uuid.uuid4().hex[:8]}"
+    try:
+        print(f"[DEBUG] /api/chat request received", flush=True)
+        print(f"[DEBUG] Request method: {request.method}", flush=True)
+        print(f"[DEBUG] Request headers: {dict(request.headers)}", flush=True)
+        print(f"[DEBUG] Request content type: {request.content_type}", flush=True)
+        
+        data = request.get_json(force=True, silent=True) or {}
+        print(f"[DEBUG] Parsed JSON data: {data}", flush=True)
+        
+        user_message = (data.get("message") or "").strip()
+        user_id      = (data.get("user_id") or "anonymous").strip().lower()
+        session_id   = data.get("session_id") or f"{user_id}-{uuid.uuid4().hex[:8]}"
+        
+        print(f"[DEBUG] user_message: '{user_message}', user_id: '{user_id}', session_id: '{session_id}'", flush=True)
 
-    if not user_message:
-        return jsonify({"reply": "No message received. Please enter something."}), 400
+        if not user_message:
+            print(f"[DEBUG] Returning 400: No message received", flush=True)
+            return jsonify({"reply": "No message received. Please enter something."}), 400
+    except Exception as e:
+        print(f"[ERROR] Error parsing request: {e}", flush=True)
+        return jsonify({"error": "Invalid request", "message": str(e)}), 400
 
     # 📅 Detect calendar requests first
     calendar_requests = detect_calendar_requests(user_message)
@@ -380,7 +394,10 @@ def google_auth(user_id):
         if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https':
             redirect_uri = "https://web-production-0b6ce.up.railway.app/google/oauth2callback"
         else:
-            redirect_uri = url_for("google_callback", _external=True)
+            # Always use localhost for redirect URI (required by Google OAuth)
+            # Google doesn't accept IP addresses in redirect URIs
+            # The callback will handle redirecting to mobile app after processing
+            redirect_uri = "http://localhost:10000/google/oauth2callback"
             
         print(f"DEBUG: Building OAuth flow for user {user_id}", flush=True)
         print(f"DEBUG: Redirect URI: {redirect_uri}", flush=True)
@@ -425,15 +442,27 @@ def google_auth(user_id):
 
 from flask import render_template_string
 
-@app.get("/google/oauth2callback")
+@app.route("/google/oauth2callback", methods=["GET", "POST"])
 def google_callback():
+    """
+    OAuth callback endpoint.
+    Note: This endpoint must be accessible at http://localhost:10000/google/oauth2callback
+    For mobile development, you may need to use a tunnel service (ngrok, localtunnel) or
+    ensure the callback is accessible from your mobile device via IP address.
+    """
     try:
         print(f"DEBUG: OAuth callback received", flush=True)
         print(f"DEBUG: Request URL: {request.url}", flush=True)
+        print(f"DEBUG: Request host: {request.host}", flush=True)
+        print(f"DEBUG: Request remote_addr: {request.remote_addr}", flush=True)
         print(f"DEBUG: Request args: {dict(request.args)}", flush=True)
+        print(f"DEBUG: Request method: {request.method}", flush=True)
+        print(f"DEBUG: Request headers: {dict(request.headers)}", flush=True)
         
         state_raw = request.args.get("state")                # your temp "vani" or "vani|expo:true|redirect:http://localhost:8081"
         error = request.args.get("error")
+        
+        print(f"DEBUG: Raw state parameter: {state_raw}", flush=True)
         
         if not state_raw:
             return render_template_string("""
@@ -449,17 +478,27 @@ def google_callback():
             """), 400
         
         # Parse state to extract expo info
+        # Flask automatically URL-decodes request.args, but let's be explicit
+        from urllib.parse import unquote
+        state_decoded = unquote(state_raw) if state_raw else state_raw
+        print(f"DEBUG: Decoded state: {state_decoded}", flush=True)
+        
         expo_app = False
         expo_redirect = None
-        state = state_raw
-        if "|expo:" in state_raw:
-            parts = state_raw.split("|")
+        state = state_decoded
+        if "|expo:" in state_decoded or "|expo:" in state_decoded.lower():
+            parts = state_decoded.split("|")
+            print(f"DEBUG: State parts: {parts}", flush=True)
             state = parts[0]  # Original user_id
             for part in parts[1:]:
                 if part.startswith("expo:"):
-                    expo_app = part.split(":")[1].lower() == "true"
+                    # Handle both "expo:True" and "expo:true"
+                    expo_value = part.split(":", 1)[1].strip().lower()
+                    print(f"DEBUG: Found expo part: {part}, value: {expo_value}", flush=True)
+                    expo_app = expo_value == "true"
                 elif part.startswith("redirect:"):
                     expo_redirect = part.split(":", 1)[1]
+                    print(f"DEBUG: Found redirect part: {part}, value: {expo_redirect}", flush=True)
         
         print(f"DEBUG: Parsed state: user_id={state}, expo_app={expo_app}, expo_redirect={expo_redirect}", flush=True)
         
@@ -478,14 +517,19 @@ def google_callback():
             """, error=error)
         
         # Use the same redirect URI as in the auth request
+        # (expo_app is already parsed above, don't reset it)
         if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https':
             redirect_uri = "https://web-production-0b6ce.up.railway.app/google/oauth2callback"
         else:
-            redirect_uri = url_for("google_callback", _external=True)
+            # Always use localhost for redirect URI (required by Google OAuth)
+            # This must match what's registered in Google Cloud Console
+            redirect_uri = "http://localhost:10000/google/oauth2callback"
         print(f"DEBUG: Building flow with redirect_uri: {redirect_uri}", flush=True)
+        print(f"DEBUG: expo_app={expo_app}, expo_redirect={expo_redirect}", flush=True)
         
         # Build flow with the state that was used in authorization_url
         # This ensures fetch_token can validate the state correctly
+        # Use the original raw state for token validation
         flow = _build_flow(redirect_uri, state=state_raw)
         print("DEBUG: Flow built with state:", state_raw, flush=True)
         print("DEBUG: Flow built, fetching token...", flush=True)
@@ -548,6 +592,43 @@ def google_callback():
             
     except Exception as e:
         print(f"ERROR in google_callback: {e}", flush=True)
+        import traceback
+        print(f"ERROR traceback: {traceback.format_exc()}", flush=True)
+        
+        # If it's an Expo app and we have the state, try to show success page anyway
+        try:
+            if "|expo:" in str(state_raw or "").lower():
+                print(f"DEBUG: Error occurred but detected Expo app, showing success page anyway", flush=True)
+                user_email = str(state_raw or "unknown").split("|")[0]
+                return render_template_string("""
+                  <!doctype html>
+                  <html>
+                    <head>
+                      <title>Google Connected - Return to App</title>
+                      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    </head>
+                    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; text-align: center; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; margin: 0;">
+                      <div style="background: rgba(255,255,255,0.95); padding: 50px 30px; border-radius: 25px; max-width: 400px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+                        <div style="font-size: 80px; margin-bottom: 20px;">✅</div>
+                        <h1 style="font-size: 2em; margin-bottom: 15px; color: #333; font-weight: 700;">Successfully Logged In!</h1>
+                        <p style="font-size: 1.1em; margin-bottom: 30px; color: #666; line-height: 1.6;">
+                          Your Google account has been connected successfully.
+                        </p>
+                        <div style="background: #f0f0f0; padding: 20px; border-radius: 15px; margin-bottom: 30px;">
+                          <p style="font-size: 1.3em; margin: 0; color: #333; font-weight: 600;">
+                            👉 Return to the App
+                          </p>
+                          <p style="font-size: 0.95em; margin-top: 10px; color: #666;">
+                            Close this browser tab and go back to your app. You're all set!
+                          </p>
+                        </div>
+                      </div>
+                    </body>
+                  </html>
+                """, user_email=user_email)
+        except:
+            pass
+        
         return render_template_string("""
         <!doctype html>
         <html>
@@ -565,51 +646,102 @@ def google_callback():
     # Create a URL-safe user ID by replacing @ with -at- and removing dots
     user_id_safe = user_email.replace('@', '-at-').replace('.', '-')
     
-    # Determine redirect URL based on whether it's Expo app
-    if expo_app and expo_redirect:
-        redirect_url = f"{expo_redirect}/?username={state}&email={user_email}"
-        print(f"DEBUG: Redirecting to Expo app: {redirect_url}", flush=True)
-    else:
-        redirect_url = f"/?username={state}&email={user_email}"
-        print(f"DEBUG: Redirecting to web app: {redirect_url}", flush=True)
+    # For Expo apps, show success page immediately (no redirect)
+    print(f"DEBUG: Final check - expo_app={expo_app}, expo_redirect={expo_redirect}, will show success page: {expo_app}", flush=True)
+    print(f"DEBUG: user_email={user_email}, state={state}", flush=True)
     
-    # Simple success page that works for both popup and redirect
-    return render_template_string("""
-      <!doctype html>
-      <html>
-        <head>
-          <title>Google Connected</title>
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <script>
-            // Try to close popup (desktop)
-            if (window.opener) {
-              // Notify parent window of successful authentication
-              try {
-                window.opener.postMessage({
-                  type: 'GOOGLE_AUTH_SUCCESS',
-                  userEmail: "{{ user_email }}"
-                }, '*');
-              } catch (e) {
-                console.log('Could not notify parent window:', e);
-              }
-              window.close();
-            } else {
-              // For mobile/redirect, redirect with username parameter
-              const redirectUrl = "{{ redirect_url }}";
-              window.location.href = redirectUrl;
-            }
-          </script>
-        </head>
-        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; min-height: 100vh; display: flex; flex-direction: column; justify-content: center;">
-          <div style="background: rgba(255,255,255,0.1); padding: 40px; border-radius: 20px; backdrop-filter: blur(10px);">
-            <h1 style="font-size: 2.5em; margin-bottom: 20px;">✅ Connected to Google!</h1>
-            <p style="font-size: 1.2em; margin-bottom: 30px;">You can now use Gmail and Calendar features.</p>
-            <p style="font-size: 1em; margin-bottom: 20px;">Redirecting...</p>
-            <p><a href="{{ redirect_url }}" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 12px 24px; border-radius: 25px; display: inline-block;">Continue to Chat</a></p>
-          </div>
-        </body>
-      </html>
-    """, user_email=user_email, username=state, redirect_url=redirect_url)
+    if expo_app:
+        # For Expo mobile, show success page immediately - no redirect
+        print(f"DEBUG: Showing success page for Expo app, user: {user_email}", flush=True)
+        print(f"DEBUG: Success page will be rendered now", flush=True)
+        
+        # Ensure user_email is a string for the template
+        display_email = str(user_email) if user_email else str(state)
+        print(f"DEBUG: Rendering success page with email: {display_email}", flush=True)
+        
+        return render_template_string("""
+          <!doctype html>
+          <html>
+            <head>
+              <title>Google Connected - Return to App</title>
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <style>
+                @keyframes checkmark {
+                  0% { transform: scale(0); }
+                  50% { transform: scale(1.2); }
+                  100% { transform: scale(1); }
+                }
+                .checkmark {
+                  animation: checkmark 0.6s ease-in-out;
+                }
+              </style>
+            </head>
+            <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; text-align: center; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; margin: 0;">
+              <div style="background: rgba(255,255,255,0.95); padding: 50px 30px; border-radius: 25px; backdrop-filter: blur(10px); max-width: 400px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+                <div class="checkmark" style="font-size: 80px; margin-bottom: 20px;">✅</div>
+                <h1 style="font-size: 2em; margin-bottom: 15px; color: #333; font-weight: 700;">Successfully Logged In!</h1>
+                <p style="font-size: 1.1em; margin-bottom: 30px; color: #666; line-height: 1.6;">
+                  Your Google account has been connected successfully.
+                </p>
+                <div style="background: #f0f0f0; padding: 20px; border-radius: 15px; margin-bottom: 30px;">
+                  <p style="font-size: 1.3em; margin: 0; color: #333; font-weight: 600;">
+                    👉 Return to the App
+                  </p>
+                  <p style="font-size: 0.95em; margin-top: 10px; color: #666;">
+                    Close this browser tab and go back to your app. You're all set!
+                  </p>
+                </div>
+                <p style="font-size: 0.9em; color: #999; margin-top: 20px;">
+                  Connected as: <strong style="color: #667eea;">{{ display_email }}</strong>
+                </p>
+              </div>
+            </body>
+          </html>
+        """, display_email=display_email, username=state)
+    
+    # For web apps, determine redirect URL and use redirect logic
+    else:
+        # Determine redirect URL for web app
+        frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+        redirect_url = f"{frontend_url}/?username={state}&email={user_email}"
+        print(f"DEBUG: Redirecting to web app: {redirect_url}", flush=True)
+        # For web apps, use the original redirect logic
+        return render_template_string("""
+          <!doctype html>
+          <html>
+            <head>
+              <title>Google Connected</title>
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <script>
+                // Try to close popup (desktop)
+                if (window.opener) {
+                  // Notify parent window of successful authentication
+                  try {
+                    window.opener.postMessage({
+                      type: 'GOOGLE_AUTH_SUCCESS',
+                      userEmail: "{{ user_email }}"
+                    }, '*');
+                  } catch (e) {
+                    console.log('Could not notify parent window:', e);
+                  }
+                  window.close();
+                } else {
+                  // For web redirect
+                  const redirectUrl = "{{ redirect_url }}";
+                  window.location.href = redirectUrl;
+                }
+              </script>
+            </head>
+            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; min-height: 100vh; display: flex; flex-direction: column; justify-content: center;">
+              <div style="background: rgba(255,255,255,0.1); padding: 40px; border-radius: 20px; backdrop-filter: blur(10px);">
+                <h1 style="font-size: 2.5em; margin-bottom: 20px;">✅ Connected to Google!</h1>
+                <p style="font-size: 1.2em; margin-bottom: 30px;">You can now use Gmail and Calendar features.</p>
+                <p style="font-size: 1em; margin-bottom: 20px;">Redirecting...</p>
+                <p><a href="{{ redirect_url }}" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 12px 24px; border-radius: 25px; display: inline-block;">Continue to Chat</a></p>
+              </div>
+            </body>
+          </html>
+        """, user_email=user_email, username=state, redirect_url=redirect_url)
 
 
 # /agent  – calls run_agent which may invoke tools (Gmail, Calendar…)

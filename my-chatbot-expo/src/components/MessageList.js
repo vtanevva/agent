@@ -155,7 +155,13 @@ export default function MessageList({chat, loading, onEmailSelect}) {
                   {emailsToDisplay.length > 0 ? (
                     <EmailList emails={emailsToDisplay} onSelect={onEmailSelect} />
                   ) : (
-                    <Text style={styles.messageText}>{msg.text}</Text>
+                    <Text 
+                      style={styles.messageText} 
+                      numberOfLines={undefined} 
+                      selectable={true}
+                      allowFontScaling={true}>
+                      {msg.text || ''}
+                    </Text>
                   )}
                 </View>
               </View>
@@ -185,8 +191,10 @@ const styles = StyleSheet.create({
   },
   messageBubble: {
     maxWidth: '80%',
+    minWidth: 60, // Ensure minimum width for visibility
     borderRadius: 16,
     padding: 12,
+    width: 'auto', // Allow natural width on mobile
     ...commonStyles.shadowMd,
   },
   bubbleUser: {
@@ -199,8 +207,8 @@ const styles = StyleSheet.create({
   },
   messageContent: {
     flexDirection: 'row',
-    gap: 12,
     alignItems: 'flex-start',
+    width: '100%', // Ensure full width on mobile
   },
   avatar: {
     width: 40,
@@ -208,6 +216,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 12, // Spacing between avatar and text
     ...commonStyles.shadowMd,
   },
   avatarText: {
@@ -217,18 +226,23 @@ const styles = StyleSheet.create({
   },
   messageTextContainer: {
     flex: 1,
-    gap: 4,
+    minWidth: 0, // Ensure flex container can shrink
+    flexShrink: 1, // Allow container to shrink
+    width: '100%', // Explicit width for mobile text rendering
+    flexDirection: 'column', // Ensure proper layout
   },
   messageAuthor: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.primary[50] + '80',
+    color: 'rgba(253, 255, 252, 0.5)', // Semi-transparent white
     marginBottom: 4,
   },
   messageText: {
     fontSize: 15,
     lineHeight: 20,
-    color: colors.primary[50],
+    color: '#FFFFFF', // Pure white color for mobile compatibility
+    flexShrink: 1, // Allow text to shrink and wrap
+    backgroundColor: 'transparent', // Ensure text background is transparent
   },
 });
 
