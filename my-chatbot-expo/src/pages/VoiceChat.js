@@ -24,6 +24,7 @@ import MessageList from '../components/MessageList';
 import InputBar from '../components/InputBar';
 import EmailList from '../components/EmailList';
 import {API_BASE_URL} from '../config/api';
+import EmailReplyModal from '../components/EmailReplyModal';
 
 export default function VoiceChat() {
   const route = useRoute();
@@ -43,6 +44,9 @@ export default function VoiceChat() {
   const [showSidebar, setShowSidebar] = useState(false);
   const [speechRate, setSpeechRate] = useState(0.5);
   const [voiceAccent, setVoiceAccent] = useState('en-US');
+  const [replyOpen, setReplyOpen] = useState(false);
+  const [replyThreadId, setReplyThreadId] = useState(null);
+  const [replyTo, setReplyTo] = useState(null);
   const lastUserMessage = useRef('');
   const sidebarAnim = useRef(new Animated.Value(-280)).current;
 
@@ -377,7 +381,9 @@ export default function VoiceChat() {
   const handleEmailSelect = (threadId, from) => {
     const m = /<([^>]+)>/.exec(from);
     const to = m ? m[1] : from;
-    setInput(`Reply to thread ${threadId} to ${to}: `);
+    setReplyThreadId(threadId);
+    setReplyTo(to);
+    setReplyOpen(true);
     setEmailChoices(null);
   };
 
@@ -853,6 +859,20 @@ export default function VoiceChat() {
           />
         </View>
       </View>
+      <EmailReplyModal
+        visible={replyOpen}
+        onClose={(sent) => {
+          setReplyOpen(false);
+          setReplyThreadId(null);
+          setReplyTo(null);
+          if (sent) {
+            setChat((prev) => [...prev, {role: 'assistant', text: '✅ Reply sent.'}]);
+          }
+        }}
+        userId={userId}
+        threadId={replyThreadId}
+        to={replyTo}
+      />
     </SafeAreaView>
   );
 }

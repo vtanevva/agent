@@ -22,6 +22,7 @@ import MessageList from '../components/MessageList';
 import InputBar from '../components/InputBar';
 import CalendarView from '../components/CalendarView';
 import {API_BASE_URL} from '../config/api';
+import EmailReplyModal from '../components/EmailReplyModal';
 
 export default function ChatPage() {
   const route = useRoute();
@@ -38,6 +39,9 @@ export default function ChatPage() {
   const [showSidebar, setShowSidebar] = useState(false);
   const [googleConnected, setGoogleConnected] = useState(false);
   const [googleEmail, setGoogleEmail] = useState(null);
+  const [replyOpen, setReplyOpen] = useState(false);
+  const [replyThreadId, setReplyThreadId] = useState(null);
+  const [replyTo, setReplyTo] = useState(null);
   const chatRef = useRef(null);
   const lastUserMessage = useRef('');
   const sidebarAnim = useRef(new Animated.Value(-280)).current;
@@ -251,7 +255,9 @@ export default function ChatPage() {
   const handleEmailSelect = (threadId, from) => {
     const m = /<([^>]+)>/.exec(from);
     const to = m ? m[1] : from;
-    setInput(`Reply to thread ${threadId} to ${to}: `);
+    setReplyThreadId(threadId);
+    setReplyTo(to);
+    setReplyOpen(true);
   };
 
   const handleNewChat = () => {
@@ -542,6 +548,20 @@ export default function ChatPage() {
             onClose={() => setShowCalendar(false)}
           />
         )}
+        <EmailReplyModal
+          visible={replyOpen}
+          onClose={(sent) => {
+            setReplyOpen(false);
+            setReplyThreadId(null);
+            setReplyTo(null);
+            if (sent) {
+              setChat((c) => [...c, {role: 'assistant', text: '✅ Reply sent.'}]);
+            }
+          }}
+          userId={userId}
+          threadId={replyThreadId}
+          to={replyTo}
+        />
       </View>
     </SafeAreaView>
   );
