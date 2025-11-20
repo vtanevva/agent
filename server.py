@@ -46,6 +46,10 @@ from app.utils.oauth_utils import (
     GOOGLE_SCOPES, IG_SCOPES, OAUTH_BASE, TOKEN_URL
 )
 from app.config import Config
+from app.autogen_agents.gmail_agent import run_gmail_autogen
+from app.tools.gmail_style import analyze_email_style, generate_reply_draft
+from app.tools.gmail_reply import reply_email as tool_reply_email
+from app.tools.gmail_detail import get_thread_detail
 
 # Environment setup
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -204,92 +208,100 @@ def chat():
         if not user_message:
             return jsonify({"reply": "No message received. Please enter something."}), 400
 
-        # Check Google auth if needed
-    auth_response = require_google_auth(user_id)
-    if auth_response:
-        return auth_response
+        # Detect features that require Google auth
+        calendar_requests = detect_calendar_requests(user_message)
+        calendar_keywords = ["calendar", "events", "schedule", "appointments", "meetings"]
+        email_keywords = ["emails", "email", "inbox", "reply to"]
 
-        # Handle calendar requests
-    calendar_requests = detect_calendar_requests(user_message)
-    if calendar_requests:
-        try:
-            for calendar_request in calendar_requests:
-                start_time, end_time = parse_datetime_from_text(calendar_request['full_match'])
-                if start_time and end_time:
-                    result = create_calendar_event(
-                        user_id=user_id,
-                        summary=calendar_request['description'],
-                        start_time=start_time.isoformat(),
-                        end_time=end_time.isoformat(),
-                        description=f"Event created from chat: {user_message}"
-                    )
-                    
-                    if result.get('success'):
-                        reply = f"✅ I've scheduled '{calendar_request['description']}' for {start_time.strftime('%B %d at %I:%M %p')}. You can view it in your calendar!"
-                    else:
-                        reply = f"❌ Sorry, I couldn't schedule the event. Please make sure you're connected to Google Calendar."
-                    
-                    save_message(user_id, session_id, user_message, reply, None, False)
-                    return jsonify({"reply": reply})
-        except Exception as e:
-            reply = f"❌ Error creating calendar event: {str(e)}"
-            save_message(user_id, session_id, user_message, reply, None, False)
-            return jsonify({"reply": reply})
+        if calendar_requests or any(k in user_message.lower() for k in calendar_keywords + email_keywords):
+            auth_response = require_google_auth(user_id)
+            if auth_response:
+                return auth_response
 
-        # Handle calendar viewing requests
-    calendar_keywords = ["calendar", "events", "schedule", "appointments", "meetings"]
-    if any(keyword in user_message.lower() for keyword in calendar_keywords):
-        auth_response = require_google_auth(user_id)
-        if auth_response:
-            return auth_response
-        reply = run_agent(user_id=user_id, message=user_message, history=[])
-        emotion = None
-        suicide_flag = False
+        # Handle calendar event creation
+        if calendar_requests:
+            try:
+                for calendar_request in calendar_requests:
+                    start_time, end_time = parse_datetime_from_text(calendar_request["full_match"])
+                    if start_time and end_time:
+                        result = create_calendar_event(
+                            user_id=user_id,
+                            summary=calendar_request["description"],
+                            start_time=start_time.isoformat(),
+                            end_time=end_time.isoformat(),
+                            description=f"Event created from chat: {user_message}",
+                        )
+
+                        if result.get("success"):
+                            reply = (
+                                f"✅ I've scheduled '{calendar_request['description']}' for "
+                                f"{start_time.strftime('%B %d at %I:%M %p')}."
+                                " You can view it in your calendar!"
+                            )
+                        else:
+                            reply = (
+                                "❌ Sorry, I couldn't schedule the event. Please make sure "
+                                "you're connected to Google Calendar."
+                            )
+
+                        save_message(user_id, session_id, user_message, reply, None, False)
+                        return jsonify({"reply": reply})
+            except Exception as e:
+                reply = f"❌ Error creating calendar event: {str(e)}"
+                save_message(user_id, session_id, user_message, reply, None, False)
+                return jsonify({"reply": reply})
+
+        # Load session history
+        session_memory = []
+        conversations = get_conversations_collection()
+        if conversations is not None:
+            try:
+                chat_doc = conversations.find_one({"user_id": user_id, "session_id": session_id})
+                if chat_doc and "messages" in chat_doc:
+                    for msg in chat_doc["messages"][-20:]:
+                        role = "assistant" if msg["role"] == "bot" else msg["role"]
+                        # Ensure content is a string for model compatibility
+                        text = msg.get("text", "")
+                        if not isinstance(text, str):
+                            try:
+                                text = json.dumps(text, ensure_ascii=False)
+                            except Exception:
+                                text = str(text)
+                        session_memory.append({"role": role, "content": text})
+            except Exception as e:
+                print(f"[ERROR] Failed to load session history: {e}", flush=True)
+
+        # Feature-specific handling
+        if any(k in user_message.lower() for k in calendar_keywords):
+            reply = run_agent(user_id=user_id, message=user_message, history=[])
+            emotion = None
+            suicide_flag = False
+        elif any(k in user_message.lower() for k in email_keywords):
+            reply = run_agent(user_id=user_id, message=user_message, history=session_memory)
+            emotion = None
+            suicide_flag = False
         else:
-            # Load session history
-    session_memory = []
-    conversations = get_conversations_collection()
-    if conversations is not None:
-        try:
-            chat_doc = conversations.find_one({"user_id": user_id, "session_id": session_id})
-            if chat_doc and "messages" in chat_doc:
-                for msg in chat_doc["messages"][-20:]:
-                    role = "assistant" if msg["role"] == "bot" else msg["role"]
-                    session_memory.append({"role": role, "content": msg["text"]})
-        except Exception as e:
-            print(f"[ERROR] Failed to load session history: {e}", flush=True)
-
-            # Handle email queries with agent
-    email_keywords = ["emails", "email", "inbox", "reply to"]
-    if any(kw in user_message.lower() for kw in email_keywords):
-        auth_response = require_google_auth(user_id)
-        if auth_response:
-            return auth_response
-        reply = run_agent(user_id=user_id, message=user_message, history=session_memory)
-        emotion = None
-        suicide_flag = False
-    else:
-                # Default: GPT chat with memory
-        reply, emotion, suicide_flag = chat_with_gpt(
-            user_message,
-            user_id=user_id,
-            session_id=session_id,
-            return_meta=True,
-            session_memory=session_memory
-        )
+            # Default: GPT chat with memory
+            reply, emotion, suicide_flag = chat_with_gpt(
+                user_message,
+                user_id=user_id,
+                session_id=session_id,
+                return_meta=True,
+                session_memory=session_memory,
+            )
 
         # Save conversation
-    save_message(user_id, session_id, user_message, reply, emotion, suicide_flag)
+        save_message(user_id, session_id, user_message, reply, emotion, suicide_flag)
 
         # Extract and save new facts
-    extracted = extract_facts_with_gpt(user_message)
-    for line in extracted.split("\n"):
-        line = line.strip("- ").strip()
-        if line and line.lower() != "none":
-            fact = line.removeprefix("FACT:").strip()
-            save_chat_to_memory(fact, session_id, user_id=user_id, emotion=emotion)
+        extracted = extract_facts_with_gpt(user_message)
+        for line in extracted.split("\n"):
+            line = line.strip("- ").strip()
+            if line and line.lower() != "none":
+                fact = line.removeprefix("FACT:").strip()
+                save_chat_to_memory(fact, session_id, user_id=user_id, emotion=emotion)
 
-    return jsonify({"reply": reply})
+        return jsonify({"reply": reply})
 
     except Exception as e:
         print(f"[ERROR] Error in chat endpoint: {e}", flush=True)
@@ -306,6 +318,117 @@ def agent_endpoint():
         history=data.get("history", [])
     )
     return jsonify({"reply": reply})
+
+
+@app.route("/api/autogen/gmail", methods=["POST"])
+def autogen_gmail():
+    """Invoke the AutoGen-based Gmail agent with a user message."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_message = (data.get("message") or "").strip()
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    history = data.get("history", [])
+
+    if not user_message:
+        return jsonify({"reply": "No message received. Please enter something."}), 400
+
+    # Ensure Google OAuth is connected for Gmail features
+    email_keywords = ["emails", "email", "inbox", "reply to", "gmail"]
+    if any(k in user_message.lower() for k in email_keywords):
+        auth_response = require_google_auth(user_id)
+        if auth_response:
+            return auth_response
+
+    reply = run_gmail_autogen(user_id=user_id, message=user_message, history=history)
+    return jsonify({"reply": reply})
+
+@app.route("/api/gmail/analyze-style", methods=["POST"])
+def gmail_analyze_style():
+    """Analyze user's email writing style from Sent messages."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    max_samples = int(data.get("max_samples", 10))
+
+    # Ensure Google OAuth
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    result = analyze_email_style(user_id=user_id, max_samples=max_samples)
+    try:
+        return jsonify(json.loads(result))
+    except Exception:
+        return jsonify({"success": False, "error": "Invalid analyzer output"}), 500
+
+@app.route("/api/gmail/draft-reply", methods=["POST"])
+def gmail_draft_reply():
+    """Generate a reply draft for a given thread, emulating user's style."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    thread_id = data.get("thread_id")
+    to = data.get("to")
+    user_points = data.get("user_points") or ""
+    max_samples = int(data.get("max_samples", 10))
+
+    if not all([thread_id, to]):
+        return jsonify({"success": False, "error": "Missing thread_id or to"}), 400
+
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    result = generate_reply_draft(
+        user_id=user_id,
+        thread_id=thread_id,
+        to=to,
+        user_points=user_points,
+        max_samples=max_samples,
+    )
+    try:
+        return jsonify(json.loads(result))
+    except Exception:
+        return jsonify({"success": False, "error": "Invalid draft output"}), 500
+
+@app.route("/api/gmail/thread-detail", methods=["POST"])
+def gmail_thread_detail():
+    """Return full plain-text content and headers for the selected email/thread."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    thread_id = data.get("thread_id")
+    if not thread_id:
+        return jsonify({"success": False, "error": "Missing thread_id"}), 400
+
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    result = get_thread_detail(user_id=user_id, thread_id=thread_id)
+    try:
+        return jsonify(json.loads(result))
+    except Exception:
+        return jsonify({"success": False, "error": "Invalid detail output"}), 500
+
+@app.route("/api/gmail/reply", methods=["POST"])
+def gmail_reply_send():
+    """Send a reply inside a Gmail thread with a provided body."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    thread_id = data.get("thread_id")
+    to = data.get("to")
+    body = data.get("body") or ""
+    subj_prefix = data.get("subj_prefix", "Re:")
+
+    if not all([thread_id, to, body]):
+        return jsonify({"success": False, "error": "Missing thread_id, to, or body"}), 400
+
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    try:
+        msg = tool_reply_email(user_id=user_id, thread_id=thread_id, to=to, body=body, subj_prefix=subj_prefix)
+        return jsonify({"success": True, "message": msg})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/api/google-profile", methods=["POST"])
@@ -496,7 +619,7 @@ def google_callback():
     try:
         state_raw = request.args.get("state")
         error = request.args.get("error")
-        
+
         if not state_raw:
             return render_template_string("""
             <!doctype html>
@@ -509,9 +632,9 @@ def google_callback():
               </body>
             </html>
             """), 400
-        
+
         state, expo_app, expo_redirect = parse_expo_state(state_raw)
-        
+
         if error:
             return render_template_string("""
             <!doctype html>
@@ -524,10 +647,9 @@ def google_callback():
               </body>
             </html>
             """, error=error)
-        
+
         redirect_uri = _get_redirect_uri()
         flow = _build_flow(redirect_uri, state=state_raw)
-        
         try:
             flow.fetch_token(authorization_response=request.url)
         except Exception as token_error:
@@ -548,20 +670,16 @@ def google_callback():
               </body>
             </html>
             """, error=str(token_error))
-        
+
         creds = flow.credentials
         real_email = get_gmail_profile(creds)
         if not real_email:
             real_email = state
 
         save_google_credentials(state, creds, real_email)
-            
+
     except Exception as e:
         print(f"[ERROR] OAuth callback error: {e}", flush=True)
-            if "|expo:" in str(state_raw or "").lower():
-                user_email = str(state_raw or "unknown").split("|")[0]
-            return render_template_string(_get_success_page_template(user_email))
-        
         return render_template_string("""
         <!doctype html>
         <html>
@@ -575,47 +693,47 @@ def google_callback():
         """, error=str(e))
 
     user_email = real_email if real_email else state
-    
+
     if expo_app:
         display_email = str(user_email) if user_email else str(state)
         return render_template_string(_get_success_page_template(display_email))
-    
+
     # Web app redirect
-        frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
-        redirect_url = f"{frontend_url}/?username={state}&email={user_email}"
-        return render_template_string("""
-          <!doctype html>
-          <html>
-            <head>
-              <title>Google Connected</title>
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <script>
-                if (window.opener) {
-                  try {
-                    window.opener.postMessage({
-                      type: 'GOOGLE_AUTH_SUCCESS',
-                      userEmail: "{{ user_email }}"
-                    }, '*');
-                  } catch (e) {
-                    console.log('Could not notify parent window:', e);
-                  }
-                  window.close();
-                } else {
-                  const redirectUrl = "{{ redirect_url }}";
-                  window.location.href = redirectUrl;
-                }
-              </script>
-            </head>
-            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; min-height: 100vh; display: flex; flex-direction: column; justify-content: center;">
-              <div style="background: rgba(255,255,255,0.1); padding: 40px; border-radius: 20px; backdrop-filter: blur(10px);">
-                <h1 style="font-size: 2.5em; margin-bottom: 20px;">✅ Connected to Google!</h1>
-                <p style="font-size: 1.2em; margin-bottom: 30px;">You can now use Gmail and Calendar features.</p>
-                <p style="font-size: 1em; margin-bottom: 20px;">Redirecting...</p>
-                <p><a href="{{ redirect_url }}" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 12px 24px; border-radius: 25px; display: inline-block;">Continue to Chat</a></p>
-              </div>
-            </body>
-          </html>
-        """, user_email=user_email, username=state, redirect_url=redirect_url)
+    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    redirect_url = f"{frontend_url}/?username={state}&email={user_email}"
+    return render_template_string("""
+      <!doctype html>
+      <html>
+        <head>
+          <title>Google Connected</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <script>
+            if (window.opener) {
+              try {
+                window.opener.postMessage({
+                  type: 'GOOGLE_AUTH_SUCCESS',
+                  userEmail: "{{ user_email }}"
+                }, '*');
+              } catch (e) {
+                console.log('Could not notify parent window:', e);
+              }
+              window.close();
+            } else {
+              const redirectUrl = "{{ redirect_url }}";
+              window.location.href = redirectUrl;
+            }
+          </script>
+        </head>
+        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; min-height: 100vh; display: flex; flex-direction: column; justify-content: center;">
+          <div style="background: rgba(255,255,255,0.1); padding: 40px; border-radius: 20px; backdrop-filter: blur(10px);">
+            <h1 style="font-size: 2.5em; margin-bottom: 20px;">✅ Connected to Google!</h1>
+            <p style="font-size: 1.2em; margin-bottom: 30px;">You can now use Gmail and Calendar features.</p>
+            <p style="font-size: 1em; margin-bottom: 20px;">Redirecting...</p>
+            <p><a href="{{ redirect_url }}" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 12px 24px; border-radius: 25px; display: inline-block;">Continue to Chat</a></p>
+          </div>
+        </body>
+      </html>
+    """, user_email=user_email, username=state, redirect_url=redirect_url)
 
 
 @app.route("/instagram/auth")
@@ -681,16 +799,16 @@ def instagram_callback():
             linked = (p, test["instagram_business_account"])
             break
 
-        if not linked:
-            return (
-                "❌ None of your Pages are linked to an IG Business/Creator account. "
-                "Go into Facebook Page Settings and link your IG profile first."
-            ), 400
+    if not linked:
+        return (
+            "❌ None of your Pages are linked to an IG Business/Creator account. "
+            "Go into Facebook Page Settings and link your IG profile first."
+        ), 400
 
-        page, ig_info = linked
+    page, ig_info = linked
     page_id = page["id"]
-        page_token = page["access_token"]
-        ig_user_id = ig_info["id"]
+    page_token = page["access_token"]
+    ig_user_id = ig_info["id"]
 
     # Persist to MongoDB
     tokens = get_tokens_collection()

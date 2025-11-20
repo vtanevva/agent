@@ -6,7 +6,7 @@ import { Platform } from 'react-native';
 // Find your IP with: ipconfig (Windows) or ifconfig (Mac/Linux)
 
 // Your computer's local IP address - UPDATE THIS if your IP changes
-const LOCAL_IP = '192.168.0.104';
+const LOCAL_IP = '192.168.0.101';
 
 const getApiBaseUrl = () => {
   // Check environment variable first

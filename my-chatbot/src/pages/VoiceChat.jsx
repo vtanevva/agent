@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from "react"
 import { useNavigate } from "react-router-dom"
 import axios from "axios"
 import EmailList from "../components/EmailList"
+import EmailReplyModal from "../components/EmailReplyModal"
 
 export default function VoiceChat({ userId: rawUserId, sessionId, setUseVoice }) {
   // Decode the userId if it's URL encoded
@@ -17,6 +18,9 @@ export default function VoiceChat({ userId: rawUserId, sessionId, setUseVoice })
   const [sessions, setSessions] = useState([])
   const [selectedSession, setSelectedSession] = useState(sessionId)
   const [emailChoices, setEmailChoices] = useState(null)
+  const [replyModalOpen, setReplyModalOpen] = useState(false)
+  const [replyThreadId, setReplyThreadId] = useState(null)
+  const [replyTo, setReplyTo] = useState(null)
   const [showSidebar, setShowSidebar] = useState(false)
   const lastUserMessage = useRef("")
 
@@ -295,13 +299,14 @@ export default function VoiceChat({ userId: rawUserId, sessionId, setUseVoice })
   function handleEmailSelect(threadId, from) {
     const m = /<([^>]+)>/.exec(from);
     const to = m ? m[1] : from;
-    setInput(`Reply to thread ${threadId} to ${to}: `);
-    setEmailChoices(null);
+    setReplyThreadId(threadId);
+    setReplyTo(to);
+    setReplyModalOpen(true);
   }
 
 
   return (
-    <div className="w-full max-w-full lg:max-w-full flex gap-6 h-[98vh] lg:h-[calc(100vh-2rem)] relative overflow-hidden overflow-y-hidden">
+    <div className="w-full max-w-full lg:max-w-full flex gap-6 min-h-[100dvh] lg:h-[calc(100vh-2rem)] relative overflow-hidden">
       {/* Mobile overlay */}
       {showSidebar && (
         <div 
@@ -897,6 +902,22 @@ export default function VoiceChat({ userId: rawUserId, sessionId, setUseVoice })
           </div>
         </div>
       </div>
+
+      {/* Reply Modal */}
+      <EmailReplyModal
+        open={replyModalOpen}
+        onClose={(sent) => {
+          setReplyModalOpen(false);
+          setReplyThreadId(null);
+          setReplyTo(null);
+          if (sent) {
+            setChat(prev => [...prev, { role: "assistant", text: "✅ Reply sent." }]);
+          }
+        }}
+        userId={userId}
+        threadId={replyThreadId}
+        to={replyTo}
+      />
 
     </div>
   )

@@ -10,6 +10,7 @@ import EmailList from "../components/EmailList";
 import InputBar from "../components/InputBar";
 import CalendarView from "../components/CalendarView";
 import CalendarEvent from "../components/CalendarEvent";
+import EmailReplyModal from "../components/EmailReplyModal";
 
 export default function ChatPage() {
   const { userId: rawUserId, sessionId } = useParams();
@@ -47,6 +48,9 @@ export default function ChatPage() {
   const [selectedSession, setSelectedSession] = useState(null);
   const [useVoice, setUseVoice] = useState(false);
   const [emailChoices, setEmailChoices] = useState(null);
+  const [replyModalOpen, setReplyModalOpen] = useState(false);
+  const [replyThreadId, setReplyThreadId] = useState(null);
+  const [replyTo, setReplyTo] = useState(null);
   const [showCalendar, setShowCalendar] = useState(false);
   const [calendarEvents, setCalendarEvents] = useState([]);
   const [calendarEvent, setCalendarEvent] = useState(null);
@@ -275,8 +279,9 @@ export default function ChatPage() {
   function handleEmailSelect(threadId, from) {
     const m = /<([^>]+)>/.exec(from);
     const to = m ? m[1] : from;
-    setInput(`Reply to ${to}: `);
-    setEmailChoices(null);
+    setReplyThreadId(threadId);
+    setReplyTo(to);
+    setReplyModalOpen(true);
   }
 
   const handleNewChat = () => {
@@ -327,7 +332,7 @@ export default function ChatPage() {
 
     /* ── MAIN CHAT ── */
   return (
-    <div className="w-full max-w-full lg:max-w-full flex gap-6 h-[98vh] lg:h-[calc(100vh-2rem)] relative overflow-hidden overflow-y-hidden">
+    <div className="w-full max-w-full lg:max-w-full flex gap-6 min-h-[100dvh] lg:h-[calc(100vh-2rem)] relative overflow-hidden">
       {/* Mobile overlay */}
       {showSidebar && (
         <div 
@@ -585,6 +590,20 @@ export default function ChatPage() {
           onClose={() => setShowCalendar(false)}
         />
       )}
+      <EmailReplyModal
+        open={replyModalOpen}
+        onClose={(sent) => {
+          setReplyModalOpen(false);
+          setReplyThreadId(null);
+          setReplyTo(null);
+          if (sent) {
+            setChat((c) => [...c, { role: "assistant", text: "✅ Reply sent." }]);
+          }
+        }}
+        userId={userId}
+        threadId={replyThreadId}
+        to={replyTo}
+      />
     </div>
   );
 }

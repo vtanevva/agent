@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Modal, View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { Modal, View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors } from '../styles/colors';
 import { commonStyles } from '../styles/commonStyles';
@@ -10,6 +10,7 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
   const [error, setError] = useState(null);
   const [original, setOriginal] = useState({ subject: '', from: '', date: '', body: '' });
   const [draft, setDraft] = useState('');
+  const inputRef = useRef(null);
   const [showFullOriginal, setShowFullOriginal] = useState(false);
   const displayFrom = (() => {
     if (!original.from) return '';
@@ -95,6 +96,18 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
     loadData();
   }, [visible, userId, threadId, to]);
 
+  // Focus draft input when visible and draft is ready
+  useEffect(() => {
+    if (!visible) return;
+    if (loading) return;
+    const t = setTimeout(() => {
+      try {
+        inputRef.current?.focus();
+      } catch {}
+    }, 50);
+    return () => clearTimeout(t);
+  }, [visible, loading]);
+
   const handleSend = async () => {
     setLoading(true);
     setError(null);
@@ -122,6 +135,11 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={() => onClose(false)}>
       <View style={styles.overlay}>
+        <KeyboardAvoidingView
+          style={{width: '100%'}}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.select({ios: 12, android: 24, default: 0})}
+        >
         <View style={styles.container}>
           {/* Header - Gmail-like */}
           <View style={styles.headerRow}>
@@ -204,12 +222,14 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
               </View>
             ) : (
               <TextInput
+                ref={inputRef}
                 multiline
                 value={draft}
                 onChangeText={setDraft}
                 placeholder="Draft will appear here..."
                 style={styles.textarea}
                 placeholderTextColor={colors.primary[900] + '60'}
+                autoFocus
               />
             )}
           </View>
@@ -227,6 +247,7 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
             </TouchableOpacity>
           </View>
         </View>
+        </KeyboardAvoidingView>
       </View>
     </Modal>
   );

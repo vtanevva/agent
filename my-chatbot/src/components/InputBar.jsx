@@ -28,6 +28,18 @@ export default function InputBar({ input, setInput, loading, onSend, showConnect
               e.target.style.border = 'none';
               e.target.style.outline = 'none';
               e.target.style.boxShadow = 'none';
+              // Ensure the input is visible above the mobile keyboard
+              try {
+                setTimeout(() => {
+                  if (typeof e.target.scrollIntoView === 'function') {
+                    e.target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                  }
+                  // Fallback: scroll to bottom
+                  if (typeof window !== 'undefined') {
+                    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+                  }
+                }, 50);
+              } catch {}
             }}
             className="w-full px-4 lg:px-6 py-3 lg:py-4 rounded-xl text-primary-900 bg-primary-100/50 placeholder-primary-900/40 border-0 focus:border-0 focus:outline-none focus:ring-0 focus:ring-offset-0 resize-none focus:bg-primary-100/70 transition-all duration-300 text-sm lg:text-base overflow-y-hidden"
             placeholder="Share your thoughts, feelings, or ask me anything..."

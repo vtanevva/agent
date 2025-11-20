@@ -10,6 +10,7 @@ import {
   PermissionsAndroid,
   Platform,
   Animated,
+  KeyboardAvoidingView,
 } from 'react-native';
 import {useRoute, useNavigation} from '@react-navigation/native';
 import {LinearGradient} from 'expo-linear-gradient';
@@ -393,6 +394,11 @@ export default function VoiceChat() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+      <KeyboardAvoidingView
+        style={{flex: 1}}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.select({ios: 0, android: 24, default: 0})}
+      >
       <View style={styles.content}>
         {/* Sidebar */}
         {showSidebar && (
@@ -873,6 +879,7 @@ export default function VoiceChat() {
         threadId={replyThreadId}
         to={replyTo}
       />
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
