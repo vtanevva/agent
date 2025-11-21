@@ -8,7 +8,7 @@ import TypingIndicator from './TypingIndicator';
 import WelcomeMessage from './WelcomeMessage';
 import EmailList from './EmailList';
 
-export default function MessageList({chat, loading, onEmailSelect}) {
+export default function MessageList({chat, loading, onEmailSelect, onArchive, onDone, hiddenThreadIds}) {
   const scrollViewRef = useRef(null);
 
   // Auto-scroll to bottom when new messages are added or when AI finishes responding
@@ -153,7 +153,13 @@ export default function MessageList({chat, loading, onEmailSelect}) {
                     {msg.role === 'user' ? 'You' : 'Aivis'}
                   </Text>
                   {emailsToDisplay.length > 0 ? (
-                    <EmailList emails={emailsToDisplay} onSelect={onEmailSelect} />
+                    <EmailList
+                      emails={emailsToDisplay}
+                      onSelect={onEmailSelect}
+                      onArchive={onArchive}
+                      onDone={onDone}
+                      hiddenThreadIds={hiddenThreadIds}
+                    />
                   ) : (
                     <Text 
                       style={styles.messageText} 

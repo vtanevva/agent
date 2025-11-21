@@ -4,8 +4,12 @@ import {LinearGradient} from 'expo-linear-gradient';
 import {colors} from '../styles/colors';
 import {commonStyles} from '../styles/commonStyles';
 
-export default function EmailList({emails, onSelect}) {
-  if (!emails || emails.length === 0) {
+export default function EmailList({emails, onSelect, onArchive, onDone, hiddenThreadIds}) {
+  const filtered = Array.isArray(emails)
+    ? emails.filter(e => !(hiddenThreadIds || []).includes(e.threadId))
+    : [];
+
+  if (!filtered || filtered.length === 0) {
     return (
       <View style={styles.emptyContainer}>
         <Text style={styles.emptyEmoji}>📭</Text>
@@ -24,50 +28,65 @@ export default function EmailList({emails, onSelect}) {
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}>
-        {emails.map((email, index) => (
-          <TouchableOpacity
-            key={email.threadId || index}
-            onPress={() => onSelect(email.threadId, email.from)}
-            style={styles.emailCard}>
-            <View style={styles.emailContent}>
-              <LinearGradient
-                colors={[colors.accent[500], colors.secondary[600]]}
-                style={styles.emailIcon}>
-                <Text style={styles.emailIconText}>
-                  {(email.from?.charAt(0) || 'E').toUpperCase()}
-                </Text>
-              </LinearGradient>
-              
-              <View style={styles.emailText}>
-                <View style={styles.emailHeader}>
-                  <Text style={styles.emailFrom} numberOfLines={1}>
-                    {email.from?.replace(/<[^>]*>/g, '').trim() || 'Unknown'}
+        {filtered.map((email, index) => (
+          <View key={email.threadId || index} style={styles.itemWrapper}>
+            <TouchableOpacity
+              onPress={() => onSelect(email.threadId, email.from)}
+              style={styles.emailCard}>
+              <View style={styles.emailContent}>
+                <LinearGradient
+                  colors={[colors.accent[500], colors.secondary[600]]}
+                  style={styles.emailIcon}>
+                  <Text style={styles.emailIconText}>
+                    {(email.from?.charAt(0) || 'E').toUpperCase()}
                   </Text>
-                  {email.idx && (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>#{email.idx}</Text>
-                    </View>
-                  )}
+                </LinearGradient>
+                
+                <View style={styles.emailText}>
+                  <View style={styles.emailHeader}>
+                    <Text style={styles.emailFrom} numberOfLines={1}>
+                      {email.from?.replace(/<[^>]*>/g, '').trim() || 'Unknown'}
+                    </Text>
+                    {email.idx && (
+                      <View style={styles.badge}>
+                        <Text style={styles.badgeText}>#{email.idx}</Text>
+                      </View>
+                    )}
+                  </View>
+                  
+                  <Text style={styles.emailSubject} numberOfLines={1}>
+                    {email.subject || 'No subject'}
+                  </Text>
+                  
+                  <Text style={styles.emailSnippet} numberOfLines={2}>
+                    {email.snippet || ''}
+                  </Text>
                 </View>
-                
-                <Text style={styles.emailSubject} numberOfLines={1}>
-                  {email.subject || 'No subject'}
-                </Text>
-                
-                <Text style={styles.emailSnippet} numberOfLines={2}>
-                  {email.snippet || ''}
-                </Text>
               </View>
+              
+              {email.threadId && (
+                <View style={styles.threadBadge}>
+                  <Text style={styles.threadBadgeText}>
+                    {email.threadId.slice(-8)}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            <View style={styles.actionRow}>
+              <TouchableOpacity
+                style={[styles.smallBtn, styles.archiveBtn]}
+                onPress={() => onArchive?.(email.threadId)}
+              >
+                <Text style={styles.smallBtnText}>Archive</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.smallBtn, styles.doneBtn]}
+                onPress={() => onDone?.(email.threadId)}
+              >
+                <Text style={styles.smallBtnText}>Done</Text>
+              </TouchableOpacity>
             </View>
-            
-            {email.threadId && (
-              <View style={styles.threadBadge}>
-                <Text style={styles.threadBadgeText}>
-                  {email.threadId.slice(-8)}
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
+          </View>
         ))}
       </ScrollView>
     </View>
@@ -170,6 +189,31 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: colors.primary[900] + '60',
     fontFamily: 'monospace',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'flex-end',
+    marginTop: -6,
+    marginBottom: 12,
+  },
+  smallBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  smallBtnText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  archiveBtn: {
+    borderColor: colors.dark[500] + '20',
+    backgroundColor: colors.primary[200] + '30',
+  },
+  doneBtn: {
+    borderColor: colors.secondary[600] + '30',
+    backgroundColor: colors.secondary[500] + '25',
   },
   emptyContainer: {
     alignItems: 'center',

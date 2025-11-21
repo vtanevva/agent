@@ -6,7 +6,9 @@ import { commonStyles } from '../styles/commonStyles';
 import { API_BASE_URL } from '../config/api';
 
 export default function EmailReplyModal({ visible, onClose, userId, threadId, to }) {
-  const [loading, setLoading] = useState(false);
+  const [loadingDraft, setLoadingDraft] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sentJustNow, setSentJustNow] = useState(false);
   const [error, setError] = useState(null);
   const [original, setOriginal] = useState({ subject: '', from: '', date: '', body: '' });
   const [draft, setDraft] = useState('');
@@ -55,7 +57,7 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
   useEffect(() => {
     async function loadData() {
       if (!visible || !userId || !threadId || !to) return;
-      setLoading(true);
+      setLoadingDraft(true);
       setError(null);
       try {
         // 1) fetch original message
@@ -90,7 +92,7 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
       } catch (e) {
         setError(e?.message || 'Network error.');
       } finally {
-        setLoading(false);
+        setLoadingDraft(false);
       }
     }
     loadData();
@@ -99,17 +101,17 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
   // Focus draft input when visible and draft is ready
   useEffect(() => {
     if (!visible) return;
-    if (loading) return;
+    if (loadingDraft) return;
     const t = setTimeout(() => {
       try {
         inputRef.current?.focus();
       } catch {}
     }, 50);
     return () => clearTimeout(t);
-  }, [visible, loading]);
+  }, [visible, loadingDraft]);
 
   const handleSend = async () => {
-    setLoading(true);
+    setSending(true);
     setError(null);
     try {
       const r = await fetch(`${API_BASE_URL}/api/gmail/reply`, {
@@ -119,7 +121,12 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
       });
       const data = await r.json();
       if (data?.success) {
-        onClose(true);
+        setSentJustNow(true);
+        setDraft('');
+        setTimeout(() => {
+          setSentJustNow(false);
+          onClose(true);
+        }, 600);
       } else if (data?.action === 'connect_google') {
         setError('Google not connected. Please connect and retry.');
       } else {
@@ -128,7 +135,7 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
     } catch (e) {
       setError(e?.message || 'Network error.');
     } finally {
-      setLoading(false);
+      setSending(false);
     }
   };
 
@@ -169,6 +176,61 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
             </TouchableOpacity>
             <View style={{flex: 1}} />
             <Text style={styles.threadMeta}>Thread: {String(threadId || '').slice(-8)}</Text>
+          </View>
+
+          {/* Smart suggestions */}
+          <View style={styles.suggestionRow}>
+            <TouchableOpacity
+              style={styles.suggestionBtn}
+              disabled={sending || loadingDraft}
+              onPress={async () => {
+                try {
+                  setDraft(''); // clear before loading
+                  const r = await fetch(`${API_BASE_URL}/api/gmail/draft-reply`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId, thread_id: threadId, to, user_points: 'Agree politely, short and warm.' }),
+                  });
+                  const data = await r.json();
+                  if (data?.success && data.body) setDraft(data.body);
+                } catch {}
+              }}>
+              <Text style={styles.suggestionText}>Sounds good 👍</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.suggestionBtn}
+              disabled={sending || loadingDraft}
+              onPress={async () => {
+                try {
+                  setDraft('');
+                  const r = await fetch(`${API_BASE_URL}/api/gmail/draft-reply`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId, thread_id: threadId, to, user_points: 'Propose scheduling a short call. Provide 2 time windows.' }),
+                  });
+                  const data = await r.json();
+                  if (data?.success && data.body) setDraft(data.body);
+                } catch {}
+              }}>
+              <Text style={styles.suggestionText}>Let’s schedule a call</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.suggestionBtn}
+              disabled={sending || loadingDraft}
+              onPress={async () => {
+                try {
+                  setDraft('');
+                  const r = await fetch(`${API_BASE_URL}/api/gmail/draft-reply`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId, thread_id: threadId, to, user_points: 'Write a brief summary of the key points before replying.' }),
+                  });
+                  const data = await r.json();
+                  if (data?.success && data.body) setDraft(data.body);
+                } catch {}
+              }}>
+              <Text style={styles.suggestionText}>Quick summary</Text>
+            </TouchableOpacity>
           </View>
 
           {/* Original message */}
@@ -215,7 +277,7 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
               </View>
               <Text style={styles.replyLabel}>Me</Text>
             </View>
-            {loading ? (
+            {loadingDraft ? (
               <View style={styles.loadingBox}>
                 <ActivityIndicator color={colors.secondary[600]} />
                 <Text style={styles.loadingText}>Preparing draft...</Text>
@@ -240,9 +302,11 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
             <TouchableOpacity onPress={() => onClose(false)} style={styles.cancelButton}>
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
-            <TouchableOpacity disabled={loading || !draft.trim()} onPress={handleSend} style={styles.sendWrapper}>
+            <TouchableOpacity disabled={sending || !draft.trim()} onPress={handleSend} style={styles.sendWrapper}>
               <LinearGradient colors={[colors.accent[500], colors.accent[600]]} style={styles.sendButton}>
-                <Text style={styles.sendText}>{loading ? 'Sending...' : 'Send'}</Text>
+                <Text style={styles.sendText}>
+                  {sentJustNow ? 'Sent ✓' : sending ? 'Sending...' : 'Send'}
+                </Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -352,6 +416,25 @@ const styles = StyleSheet.create({
   threadMeta: {
     fontSize: 10,
     color: colors.primary[900] + '60',
+  },
+  suggestionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 8,
+  },
+  suggestionBtn: {
+    borderRadius: 8,
+    backgroundColor: colors.primary[200] + '30',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: colors.dark[500] + '10',
+  },
+  suggestionText: {
+    fontSize: 12,
+    color: colors.primary[900],
+    fontWeight: '500',
   },
   originalWrapper: {
     backgroundColor: colors.primary[200] + '30',

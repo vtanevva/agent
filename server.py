@@ -19,6 +19,7 @@ from flask_cors import CORS
 from requests_oauthlib import OAuth2Session
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
+import openai
 
 # Configure logging
 logging.basicConfig(
@@ -50,6 +51,10 @@ from app.autogen_agents.gmail_agent import run_gmail_autogen
 from app.tools.gmail_style import analyze_email_style, generate_reply_draft
 from app.tools.gmail_reply import reply_email as tool_reply_email
 from app.tools.gmail_detail import get_thread_detail
+from app.utils.oauth_utils import load_google_credentials
+from googleapiclient.errors import HttpError
+from googleapiclient.discovery import build
+from app.tools.gmail_mail import send_email as tool_send_email
 
 # Environment setup
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -427,6 +432,288 @@ def gmail_reply_send():
     try:
         msg = tool_reply_email(user_id=user_id, thread_id=thread_id, to=to, body=body, subj_prefix=subj_prefix)
         return jsonify({"success": True, "message": msg})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/gmail/archive", methods=["POST"])
+def gmail_archive_thread():
+    """Archive a Gmail thread by removing it from the INBOX."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    thread_id = data.get("thread_id")
+    if not thread_id:
+        return jsonify({"success": False, "error": "Missing thread_id"}), 400
+
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    try:
+        creds = load_google_credentials(user_id)
+        service = build("gmail", "v1", credentials=creds)
+
+        # If a messageId was provided, resolve to threadId
+        try:
+            meta = service.users().messages().get(userId="me", id=thread_id, format="minimal").execute()
+            real_thread_id = meta.get("threadId", thread_id)
+        except HttpError as e:
+            if e.resp.status in (400, 404):
+                real_thread_id = thread_id
+            else:
+                raise
+
+        service.users().threads().modify(
+            userId="me",
+            id=real_thread_id,
+            body={"removeLabelIds": ["INBOX"]}
+        ).execute()
+        return jsonify({"success": True, "thread_id": real_thread_id})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/gmail/mark-handled", methods=["POST"])
+def gmail_mark_handled():
+    """Apply a 'Handled' label to a thread and mark it as read."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    thread_id = data.get("thread_id")
+    if not thread_id:
+        return jsonify({"success": False, "error": "Missing thread_id"}), 400
+
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    try:
+        creds = load_google_credentials(user_id)
+        service = build("gmail", "v1", credentials=creds)
+
+        # Ensure label exists (create if missing)
+        labels = service.users().labels().list(userId="me").execute().get("labels", [])
+        handled_label = next((l for l in labels if l.get("name") == "Handled"), None)
+        if not handled_label:
+            handled_label = service.users().labels().create(
+                userId="me",
+                body={
+                    "name": "Handled",
+                    "labelListVisibility": "labelShow",
+                    "messageListVisibility": "show",
+                    "type": "user"
+                }
+            ).execute()
+        handled_label_id = handled_label["id"]
+
+        # If a messageId was provided, resolve to threadId
+        try:
+            meta = service.users().messages().get(userId="me", id=thread_id, format="minimal").execute()
+            real_thread_id = meta.get("threadId", thread_id)
+        except HttpError as e:
+            if e.resp.status in (400, 404):
+                real_thread_id = thread_id
+            else:
+                raise
+
+        service.users().threads().modify(
+            userId="me",
+            id=real_thread_id,
+            body={"addLabelIds": [handled_label_id], "removeLabelIds": ["UNREAD"]}
+        ).execute()
+        return jsonify({"success": True, "thread_id": real_thread_id, "label": "Handled"})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/gmail/list", methods=["POST"])
+def gmail_list_threads():
+    """List Gmail threads for a given label (default INBOX)."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    label = (data.get("label") or "INBOX").strip()
+    max_results = int(data.get("max_results", 50))
+
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    try:
+        creds = load_google_credentials(user_id)
+        service = build("gmail", "v1", credentials=creds)
+        resp = service.users().threads().list(
+            userId="me",
+            labelIds=[label] if label else None,
+            maxResults=max_results,
+        ).execute()
+        threads = resp.get("threads", []) or []
+        items = []
+        for idx, t in enumerate(threads, start=1):
+            th = service.users().threads().get(userId="me", id=t["id"], format="metadata").execute()
+            first = th.get("messages", [{}])[0]
+            headers = {h["name"]: h["value"] for h in first.get("payload", {}).get("headers", [])}
+            items.append({
+                "idx": idx,
+                "threadId": th.get("id"),
+                "from": headers.get("From", ""),
+                "subject": headers.get("Subject", "(No subject)"),
+                "snippet": first.get("snippet", "")[:200],
+                "label": label or "",
+            })
+            if len(items) >= max_results:
+                break
+        return jsonify({"success": True, "threads": items})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/gmail/search", methods=["POST"])
+def gmail_search_threads():
+    """Search Gmail messages and return unique threads for a query."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    query = (data.get("query") or "").strip()
+    max_results = int(data.get("max_results", 20))
+
+    if not query:
+        return jsonify({"success": False, "error": "Missing query"}), 400
+
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    try:
+        creds = load_google_credentials(user_id)
+        service = build("gmail", "v1", credentials=creds)
+        resp = service.users().messages().list(
+            userId="me",
+            q=query,
+            maxResults=max_results * 2,
+        ).execute()
+        msgs = resp.get("messages", []) or []
+        seen = set()
+        results = []
+        for m in msgs:
+            meta = service.users().messages().get(
+                userId="me", id=m["id"], format="metadata", metadataHeaders=["Subject", "From"]
+            ).execute()
+            tid = meta.get("threadId")
+            if tid in seen:
+                continue
+            seen.add(tid)
+            headers = {h["name"]: h["value"] for h in meta.get("payload", {}).get("headers", [])}
+            results.append({
+                "threadId": tid,
+                "from": headers.get("From", ""),
+                "subject": headers.get("Subject", "(No subject)"),
+                "snippet": meta.get("snippet", "")[:200],
+            })
+            if len(results) >= max_results:
+                break
+        return jsonify({"success": True, "threads": results})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/gmail/send", methods=["POST"])
+def gmail_send_new():
+    """Send a new email (compose)."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    to = data.get("to")
+    subject = data.get("subject") or "(No subject)"
+    body = data.get("body") or ""
+
+    if not to or not body:
+        return jsonify({"success": False, "error": "Missing 'to' or 'body'"}), 400
+
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    try:
+        msg = tool_send_email(user_id=user_id, to=to, subject=subject, body=body)
+        return jsonify({"success": True, "message": msg})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/gmail/rewrite", methods=["POST"])
+def gmail_rewrite_text():
+    """Rewrite a user-provided text more politely/clearly, optionally using user's style and appending a signature.
+    Also optionally generate a concise subject line.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    text = (data.get("text") or "").strip()
+    tone = (data.get("tone") or "polite and professional").strip()
+    include_signature = bool(data.get("include_signature", False))
+    signature_text = (data.get("signature") or "").strip()
+    generate_subject = bool(data.get("generate_subject", True))
+
+    if not text:
+        return jsonify({"success": False, "error": "Missing 'text'"}), 400
+
+    try:
+        # Try to leverage user's style profile if available
+        try:
+            style_json = analyze_email_style(user_id=user_id, max_samples=5)
+        except Exception:
+            style_json = "{}"
+
+        # Ask model to return strict JSON for easy parsing
+        instructions = [
+            f"Rewrite the following email body in a concise, {tone} tone.",
+            "Keep the meaning, fix grammar, and avoid over-formality.",
+            "Use proper email paragraphing with a blank line between paragraphs.",
+        ]
+        if include_signature and signature_text:
+            instructions.append(
+                "Append the following closing signature at the end, separated by one blank line, "
+                "replacing any existing signature:"
+            )
+        else:
+            instructions.append("Do not add a closing signature.")
+        if generate_subject:
+            instructions.append("Propose a concise subject (3-8 words).")
+        else:
+            instructions.append("Do not propose a subject.")
+        instructions.append(
+            "Return a JSON object ONLY with keys: subject (string, may be empty) and body (string). "
+            "No markdown, no extra commentary."
+        )
+
+        prompt = "\n".join(instructions) + "\n\n" + \
+                 f"User style profile (JSON, optional):\n{style_json}\n\n" + \
+                 ("Signature to use:\n" + signature_text + "\n\n" if include_signature and signature_text else "") + \
+                 "Email body:\n" + text
+
+        model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        resp = openai.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a careful email rewriting assistant."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
+            max_tokens=500,
+        )
+        content = (resp.choices[0].message.content or "").strip()
+        # Best-effort JSON parse
+        import json as _json, re as _re
+        clean = content.strip().strip("`")
+        # remove ```json fences if present
+        clean = _re.sub(r"^```json\s*|\s*```$", "", clean, flags=_re.IGNORECASE | _re.MULTILINE).strip()
+        subject = ""
+        body = content
+        try:
+            parsed = _json.loads(clean)
+            subject = (parsed.get("subject") or "").strip()
+            body = (parsed.get("body") or "").rstrip()
+        except Exception:
+            # Fallback: use entire content as body
+            subject = ""
+            body = content
+        return jsonify({"success": True, "rewritten": body, "subject": subject})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

@@ -26,6 +26,7 @@ import InputBar from '../components/InputBar';
 import EmailList from '../components/EmailList';
 import {API_BASE_URL} from '../config/api';
 import EmailReplyModal from '../components/EmailReplyModal';
+import ComposeEmailModal from '../components/ComposeEmailModal';
 
 export default function VoiceChat() {
   const route = useRoute();
@@ -48,6 +49,9 @@ export default function VoiceChat() {
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyThreadId, setReplyThreadId] = useState(null);
   const [replyTo, setReplyTo] = useState(null);
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [hiddenThreads, setHiddenThreads] = useState([]);
+  const [currentEmailIndex, setCurrentEmailIndex] = useState(0);
   const lastUserMessage = useRef('');
   const sidebarAnim = useRef(new Animated.Value(-280)).current;
 
@@ -161,6 +165,7 @@ export default function VoiceChat() {
       
       const emailData = extractEmailChoicesFromChat(normal);
       setEmailChoices(emailData);
+      setCurrentEmailIndex(0);
     } catch (e) {
       console.error('load session chat', e);
       setChat([]);
@@ -387,6 +392,65 @@ export default function VoiceChat() {
     setReplyOpen(true);
     setEmailChoices(null);
   };
+
+  // Optimistic archive/done
+  const archiveThreadOptimistic = async (threadId) => {
+    if (!threadId) return;
+    setHiddenThreads((prev) => Array.from(new Set([...prev, threadId])));
+    try {
+      await fetch(`${API_BASE_URL}/api/gmail/archive`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({user_id: userId, thread_id: threadId}),
+      });
+    } catch (e) {
+      setHiddenThreads((prev) => prev.filter((t) => t !== threadId));
+      console.error('Failed to archive thread:', e);
+    }
+  };
+
+  const markHandledOptimistic = async (threadId) => {
+    if (!threadId) return;
+    setHiddenThreads((prev) => Array.from(new Set([...prev, threadId])));
+    try {
+      await fetch(`${API_BASE_URL}/api/gmail/mark-handled`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({user_id: userId, thread_id: threadId}),
+      });
+    } catch (e) {
+      setHiddenThreads((prev) => prev.filter((t) => t !== threadId));
+      console.error('Failed to mark handled:', e);
+    }
+  };
+
+  // Web-only keyboard shortcuts: j,k,r,e
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const handleKeyDown = (e) => {
+      const tag = (e.target?.tagName || '').toUpperCase();
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (!emailChoices || emailChoices.length === 0) return;
+      if (e.key === 'j') {
+        setCurrentEmailIndex((i) => (i + 1) % emailChoices.length);
+      } else if (e.key === 'k') {
+        setCurrentEmailIndex((i) => (i - 1 + emailChoices.length) % emailChoices.length);
+      } else if (e.key === 'r') {
+        const sel = emailChoices[currentEmailIndex];
+        if (sel) {
+          const toVal = sel.from;
+          handleEmailSelect(sel.threadId, toVal);
+        }
+      } else if (e.key === 'e') {
+        const sel = emailChoices[currentEmailIndex];
+        if (sel) {
+          archiveThreadOptimistic(sel.threadId);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [emailChoices, currentEmailIndex]);
 
   const handleCheckEmails = async () => {
     await handleSend('Check my emails');
@@ -672,9 +736,20 @@ export default function VoiceChat() {
                 <Text style={styles.actionText}>Calendar Events</Text>
               </TouchableOpacity>
               <TouchableOpacity 
-                onPress={() => setShowSidebar(false)}
+                onPress={() => {
+                  setComposeOpen(true);
+                  setShowSidebar(false);
+                }}
                 style={styles.actionButton}>
                 <Text style={styles.actionText}>Compose Email</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                onPress={() => {
+                  navigation.navigate('GmailAgent', {userId});
+                  setShowSidebar(false);
+                }}
+                style={styles.actionButton}>
+                <Text style={styles.actionText}>Open Gmail Agent</Text>
               </TouchableOpacity>
             </View>
 
@@ -806,6 +881,9 @@ export default function VoiceChat() {
               chat={chat}
               loading={loading}
               onEmailSelect={handleEmailSelect}
+              onArchive={archiveThreadOptimistic}
+              onDone={markHandledOptimistic}
+              hiddenThreadIds={hiddenThreads}
             />
           )}
 
@@ -878,6 +956,16 @@ export default function VoiceChat() {
         userId={userId}
         threadId={replyThreadId}
         to={replyTo}
+      />
+      <ComposeEmailModal
+        visible={composeOpen}
+        onClose={(sent) => {
+          setComposeOpen(false);
+          if (sent) {
+            setChat((prev) => [...prev, {role: 'assistant', text: '✅ Email sent.'}]);
+          }
+        }}
+        userId={userId}
       />
       </KeyboardAvoidingView>
     </SafeAreaView>

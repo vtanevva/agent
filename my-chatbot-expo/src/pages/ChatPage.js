@@ -24,6 +24,7 @@ import InputBar from '../components/InputBar';
 import CalendarView from '../components/CalendarView';
 import {API_BASE_URL} from '../config/api';
 import EmailReplyModal from '../components/EmailReplyModal';
+import ComposeEmailModal from '../components/ComposeEmailModal';
 
 export default function ChatPage() {
   const route = useRoute();
@@ -43,6 +44,10 @@ export default function ChatPage() {
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyThreadId, setReplyThreadId] = useState(null);
   const [replyTo, setReplyTo] = useState(null);
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [hiddenThreads, setHiddenThreads] = useState([]);
+  const [emailChoices, setEmailChoices] = useState(null);
+  const [currentEmailIndex, setCurrentEmailIndex] = useState(0);
   const chatRef = useRef(null);
   const lastUserMessage = useRef('');
   const sidebarAnim = useRef(new Animated.Value(-280)).current;
@@ -230,6 +235,8 @@ export default function ChatPage() {
       // Handle email choices
       if (Array.isArray(parsed) && parsed[0]?.threadId) {
         setChat((c) => [...c, {role: 'assistant', text: reply}]);
+        setEmailChoices(parsed);
+        setCurrentEmailIndex(0);
       } 
       // Handle calendar events
       else if (parsed && parsed.success && parsed.events) {
@@ -240,6 +247,29 @@ export default function ChatPage() {
       // Handle regular text responses
       else {
         setChat((c) => [...c, {role: 'assistant', text: reply}]);
+        // Try to extract markdown email list as choices
+        try {
+          const md = cleaned.replace(/\r\n/g, '\n');
+          const re = /\n?\s*\d+\.\s+\*\*From:\*\*\s*([\s\S]*?)\n\s*\*\*Subject:\*\*\s*([\s\S]*?)\n\s*\*\*Snippet:\*\*\s*([\s\S]*?)(?=\n\s*\d+\.\s|$)/g;
+          let m;
+          let idx = 1;
+          const items = [];
+          while ((m = re.exec(md)) !== null) {
+            const from = m[1].trim();
+            const subject = m[2].trim();
+            const snippet = m[3].trim();
+            items.push({idx, from, subject, snippet, threadId: `md-${idx}`});
+            idx += 1;
+          }
+          if (items.length > 0) {
+            setEmailChoices(items);
+            setCurrentEmailIndex(0);
+          } else {
+            setEmailChoices(null);
+          }
+        } catch {
+          setEmailChoices(null);
+        }
       }
       
       setTimeout(() => {
@@ -260,6 +290,67 @@ export default function ChatPage() {
     setReplyTo(to);
     setReplyOpen(true);
   };
+
+  // Optimistic archive/done handlers
+  const archiveThreadOptimistic = async (threadId) => {
+    if (!threadId) return;
+    setHiddenThreads((prev) => Array.from(new Set([...prev, threadId])));
+    try {
+      await fetch(`${API_BASE_URL}/api/gmail/archive`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({user_id: userId, thread_id: threadId}),
+      });
+    } catch (e) {
+      // Optional: revert
+      setHiddenThreads((prev) => prev.filter((t) => t !== threadId));
+      console.error('Failed to archive thread:', e);
+    }
+  };
+
+  const markHandledOptimistic = async (threadId) => {
+    if (!threadId) return;
+    setHiddenThreads((prev) => Array.from(new Set([...prev, threadId])));
+    try {
+      await fetch(`${API_BASE_URL}/api/gmail/mark-handled`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({user_id: userId, thread_id: threadId}),
+      });
+    } catch (e) {
+      // Optional: revert
+      setHiddenThreads((prev) => prev.filter((t) => t !== threadId));
+      console.error('Failed to mark handled:', e);
+    }
+  };
+
+  // Web-only keyboard shortcuts: j,k,r,e
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const handleKeyDown = (e) => {
+      const tag = (e.target?.tagName || '').toUpperCase();
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (!emailChoices || emailChoices.length === 0) return;
+      if (e.key === 'j') {
+        setCurrentEmailIndex((i) => (i + 1) % emailChoices.length);
+      } else if (e.key === 'k') {
+        setCurrentEmailIndex((i) => (i - 1 + emailChoices.length) % emailChoices.length);
+      } else if (e.key === 'r') {
+        const sel = emailChoices[currentEmailIndex];
+        if (sel) {
+          const toVal = sel.from;
+          handleEmailSelect(sel.threadId, toVal);
+        }
+      } else if (e.key === 'e') {
+        const sel = emailChoices[currentEmailIndex];
+        if (sel) {
+          archiveThreadOptimistic(sel.threadId);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [emailChoices, currentEmailIndex]);
 
   const handleNewChat = () => {
     const newSessionId = `${userId}-${Math.random().toString(36).substring(2, 8)}`;
@@ -428,8 +519,21 @@ export default function ChatPage() {
               <TouchableOpacity onPress={handleCheckCalendar} style={styles.actionButton}>
                 <Text style={styles.actionText}>Calendar Events</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.actionButton}>
+              <TouchableOpacity
+                onPress={() => {
+                  setComposeOpen(true);
+                  setShowSidebar(false);
+                }}
+                style={styles.actionButton}>
                 <Text style={styles.actionText}>Compose Email</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  navigation.navigate('GmailAgent', {userId});
+                  setShowSidebar(false);
+                }}
+                style={styles.actionButton}>
+                <Text style={styles.actionText}>Open Gmail Agent</Text>
               </TouchableOpacity>
             </View>
 
@@ -529,6 +633,9 @@ export default function ChatPage() {
               chat={chat}
               loading={loading}
               onEmailSelect={handleEmailSelect}
+            onArchive={archiveThreadOptimistic}
+            onDone={markHandledOptimistic}
+            hiddenThreadIds={hiddenThreads}
             />
           </View>
 
@@ -562,11 +669,26 @@ export default function ChatPage() {
             setReplyTo(null);
             if (sent) {
               setChat((c) => [...c, {role: 'assistant', text: '✅ Reply sent.'}]);
+              // Auto-advance: focus next email if exists
+              if (emailChoices && emailChoices.length > 0) {
+                setCurrentEmailIndex((i) => (i + 1) % emailChoices.length);
+              }
             }
           }}
           userId={userId}
           threadId={replyThreadId}
           to={replyTo}
+        />
+        {/* Compose Modal */}
+        <ComposeEmailModal
+          visible={composeOpen}
+          onClose={(sent) => {
+            setComposeOpen(false);
+            if (sent) {
+              setChat((c) => [...c, {role: 'assistant', text: '✅ Email sent.'}]);
+            }
+          }}
+          userId={userId}
         />
       </View>
       </KeyboardAvoidingView>
