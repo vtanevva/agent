@@ -103,18 +103,29 @@ export default function ContactsPage() {
     loadGroups();
   }, [loadGroups, contacts.length]);
 
-  // Build group names and counts from contacts (fallback if /groups not available)
+  const ALL_KEY = '__all__';
+  const UNGROUPED_KEY = 'ungrouped';
+
+  const formatGroupLabel = useCallback((key) => {
+    if (!key) return '';
+    const k = key.toLowerCase();
+    if (k === UNGROUPED_KEY) return 'Ungrouped';
+    const upper = ['hr','it','ceo','cfo','cto','coo'];
+    if (upper.includes(k)) return k.toUpperCase();
+    return k.split(/\s+/).filter(Boolean).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  }, []);
+
+  // Build group names (normalized lower-case keys) and counts from contacts (fallback if /groups not available)
   const groupCounts = React.useMemo(() => {
     const counts = {};
     for (const c of contacts) {
       const arr = Array.isArray(c?.groups) ? c.groups : [];
       if (!arr.length) {
-        counts['Ungrouped'] = (counts['Ungrouped'] || 0) + 1;
+        counts[UNGROUPED_KEY] = (counts[UNGROUPED_KEY] || 0) + 1;
       } else {
         for (const g of arr) {
-          const key = (g || '').trim();
-          if (!key) continue;
-          const norm = key;
+          const norm = (g || '').trim().toLowerCase();
+          if (!norm) continue;
           counts[norm] = (counts[norm] || 0) + 1;
         }
       }
@@ -123,35 +134,47 @@ export default function ContactsPage() {
   }, [contacts]);
 
   const allGroupNames = React.useMemo(() => {
-    const names = Object.keys(groupCounts);
+    const names = Object.keys(groupCounts); // already normalized (lower-case)
     // prefer server-provided groups ordering if available
-    const server = groups && groups.length ? groups : [];
-    const merged = [...new Set(['Ungrouped', ...server, ...names])].filter(Boolean);
+    const server = (groups && groups.length ? groups : []).map(g => (g || '').toLowerCase()).filter(Boolean);
+    const merged = [...new Set([UNGROUPED_KEY, ...server, ...names])].filter(Boolean);
     return merged;
   }, [groupCounts, groups]);
 
   // Determine which groups to display as "folders" (either all or a chosen one)
   const displayGroups = React.useMemo(() => {
-    if (!activeGroup) return allGroupNames;
+    if (!activeGroup) return [ALL_KEY];
     return allGroupNames.filter((g) => g.toLowerCase() === activeGroup.toLowerCase());
   }, [activeGroup, allGroupNames]);
 
   // Helper to get contacts for a specific group, with text filter applied
   const contactsForGroup = useCallback((groupName) => {
     const q = filter.trim().toLowerCase();
-    return contacts.filter((c) => {
+    const filtered = contacts.filter((c) => {
       const textOk =
         !q ||
         (c.name || '').toLowerCase().includes(q) ||
         (c.email || '').toLowerCase().includes(q) ||
         (c.nickname || '').toLowerCase().includes(q);
       if (!textOk) return false;
+      if (groupName === ALL_KEY) return true; // no group filter in All view
       const gs = Array.isArray(c?.groups) ? c.groups : [];
-      if (groupName === 'Ungrouped') {
+      if (groupName === UNGROUPED_KEY) {
         return gs.length === 0;
       }
       return gs.some((g) => (g || '').toLowerCase() === groupName.toLowerCase());
     });
+    if (groupName === ALL_KEY) {
+      // de-duplicate by email so one instance per contact
+      const seen = new Set();
+      return filtered.filter(c => {
+        const key = (c.email || '').toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+    return filtered;
   }, [contacts, filter]);
 
   const fixNames = async () => {
@@ -223,7 +246,7 @@ export default function ContactsPage() {
                 <Path d="M10 4H4c-1.1 0-2 .9-2 2v10a2 2 0 0 0 2 2h16V8h-8l-2-4z"/>
               </Svg>
               <Text style={[styles.folderChipText, activeGroup && activeGroup.toLowerCase() === g.toLowerCase() && styles.folderChipTextActive]}>
-                {g} {!!groupCounts[g] && `(${groupCounts[g]})`}
+                {formatGroupLabel(g)} {!!groupCounts[g] && `(${groupCounts[g]})`}
               </Text>
             </TouchableOpacity>
           ))}
@@ -239,7 +262,7 @@ export default function ContactsPage() {
                 <Svg width="18" height="18" viewBox="0 0 24 24" fill={colors.primary[700]}>
                   <Path d="M10 4H4c-1.1 0-2 .9-2 2v10a2 2 0 0 0 2 2h16V8h-8l-2-4z"/>
                 </Svg>
-                <Text style={styles.sectionTitle}>{gname}</Text>
+                <Text style={styles.sectionTitle}>{gname === ALL_KEY ? 'All' : formatGroupLabel(gname)}</Text>
                 <View style={styles.countPill}>
                   <Text style={styles.countPillText}>{items.length}</Text>
                 </View>
@@ -254,11 +277,14 @@ export default function ContactsPage() {
                     <Text style={styles.email} numberOfLines={1}>{c.email}</Text>
                     {!!c.nickname && <Text style={styles.nick} numberOfLines={1}>“{c.nickname}”</Text>}
                     <View style={styles.groupRow}>
-                      {(c.groups || []).map((gg, i) => (
-                        <View key={`${c.email}-${gg}-${i}`} style={styles.groupPill}>
-                          <Text style={styles.groupPillText}>{gg}</Text>
-                        </View>
-                      ))}
+                      {Array.from(new Set(((c.groups || []).map(gg => (gg || '').toLowerCase()))))
+                        .filter(Boolean)
+                        .map((gg, i) => (
+                          <View key={`${c.email}-${gg}-${i}`} style={styles.groupPill}>
+                            <Text style={styles.groupPillText}>{formatGroupLabel(gg)}</Text>
+                          </View>
+                        ))
+                      }
                     </View>
                   </View>
                   <View style={styles.itemActions}>

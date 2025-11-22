@@ -854,8 +854,48 @@ def contacts_list():
     query = {"user_id": user_id}
     if not include_archived:
         query["archived"] = {"$ne": True}
-    docs = list(contacts_col.find(query, {"_id": 0}).sort([("last_seen", -1), ("count", -1)]).limit(500))
-    return jsonify({"success": True, "contacts": docs})
+    docs = list(contacts_col.find(query, {"_id": 0}).sort([("last_seen", -1), ("count", -1)]).limit(2000))
+    # Merge duplicates by email (case-insensitive) and normalize groups to lower-case unique
+    merged = {}
+    for d in docs:
+        email = (d.get("email") or "").lower()
+        if not email:
+            continue
+        # normalize groups to lower-case unique list of strings
+        grps = []
+        for g in d.get("groups", []) or []:
+            if isinstance(g, str):
+                key = g.strip().lower()
+                if key and key not in grps:
+                    grps.append(key)
+        name = d.get("name")
+        entry = merged.get(email)
+        if not entry:
+            nd = dict(d)
+            nd["email"] = email
+            nd["groups"] = grps
+            nd["name"] = name or ""
+            merged[email] = nd
+        else:
+            # merge counts and timestamps
+            try:
+                entry["count"] = entry.get("count", 0) + int(d.get("count", 0))
+            except Exception:
+                pass
+            ls = d.get("last_seen")
+            if ls and (not entry.get("last_seen") or str(ls) > str(entry.get("last_seen"))):
+                entry["last_seen"] = ls
+            fs = d.get("first_seen")
+            if fs and (not entry.get("first_seen") or str(fs) < str(entry.get("first_seen"))):
+                entry["first_seen"] = fs
+            # prefer longer non-empty name
+            if name and (not entry.get("name") or len(name) > len(entry.get("name"))):
+                entry["name"] = name
+            # union groups (already normalized)
+            for g in grps:
+                if g not in entry["groups"]:
+                    entry["groups"].append(g)
+    return jsonify({"success": True, "contacts": list(merged.values())})
 
 
 def _name_from_email(email: str) -> str:
