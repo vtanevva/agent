@@ -311,11 +311,15 @@ def generate_reply_draft(
     user_points = user_points or ""
     prompt = (
         f"Subject: {ctx.get('subject','(No subject)')}\n"
-        f"Last message snippet: {ctx.get('context','')}\n\n"
+        f"Last message snippet (from them): {ctx.get('context','')}\n\n"
         f"User style profile (JSON): {style_desc}\n\n"
         f"User's points to include (optional): {user_points}\n\n"
-        "Draft a reply email body that matches the user's style. Do not include the subject line. "
-        "Keep it clean, ready to paste, with greeting and closing if appropriate."
+        "Write a direct reply email body from ME to THEM that matches the user's style.\n"
+        "- DO NOT quote, restate, or paraphrase the sender's text.\n"
+        "- Produce NEW content that acknowledges key points and moves the conversation forward.\n"
+        "- Answer requests/questions and propose a clear next step when appropriate.\n"
+        "- Avoid meta phrases like 'you said' or 'as mentioned'.\n"
+        "- No subject line; body only. Keep 2–6 sentences. Include greeting/closing if appropriate."
     )
     try:
         resp = openai.chat.completions.create(
