@@ -20,6 +20,20 @@ export default function ContactsPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editContact, setEditContact] = useState(null);
   const didForceSyncRef = useRef(false);
+  const [fetchLimit, setFetchLimit] = useState(1000);
+
+  const loadGroups = useCallback(async () => {
+    if (!userId) return;
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/contacts/groups`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({user_id: userId}),
+      });
+      const data = await r.json();
+      if (data?.success) setGroups(data.groups || []);
+    } catch {}
+  }, [userId]);
 
   const loadContacts = useCallback(async () => {
     if (!userId) return;
@@ -41,7 +55,7 @@ export default function ContactsPage() {
             await fetch(`${API_BASE_URL}/api/contacts/sync`, {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({user_id: userId, force: true}),
+              body: JSON.stringify({user_id: userId, force: true, max_sent: fetchLimit}),
             });
             // Reload list and groups after background sync
             const r3 = await fetch(`${API_BASE_URL}/api/contacts/list`, {
@@ -62,7 +76,7 @@ export default function ContactsPage() {
           await fetch(`${API_BASE_URL}/api/contacts/sync`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({user_id: userId}),
+            body: JSON.stringify({user_id: userId, max_sent: fetchLimit}),
           });
           const r2 = await fetch(`${API_BASE_URL}/api/contacts/list`, {
             method: 'POST',
@@ -80,24 +94,11 @@ export default function ContactsPage() {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, fetchLimit, loadGroups]);
 
   useEffect(() => {
     loadContacts();
   }, [loadContacts]);
-
-  const loadGroups = useCallback(async () => {
-    if (!userId) return;
-    try {
-      const r = await fetch(`${API_BASE_URL}/api/contacts/groups`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({user_id: userId}),
-      });
-      const data = await r.json();
-      if (data?.success) setGroups(data.groups || []);
-    } catch {}
-  }, [userId]);
 
   useEffect(() => {
     loadGroups();
@@ -209,22 +210,49 @@ export default function ContactsPage() {
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.header}>
         <Text style={styles.title}>Contacts</Text>
-        <Text style={styles.subtitle}>Last 100 Sent recipients</Text>
+        <Text style={styles.subtitle}>Last {fetchLimit} Sent recipients</Text>
       </View>
-      <View style={styles.controls}>
-        <TextInput
-          value={filter}
-          onChangeText={setFilter}
-          placeholder="Search name or email"
-          placeholderTextColor={colors.primary[900] + '60'}
-          style={styles.input}
-        />
-        <TouchableOpacity onPress={loadContacts} style={styles.reloadBtn}>
-          <Text style={styles.reloadText}>{loading ? 'Loading…' : 'Reload'}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={fixNames} style={styles.reloadBtn} disabled={working}>
-          <Text style={styles.reloadText}>{working ? 'Fixing…' : 'Fix names'}</Text>
-        </TouchableOpacity>
+      <View style={styles.controlsContainer}>
+        <View style={styles.controls}>
+          <TextInput
+            value={filter}
+            onChangeText={setFilter}
+            placeholder="Search name or email"
+            placeholderTextColor={colors.primary[900] + '60'}
+            style={styles.input}
+          />
+          <TouchableOpacity onPress={loadContacts} style={styles.reloadBtn}>
+            <Text style={styles.reloadText}>{loading ? 'Loading…' : 'Reload'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={fixNames} style={styles.reloadBtn} disabled={working}>
+            <Text style={styles.reloadText}>{working ? 'Fixing…' : 'Fix names'}</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.limitRow}>
+          <Text style={styles.limitLabel}>Look back:</Text>
+          {[100, 250, 500, 1000].map((n) => (
+            <TouchableOpacity
+              key={n}
+              onPress={async () => {
+                setFetchLimit(n);
+                // trigger a forced sync with the selected limit
+                try {
+                  setWorking(true);
+                  await fetch(`${API_BASE_URL}/api/contacts/sync`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({user_id: userId, force: true, max_sent: n}),
+                  });
+                  await loadContacts();
+                } finally {
+                  setWorking(false);
+                }
+              }}
+              style={[styles.limitChip, fetchLimit === n && styles.limitChipActive]}>
+              <Text style={[styles.limitChipText, fetchLimit === n && styles.limitChipTextActive]}>{n}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
       <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
         {/* Folder-style group selector */}
@@ -330,6 +358,9 @@ const styles = StyleSheet.create({
   header: { marginBottom: 8 },
   title: { fontSize: 20, fontWeight: '700', color: colors.primary[900] },
   subtitle: { fontSize: 12, color: colors.primary[900] + '80' },
+  controlsContainer: {
+    marginBottom: 8,
+  },
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -446,6 +477,22 @@ const styles = StyleSheet.create({
   },
   folderChipText: { fontSize: 12, color: colors.primary[900] + '90', fontWeight: '600' },
   folderChipTextActive: { color: colors.primary[50] },
+  limitRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  limitLabel: { fontSize: 12, color: colors.primary[900] + '80', marginRight: 4 },
+  limitChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: colors.primary[200] + '20',
+    borderWidth: 1,
+    borderColor: colors.dark[500] + '10',
+  },
+  limitChipActive: {
+    backgroundColor: colors.accent[500] + '30',
+    borderColor: colors.accent[600] + '50',
+  },
+  limitChipText: { fontSize: 12, color: colors.primary[900] + '90', fontWeight: '600' },
+  limitChipTextActive: { color: colors.primary[50] },
 });
 
 

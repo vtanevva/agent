@@ -620,7 +620,7 @@ def contacts_sync():
     """Initialize or refresh user's contacts from last 100 Sent messages (To: only). Idempotent."""
     data = request.get_json(force=True, silent=True) or {}
     user_id = (data.get("user_id") or "anonymous").strip().lower()
-    max_sent = int(data.get("max_sent", 100))
+    max_sent = int(data.get("max_sent", 1000))
     force = bool(data.get("force", False))
 
     auth_response = require_google_auth(user_id)
@@ -662,6 +662,16 @@ def contacts_sync():
                             {"user_id": user_id, "email": em},
                             {"$set": {"name": new_name}}
                         )
+            # Add category-based groups (travel/food/events/housing) for all existing contacts FIRST
+            all_existing = list(contacts_col.find({"user_id": user_id}, {"_id": 0, "email": 1}))
+            for ed in all_existing:
+                em = (ed.get("email") or "").lower()
+                cats = _category_groups_for_email(em)
+                if cats:
+                    contacts_col.update_one(
+                        {"user_id": user_id, "email": em},
+                        {"$addToSet": {"groups": {"$each": cats}}}
+                    )
             # Rebuild groups based on person/company for existing (non-archived) contacts
             docs = list(contacts_col.find({"user_id": user_id, "archived": {"$ne": True}}, {"_id": 0, "email": 1, "name": 1}))
             from collections import defaultdict
@@ -693,31 +703,80 @@ def contacts_sync():
                     )
             for comp, emails in by_company.items():
                 if len(emails) >= 2:
-                    # Ensure groups is an array for all targeted docs
+                    # Only add company group if contact doesn't already have a category group
+                    # Category groups: travel, food, events, housing
+                    category_groups = {"travel", "food", "events", "housing"}
+                    # Filter emails that don't have category groups
+                    emails_without_cats = []
+                    for em in emails:
+                        doc = contacts_col.find_one({"user_id": user_id, "email": em}, {"groups": 1})
+                        if doc:
+                            existing_groups = [g.lower() if isinstance(g, str) else "" for g in (doc.get("groups") or [])]
+                            if not any(cat in existing_groups for cat in category_groups):
+                                emails_without_cats.append(em)
+                    if emails_without_cats:
+                        # Ensure groups is an array for all targeted docs
+                        contacts_col.update_many(
+                            {"user_id": user_id, "email": {"$in": emails_without_cats}, "groups": {"$exists": False}},
+                            {"$set": {"groups": []}}
+                        )
+                        contacts_col.update_many(
+                            {"user_id": user_id, "email": {"$in": emails_without_cats}, "groups": {"$type": "object"}},
+                            {"$set": {"groups": []}}
+                        )
                     contacts_col.update_many(
-                        {"user_id": user_id, "email": {"$in": emails}, "groups": {"$exists": False}},
-                        {"$set": {"groups": []}}
-                    )
-                    contacts_col.update_many(
-                        {"user_id": user_id, "email": {"$in": emails}, "groups": {"$type": "object"}},
-                        {"$set": {"groups": []}}
-                    )
-                    contacts_col.update_many(
-                        {"user_id": user_id, "email": {"$in": emails}},
+                        {"user_id": user_id, "email": {"$in": emails_without_cats}},
                         {"$addToSet": {"groups": comp}}
                     )
-            items = list(contacts_col.find({"user_id": user_id}, {"_id": 0}).limit(500))
-            return jsonify({"success": True, "initialized": True, "contacts": items})
+        # Cleanup: Remove company groups from contacts that have category groups
+        category_groups = {"travel", "food", "events", "housing"}
+        all_contacts = list(contacts_col.find({"user_id": user_id}, {"_id": 0, "email": 1, "groups": 1}))
+        for contact in all_contacts:
+            em = contact.get("email", "")
+            original_groups = [g if isinstance(g, str) else "" for g in (contact.get("groups") or [])]
+            existing_groups_lower = [g.lower() for g in original_groups if g]
+            has_category = any(cat in existing_groups_lower for cat in category_groups)
+            if has_category:
+                # Get company name from email
+                comp = _company_from_email(em)
+                if comp:
+                    comp_lower = comp.lower()
+                    # Find and remove company group in any case variation
+                    groups_to_remove = []
+                    for g in original_groups:
+                        if g and g.lower() == comp_lower:
+                            groups_to_remove.append(g)
+                    # Remove all variations
+                    for gtr in groups_to_remove:
+                        contacts_col.update_one(
+                            {"user_id": user_id, "email": em},
+                            {"$pull": {"groups": gtr}}
+                        )
+        items = list(contacts_col.find({"user_id": user_id}, {"_id": 0}).limit(500))
+        return jsonify({"success": True, "initialized": True, "contacts": items})
 
     try:
         creds = load_google_credentials(user_id)
         svc = build("gmail", "v1", credentials=creds)
-        resp = svc.users().messages().list(
-            userId="me",
-            q="in:sent -from:mailer-daemon@googlemail.com",
-            maxResults=max_sent,
-        ).execute()
-        msgs = resp.get("messages", []) or []
+        # Fetch up to max_sent messages from Sent via pagination (Gmail caps ~500 per page)
+        msgs = []
+        next_token = None
+        remaining = max(0, max_sent)
+        while remaining > 0:
+            page_size = min(500, remaining)
+            req = svc.users().messages().list(
+                userId="me",
+                q="in:sent -from:mailer-daemon@googlemail.com",
+                maxResults=page_size,
+                pageToken=next_token
+            )
+            resp = req.execute()
+            batch = resp.get("messages", []) or []
+            msgs.extend(batch)
+            remaining -= len(batch)
+            next_token = resp.get("nextPageToken")
+            if not next_token or not batch:
+                break
 
         from datetime import datetime
         seen = {}
@@ -764,6 +823,7 @@ def contacts_sync():
                         "last_seen": doc["last_seen"],
                     },
                     "$inc": {"count": doc["count"]},
+                    "$addToSet": {"groups": {"$each": _category_groups_for_email(email_norm)}},
                 },
                 upsert=True,
             )
@@ -789,6 +849,17 @@ def contacts_sync():
                     {"$set": {"name": new_name}}
                 )
 
+        # Add category-based groups (travel/food/events/housing) for all existing contacts FIRST
+        # (Note: category groups are already added during upsert for new contacts, but we ensure all contacts have them)
+        all_existing = list(contacts_col.find({"user_id": user_id}, {"_id": 0, "email": 1}))
+        for ed in all_existing:
+            em = (ed.get("email") or "").lower()
+            cats = _category_groups_for_email(em)
+            if cats:
+                contacts_col.update_one(
+                    {"user_id": user_id, "email": em},
+                    {"$addToSet": {"groups": {"$each": cats}}}
+                )
         # Auto-group by canonical person name and company (clusters with size >= 2)
         docs = list(contacts_col.find({"user_id": user_id, "archived": {"$ne": True}}, {"_id": 0, "email": 1, "name": 1}))
         from collections import defaultdict
@@ -820,19 +891,55 @@ def contacts_sync():
                 )
         for comp, emails in by_company.items():
             if len(emails) >= 2:
-                # Ensure groups is an array for all targeted docs
-                contacts_col.update_many(
-                    {"user_id": user_id, "email": {"$in": emails}, "groups": {"$exists": False}},
-                    {"$set": {"groups": []}}
-                )
-                contacts_col.update_many(
-                    {"user_id": user_id, "email": {"$in": emails}, "groups": {"$type": "object"}},
-                    {"$set": {"groups": []}}
-                )
-                contacts_col.update_many(
-                    {"user_id": user_id, "email": {"$in": emails}},
-                    {"$addToSet": {"groups": comp}}
-                )
+                # Only add company group if contact doesn't already have a category group
+                # Category groups: travel, food, events, housing
+                category_groups = {"travel", "food", "events", "housing"}
+                # Filter emails that don't have category groups
+                emails_without_cats = []
+                for em in emails:
+                    doc = contacts_col.find_one({"user_id": user_id, "email": em}, {"groups": 1})
+                    if doc:
+                        existing_groups = [g.lower() if isinstance(g, str) else "" for g in (doc.get("groups") or [])]
+                        if not any(cat in existing_groups for cat in category_groups):
+                            emails_without_cats.append(em)
+                if emails_without_cats:
+                    # Ensure groups is an array for all targeted docs
+                    contacts_col.update_many(
+                        {"user_id": user_id, "email": {"$in": emails_without_cats}, "groups": {"$exists": False}},
+                        {"$set": {"groups": []}}
+                    )
+                    contacts_col.update_many(
+                        {"user_id": user_id, "email": {"$in": emails_without_cats}, "groups": {"$type": "object"}},
+                        {"$set": {"groups": []}}
+                    )
+                    contacts_col.update_many(
+                        {"user_id": user_id, "email": {"$in": emails_without_cats}},
+                        {"$addToSet": {"groups": comp}}
+                    )
+        # Cleanup: Remove company groups from contacts that have category groups
+        category_groups = {"travel", "food", "events", "housing"}
+        all_contacts = list(contacts_col.find({"user_id": user_id}, {"_id": 0, "email": 1, "groups": 1}))
+        for contact in all_contacts:
+            em = contact.get("email", "")
+            existing_groups = [g if isinstance(g, str) else "" for g in (contact.get("groups") or [])]
+            existing_groups_lower = [g.lower() for g in existing_groups if g]
+            has_category = any(cat in existing_groups_lower for cat in category_groups)
+            if has_category:
+                # Get company name from email
+                comp = _company_from_email(em)
+                if comp:
+                    comp_lower = comp.lower()
+                    # Find and remove company group in any case variation
+                    groups_to_remove = []
+                    for g in existing_groups:
+                        if g and g.lower() == comp_lower:
+                            groups_to_remove.append(g)
+                    # Remove all variations
+                    for gtr in groups_to_remove:
+                        contacts_col.update_one(
+                            {"user_id": user_id, "email": em},
+                            {"$pull": {"groups": gtr}}
+                        )
 
         items = list(contacts_col.find({"user_id": user_id}, {"_id": 0}).limit(500))
         return jsonify({"success": True, "initialized": True, "contacts": items})
@@ -1009,6 +1116,47 @@ def _normalized_display_name(current_name: str, email: str) -> str:
         return (f"{company} - {display_role}" if company else display_role)
     # Non-generic personal-looking name: keep as-is, no company suffix
     return base
+
+def _category_groups_for_email(email: str):
+    """
+    Heuristic category groups based on email domain.
+    Returns a list of lower-case category names like ['travel','food','events','housing'].
+    """
+    try:
+        domain = (email or "").split("@", 1)[1].lower()
+    except Exception:
+        return []
+    cats = set()
+    travel_keys = {
+        "airbnb","booking","expedia","kayak","skyscanner","tripadvisor","trivago","agoda","hostelworld",
+        "uber","lyft","bolt","blablacar","ryanair","easyjet","delta","united","american","lufthansa",
+        "wizzair","aircanada","britishairways","emirates","qatarairways","airasia","sbb","bahn","amtrak"
+    }
+    food_keys = {
+        "ubereats","doordash","deliveroo","justeat","grubhub","postmates","wolt","glovo","foodpanda",
+        "deliveryhero","dominos","pizzahut","mcdonalds","burgerking","kfc","chipotle","boltfood"
+    }
+    event_keys = {
+        "eventbrite","ticketmaster","tickets","eventim","meetup","dice","ticketek","universe",
+        "skiddle","festicket","axs","billetto","eventzilla","splashthat","bizzabo"
+    }
+    housing_keys = {
+        "zillow","realtor","trulia","redfin","apartments","apartmentlist","rent","rentals",
+        "rightmove","zoopla","spareroom","roomster","nestoria","idealista","fotocasa",
+        "immobilienscout","immowelt","immobiliare","leboncoin","seloger","funda","bolig",
+        "booking","airbnb","vrbo","homeaway","bookingcom","hostelworld","hostelbookers"
+    }
+    toks = [t for t in domain.replace('.', ' ').replace('-', ' ').split() if t]
+    lower_join = ' '.join(toks)
+    if any(k in domain for k in travel_keys) or any(k in lower_join for k in {"travel","flight","hotel","hostel","train","bus","ferry"}):
+        cats.add("travel")
+    if any(k in domain for k in food_keys) or any(k in lower_join for k in {"eat","food","pizza","burger","kebab","sushi","delivery","cafe","restaurant"}):
+        cats.add("food")
+    if any(k in domain for k in event_keys) or any(k in lower_join for k in {"event","ticket","festival","conference","meetup"}):
+        cats.add("events")
+    if any(k in domain for k in housing_keys) or any(k in lower_join for k in {"housing","rent","rental","apartment","flat","house","property","realestate","real estate","accommodation","room","rooms","landlord","tenant"}):
+        cats.add("housing")
+    return list(cats)
 
 @app.route("/api/contacts/normalize-names", methods=["POST"])
 def contacts_normalize_names():

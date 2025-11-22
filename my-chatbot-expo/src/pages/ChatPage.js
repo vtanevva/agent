@@ -159,7 +159,7 @@ export default function ChatPage() {
         await fetch(`${API_BASE_URL}/api/contacts/sync`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({user_id: userId}),
+          body: JSON.stringify({user_id: userId, max_sent: 1000}),
         });
       } catch {}
     })();
