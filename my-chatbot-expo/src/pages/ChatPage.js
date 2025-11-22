@@ -151,6 +151,19 @@ export default function ChatPage() {
     }
   }, [userId, fetchSessions, checkGoogleConnection]);
 
+  // Auto-sync contacts once Google is connected (server skips if already initialized)
+  useEffect(() => {
+    if (!userId || !googleConnected) return;
+    (async () => {
+      try {
+        await fetch(`${API_BASE_URL}/api/contacts/sync`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({user_id: userId}),
+        });
+      } catch {}
+    })();
+  }, [userId, googleConnected]);
   useEffect(() => {
     if (sessionId && userId) {
       setSelectedSession(sessionId);
@@ -526,6 +539,14 @@ export default function ChatPage() {
                 }}
                 style={styles.actionButton}>
                 <Text style={styles.actionText}>Compose Email</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  navigation.navigate('Contacts', {userId});
+                  setShowSidebar(false);
+                }}
+                style={styles.actionButton}>
+                <Text style={styles.actionText}>Open Contacts</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => {

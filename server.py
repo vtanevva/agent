@@ -40,7 +40,7 @@ from app.tools.calendar_manager import (
     create_calendar_event, list_calendar_events
 )
 from app.database import init_database
-from app.utils.db_utils import get_conversations_collection, get_tokens_collection
+from app.utils.db_utils import get_conversations_collection, get_tokens_collection, get_contacts_collection
 from app.utils.oauth_utils import (
     load_google_credentials, save_google_credentials, get_gmail_profile,
     require_google_auth, build_google_flow, parse_expo_state,
@@ -55,6 +55,7 @@ from app.utils.oauth_utils import load_google_credentials
 from googleapiclient.errors import HttpError
 from googleapiclient.discovery import build
 from app.tools.gmail_mail import send_email as tool_send_email
+from email.utils import getaddresses
 
 # Environment setup
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -612,6 +613,496 @@ def gmail_search_threads():
         return jsonify({"success": True, "threads": results})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/contacts/sync", methods=["POST"])
+def contacts_sync():
+    """Initialize or refresh user's contacts from last 100 Sent messages (To: only). Idempotent."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    max_sent = int(data.get("max_sent", 100))
+    force = bool(data.get("force", False))
+
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    contacts_col = get_contacts_collection()
+    if contacts_col is None:
+        return jsonify({"success": False, "error": "Database not connected"}), 500
+
+    # If already initialized and not forced, return existing
+    if not force:
+        existing_count = contacts_col.count_documents({"user_id": user_id})
+        if existing_count > 0:
+            # Run normalization and grouping pass on existing data (no Gmail fetch)
+            existing_docs = list(contacts_col.find({"user_id": user_id}, {"_id": 0, "email": 1, "name": 1, "archived": 1}))
+            role_set = {
+                "info","hr","support","sales","contact","admin","hello","mail","team",
+                "office","careers","jobs","billing","help","service","services","enquiries","inquiries",
+                "noreply","no reply","no-reply"
+            }
+            for d in existing_docs:
+                em = (d.get("email") or "").lower()
+                nm = (d.get("name") or "").strip()
+                needs_norm = (not nm) or (nm.lower() == "(no name)") or (nm.lower() in role_set)
+                if not needs_norm and nm:
+                    # also normalize if name is actually an email string
+                    try:
+                        if "@" in nm and "." in nm.split("@",1)[1]:
+                            needs_norm = True
+                        else:
+                            needs_norm = False
+                    except Exception:
+                        pass
+                if needs_norm:
+                    new_name = _normalized_display_name(nm, em)
+                    if new_name and new_name != nm:
+                        contacts_col.update_one(
+                            {"user_id": user_id, "email": em},
+                            {"$set": {"name": new_name}}
+                        )
+            # Rebuild groups based on person/company for existing (non-archived) contacts
+            docs = list(contacts_col.find({"user_id": user_id, "archived": {"$ne": True}}, {"_id": 0, "email": 1, "name": 1}))
+            from collections import defaultdict
+            by_person = defaultdict(list)
+            by_company = defaultdict(list)
+            for d in docs:
+                em = d.get("email","")
+                nm = d.get("name","")
+                person = _canonical_person_name(nm, em)
+                if person:
+                    by_person[person].append(em)
+                comp = _company_from_email(em)
+                if comp:
+                    by_company[comp].append(em)
+            for person, emails in by_person.items():
+                if len(emails) >= 2:
+                    # Ensure groups is an array for all targeted docs
+                    contacts_col.update_many(
+                        {"user_id": user_id, "email": {"$in": emails}, "groups": {"$exists": False}},
+                        {"$set": {"groups": []}}
+                    )
+                    contacts_col.update_many(
+                        {"user_id": user_id, "email": {"$in": emails}, "groups": {"$type": "object"}},
+                        {"$set": {"groups": []}}
+                    )
+                    contacts_col.update_many(
+                        {"user_id": user_id, "email": {"$in": emails}},
+                        {"$addToSet": {"groups": person}}
+                    )
+            for comp, emails in by_company.items():
+                if len(emails) >= 2:
+                    # Ensure groups is an array for all targeted docs
+                    contacts_col.update_many(
+                        {"user_id": user_id, "email": {"$in": emails}, "groups": {"$exists": False}},
+                        {"$set": {"groups": []}}
+                    )
+                    contacts_col.update_many(
+                        {"user_id": user_id, "email": {"$in": emails}, "groups": {"$type": "object"}},
+                        {"$set": {"groups": []}}
+                    )
+                    contacts_col.update_many(
+                        {"user_id": user_id, "email": {"$in": emails}},
+                        {"$addToSet": {"groups": comp}}
+                    )
+            items = list(contacts_col.find({"user_id": user_id}, {"_id": 0}).limit(500))
+            return jsonify({"success": True, "initialized": True, "contacts": items})
+
+    try:
+        creds = load_google_credentials(user_id)
+        svc = build("gmail", "v1", credentials=creds)
+        resp = svc.users().messages().list(
+            userId="me",
+            q="in:sent -from:mailer-daemon@googlemail.com",
+            maxResults=max_sent,
+        ).execute()
+        msgs = resp.get("messages", []) or []
+
+        from datetime import datetime
+        seen = {}
+        for m in msgs:
+            meta = svc.users().messages().get(
+                userId="me", id=m["id"], format="metadata", metadataHeaders=["To", "Date"]
+            ).execute()
+            headers = {h["name"]: h["value"] for h in meta.get("payload", {}).get("headers", [])}
+            tos = headers.get("To", "")
+            dt = headers.get("Date", "")
+            try:
+                last_seen = datetime.utcnow().isoformat()
+            except Exception:
+                last_seen = datetime.utcnow().isoformat()
+            for name, email in getaddresses([tos]):
+                email_norm = (email or "").strip().lower()
+                if not email_norm:
+                    continue
+                if email_norm not in seen:
+                    seen[email_norm] = {
+                        "user_id": user_id,
+                        "email": email_norm,
+                        "name": (name or ""),
+                        "count": 1,
+                        "first_seen": last_seen,
+                        "last_seen": last_seen,
+                    }
+                else:
+                    seen[email_norm]["count"] += 1
+                    seen[email_norm]["last_seen"] = last_seen
+
+        # Upsert into DB
+        for email_norm, doc in seen.items():
+            contacts_col.update_one(
+                {"user_id": user_id, "email": email_norm},
+                {
+                    "$setOnInsert": {
+                        "user_id": user_id,
+                        "email": email_norm,
+                        "first_seen": doc["first_seen"],
+                        "name": _normalized_display_name(doc.get("name") or "", email_norm),
+                    },
+                    "$set": {
+                        "last_seen": doc["last_seen"],
+                    },
+                    "$inc": {"count": doc["count"]},
+                },
+                upsert=True,
+            )
+
+        # Normalize names for any existing contacts with placeholder or missing names
+        needs = list(contacts_col.find(
+            {
+                "user_id": user_id,
+                "$or": [
+                    {"name": {"$exists": False}},
+                    {"name": ""}, {"name": "(No name)"},
+                    {"name": {"$regex": r"^info$", "$options": "i"}}
+                ]
+            },
+            {"_id": 0, "email": 1, "name": 1}
+        ))
+        for d in needs:
+            em = d.get("email", "")
+            new_name = _normalized_display_name(d.get("name",""), em)
+            if new_name:
+                contacts_col.update_one(
+                    {"user_id": user_id, "email": em},
+                    {"$set": {"name": new_name}}
+                )
+
+        # Auto-group by canonical person name and company (clusters with size >= 2)
+        docs = list(contacts_col.find({"user_id": user_id, "archived": {"$ne": True}}, {"_id": 0, "email": 1, "name": 1}))
+        from collections import defaultdict
+        by_person = defaultdict(list)
+        by_company = defaultdict(list)
+        for d in docs:
+            em = d.get("email","")
+            nm = d.get("name","")
+            person = _canonical_person_name(nm, em)
+            if person:
+                by_person[person].append(em)
+            comp = _company_from_email(em)
+            if comp:
+                by_company[comp].append(em)
+        for person, emails in by_person.items():
+            if len(emails) >= 2:
+                # Ensure groups is an array for all targeted docs
+                contacts_col.update_many(
+                    {"user_id": user_id, "email": {"$in": emails}, "groups": {"$exists": False}},
+                    {"$set": {"groups": []}}
+                )
+                contacts_col.update_many(
+                    {"user_id": user_id, "email": {"$in": emails}, "groups": {"$type": "object"}},
+                    {"$set": {"groups": []}}
+                )
+                contacts_col.update_many(
+                    {"user_id": user_id, "email": {"$in": emails}},
+                    {"$addToSet": {"groups": person}}
+                )
+        for comp, emails in by_company.items():
+            if len(emails) >= 2:
+                # Ensure groups is an array for all targeted docs
+                contacts_col.update_many(
+                    {"user_id": user_id, "email": {"$in": emails}, "groups": {"$exists": False}},
+                    {"$set": {"groups": []}}
+                )
+                contacts_col.update_many(
+                    {"user_id": user_id, "email": {"$in": emails}, "groups": {"$type": "object"}},
+                    {"$set": {"groups": []}}
+                )
+                contacts_col.update_many(
+                    {"user_id": user_id, "email": {"$in": emails}},
+                    {"$addToSet": {"groups": comp}}
+                )
+
+        items = list(contacts_col.find({"user_id": user_id}, {"_id": 0}).limit(500))
+        return jsonify({"success": True, "initialized": True, "contacts": items})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/contacts/list", methods=["POST"])
+def contacts_list():
+    """List stored contacts for a user."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    include_archived = bool(data.get("include_archived", False))
+
+    contacts_col = get_contacts_collection()
+    if contacts_col is None:
+        return jsonify({"success": False, "error": "Database not connected"}), 500
+
+    query = {"user_id": user_id}
+    if not include_archived:
+        query["archived"] = {"$ne": True}
+    docs = list(contacts_col.find(query, {"_id": 0}).sort([("last_seen", -1), ("count", -1)]).limit(500))
+    return jsonify({"success": True, "contacts": docs})
+
+
+def _name_from_email(email: str) -> str:
+    """Guess a human name from an email local-part."""
+    try:
+        local = (email or "").split("@", 1)[0]
+        # strip +tag
+        local = local.split("+", 1)[0]
+        import re
+        parts = re.split(r"[._\-]+", local)
+        parts = [p for p in parts if p and p.isalpha()]
+        if not parts:
+            return ""
+        # common no-name words to skip
+        blacklist = {"info", "contact", "sales", "support", "hello", "mail", "team", "admin"}
+        parts = [p for p in parts if p.lower() not in blacklist] or parts
+        # Title Case
+        return " ".join(w[:1].upper() + w[1:].lower() for w in parts[:3])
+    except Exception:
+        return ""
+
+def _canonical_person_name(current_name: str, email: str) -> str:
+    """
+    Compute a canonical person name (no company suffix, not a role mailbox).
+    Used for grouping same-person contacts across multiple emails.
+    """
+    base = (current_name or "").strip()
+    if not base or base.lower() == "(no name)":
+        base = _name_from_email(email) or ""
+    # If base appears with a suffix ' - Company', strip it
+    if " - " in base:
+        base = base.split(" - ", 1)[0].strip()
+    # Drop if role mailbox
+    role_set = {
+        "info","hr","support","sales","contact","admin","hello","mail","team",
+        "office","careers","jobs","billing","help","service","services","enquiries","inquiries",
+        "noreply","no reply","no-reply"
+    }
+    if base.lower() in role_set:
+        return ""
+    # Normalize spacing/case
+    parts = [p for p in base.replace("_"," ").replace("."," ").split() if p]
+    if not parts:
+        return ""
+    return " ".join(w[:1].upper() + w[1:].lower() for w in parts[:4])
+def _company_from_email(email: str) -> str:
+    """Extract a plausible company name from email domain; ignore public providers."""
+    try:
+        domain = (email or "").split("@", 1)[1].lower()
+    except Exception:
+        return ""
+    public = {
+        "gmail.com","googlemail.com","yahoo.com","yahoo.co.uk","outlook.com","hotmail.com","live.com",
+        "msn.com","icloud.com","me.com","protonmail.com","zoho.com","gmx.com","aol.com","pm.me"
+    }
+    if domain in public:
+        return ""
+    parts = domain.split(".")
+    core = parts[-2] if len(parts) >= 2 else (parts[0] if parts else "")
+    if not core:
+        return ""
+    # avoid technical subdomains if accidentally chosen
+    if core in {"mail","mx","smtp","pop","imap","cpanel","webmail","ns"} and len(parts) >= 3:
+        core = parts[-3]
+    if not core:
+        return ""
+    return core[:1].upper() + core[1:].lower()
+
+def _looks_like_email(text: str) -> bool:
+    """Heuristic to detect if a given name string is actually an email."""
+    if not text or "@" not in text:
+        return False
+    # very loose check: has one '@' and at least one dot after
+    try:
+        local, domain = text.split("@", 1)
+        return bool(local) and "." in domain
+    except Exception:
+        return False
+
+def _normalized_display_name(current_name: str, email: str) -> str:
+    """
+    Build display name using rules:
+    - If current_name is missing/empty/'(No name)', derive from local-part.
+    - If the base name is a generic role (info/hr/support/...), append company: 'Company - role'.
+    - If the base name itself looks like an email, derive Name from email and use 'Name - Company' when company exists.
+    - Otherwise keep the base name as-is (do NOT append company).
+    """
+    base = (current_name or "").strip()
+    if not base or base.lower() == "(no name)":
+        base = _name_from_email(email) or ""
+    company = _company_from_email(email)
+    if not base:
+        # If we cannot derive a base, fall back to company alone
+        return company or ""
+    # If the provided name is actually an email string, promote to 'Name - Company'
+    if _looks_like_email(base):
+        derived = _name_from_email(email)
+        if company and derived:
+            return f"{derived} - {company}"
+        return derived or base
+    # Decide if base is a generic role mailbox
+    role_set = {
+        "info","hr","support","sales","contact","admin","hello","mail","team",
+        "office","careers","jobs","billing","help","service","services","enquiries","inquiries",
+        "noreply","no reply","no-reply"
+    }
+    base_l = base.lower()
+    if base_l in role_set:
+        # Format role nicely: HR uppercased; others lower-case
+        display_role = "HR" if base_l == "hr" else base_l.replace("no reply", "no-reply")
+        return (f"{company} - {display_role}" if company else display_role)
+    # Non-generic personal-looking name: keep as-is, no company suffix
+    return base
+
+@app.route("/api/contacts/normalize-names", methods=["POST"])
+def contacts_normalize_names():
+    """Fill missing names from email local-part for a user's contacts."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+
+    contacts_col = get_contacts_collection()
+    if contacts_col is None:
+        return jsonify({"success": False, "error": "Database not connected"}), 500
+
+    docs = list(contacts_col.find(
+        {
+            "user_id": user_id,
+            "$or": [
+                {"name": {"$exists": False}},
+                {"name": ""}, {"name": "(No name)"},
+                {"name": {"$regex": r"^info$", "$options": "i"}}
+            ]
+        },
+        {"_id": 0, "email": 1, "name": 1}
+    ))
+    updated = 0
+    for d in docs:
+        email = d.get("email", "")
+        new_name = _normalized_display_name(d.get("name",""), email)
+        if new_name:
+            contacts_col.update_one({"user_id": user_id, "email": email}, {"$set": {"name": new_name}})
+            updated += 1
+    return jsonify({"success": True, "updated": updated})
+
+
+@app.route("/api/contacts/archive", methods=["POST"])
+def contacts_archive():
+    """Archive or unarchive a contact."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    email = (data.get("email") or "").strip().lower()
+    archived = bool(data.get("archived", True))
+
+    if not email:
+        return jsonify({"success": False, "error": "Missing email"}), 400
+
+    contacts_col = get_contacts_collection()
+    if contacts_col is None:
+        return jsonify({"success": False, "error": "Database not connected"}), 500
+
+    from datetime import datetime
+    contacts_col.update_one(
+        {"user_id": user_id, "email": email},
+        {"$set": {"archived": archived, "archived_at": datetime.utcnow().isoformat() if archived else None}},
+        upsert=False,
+    )
+    return jsonify({"success": True, "email": email, "archived": archived})
+
+
+@app.route("/api/contacts/update", methods=["POST"])
+def contacts_update():
+    """Update contact fields: name, nickname, groups (array of strings)."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    email = (data.get("email") or "").strip().lower()
+    name = data.get("name")
+    nickname = data.get("nickname")
+    groups = data.get("groups")
+
+    if not email:
+        return jsonify({"success": False, "error": "Missing email"}), 400
+
+    contacts_col = get_contacts_collection()
+    if contacts_col is None:
+        return jsonify({"success": False, "error": "Database not connected"}), 500
+
+    update_doc = {}
+    if name is not None:
+        update_doc["name"] = name
+    if nickname is not None:
+        update_doc["nickname"] = nickname
+    if groups is not None:
+        # normalize groups to unique list of lowercase strings
+        try:
+            norm = []
+            for g in groups:
+                s = (g or "").strip()
+                if not s:
+                    continue
+                if s.lower() not in [x.lower() for x in norm]:
+                    norm.append(s)
+            update_doc["groups"] = norm
+        except Exception:
+            update_doc["groups"] = []
+
+    if not update_doc:
+        return jsonify({"success": False, "error": "No fields to update"}), 400
+
+    contacts_col.update_one(
+        {"user_id": user_id, "email": email},
+        {"$set": update_doc},
+        upsert=False,
+    )
+    doc = contacts_col.find_one({"user_id": user_id, "email": email}, {"_id": 0})
+    return jsonify({"success": True, "contact": doc})
+
+
+@app.route("/api/contacts/groups", methods=["POST"])
+def contacts_groups():
+    """Return distinct groups for a user's contacts."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+
+    contacts_col = get_contacts_collection()
+    if contacts_col is None:
+        return jsonify({"success": False, "error": "Database not connected"}), 500
+
+    pipeline = [
+        {"$match": {"user_id": user_id, "archived": {"$ne": True}}},
+        # Ensure groups is an array (if not present or wrong type -> empty array)
+        {"$project": {
+            "groups": {
+                "$cond": [
+                    {"$isArray": "$groups"},
+                    "$groups",
+                    []
+                ]
+            }
+        }},
+        {"$unwind": {"path": "$groups", "preserveNullAndEmptyArrays": False}},
+        # Only keep string values for groups
+        {"$match": {"groups": {"$type": "string"}}},
+        {"$group": {"_id": {"$toLower": "$groups"}}},
+        {"$sort": {"_id": 1}},
+    ]
+    groups = [d["_id"] for d in contacts_col.aggregate(pipeline)]
+    return jsonify({"success": True, "groups": groups})
 
 
 @app.route("/api/gmail/send", methods=["POST"])

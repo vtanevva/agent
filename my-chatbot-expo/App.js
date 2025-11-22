@@ -9,6 +9,7 @@ import VoiceChat from './src/pages/VoiceChat';
 import SettingsPage from './src/pages/SettingsPage';
 import MenuPage from './src/pages/MenuPage';
 import GmailAgentPage from './src/pages/GmailAgentPage';
+import ContactsPage from './src/pages/ContactsPage';
 
 const Stack = createNativeStackNavigator();
 
@@ -28,6 +29,7 @@ export default function App() {
           <Stack.Screen name="Settings" component={SettingsPage} />
           <Stack.Screen name="Menu" component={MenuPage} />
           <Stack.Screen name="GmailAgent" component={GmailAgentPage} />
+          <Stack.Screen name="Contacts" component={ContactsPage} />
         </Stack.Navigator>
       </NavigationContainer>
     </SafeAreaProvider>

@@ -25,3 +25,10 @@ def get_calendar_events_collection() -> Optional[Collection]:
         return db_manager.db["calendar_events"]
     return None
 
+def get_contacts_collection() -> Optional[Collection]:
+    """Get the contacts collection"""
+    db_manager = get_db()
+    if db_manager.is_connected:
+        return db_manager.db["contacts"]
+    return None
+

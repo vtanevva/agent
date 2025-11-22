@@ -65,6 +65,20 @@ export default function MenuPage() {
               <Text style={styles.gridText}>Voice Chat</Text>
             </TouchableOpacity>
 
+            {/* Contacts */}
+            <TouchableOpacity 
+              style={styles.gridBox}
+              onPress={() => {
+                navigation.navigate('Contacts', {userId});
+              }}>
+              <View style={[styles.gridIcon, {backgroundColor: colors.primary[200] + '30'}]}>
+                <Svg width="32" height="32" viewBox="0 0 24 24" fill={colors.primary[700]}>
+                  <Path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                </Svg>
+              </View>
+              <Text style={styles.gridText}>Contacts</Text>
+            </TouchableOpacity>
+
             {/* Box 3: Settings */}
             <TouchableOpacity 
               style={styles.gridBox}

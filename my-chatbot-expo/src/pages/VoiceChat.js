@@ -131,6 +131,20 @@ export default function VoiceChat() {
     }
   }, [userId, fetchSessions]);
 
+  // Auto-sync contacts once (server is idempotent)
+  useEffect(() => {
+    if (!userId) return;
+    (async () => {
+      try {
+        await fetch(`${API_BASE_URL}/api/contacts/sync`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({user_id: userId}),
+        });
+      } catch {}
+    })();
+  }, [userId]);
+
   // Load session chat
   const loadSessionChat = useCallback(async (sessionId) => {
     if (!sessionId || !userId) return;
@@ -742,6 +756,14 @@ export default function VoiceChat() {
                 }}
                 style={styles.actionButton}>
                 <Text style={styles.actionText}>Compose Email</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                onPress={() => {
+                  navigation.navigate('Contacts', {userId});
+                  setShowSidebar(false);
+                }}
+                style={styles.actionButton}>
+                <Text style={styles.actionText}>Open Contacts</Text>
               </TouchableOpacity>
               <TouchableOpacity 
                 onPress={() => {
