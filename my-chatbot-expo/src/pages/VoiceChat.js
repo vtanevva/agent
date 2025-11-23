@@ -50,6 +50,7 @@ export default function VoiceChat() {
   const [replyThreadId, setReplyThreadId] = useState(null);
   const [replyTo, setReplyTo] = useState(null);
   const [composeOpen, setComposeOpen] = useState(false);
+  const [composeInitial, setComposeInitial] = useState({to: '', subject: '', body: ''});
   const [hiddenThreads, setHiddenThreads] = useState([]);
   const [currentEmailIndex, setCurrentEmailIndex] = useState(0);
   const lastUserMessage = useRef('');
@@ -260,6 +261,19 @@ export default function VoiceChat() {
         if (canOpen) {
           await Linking.openURL(data.connect_url);
         }
+        return;
+      }
+      
+      // Handle compose modal request
+      if (data.compose && data.compose.action === 'open_compose') {
+        setComposeInitial({
+          to: data.compose.to || '',
+          subject: data.compose.subject || '',
+          body: data.compose.body || '',
+        });
+        setComposeOpen(true);
+        setChat((prev) => [...prev, {role: 'assistant', text: data.reply || 'Opening compose email...'}]);
+        setLoading(false);
         return;
       }
       
@@ -983,11 +997,15 @@ export default function VoiceChat() {
         visible={composeOpen}
         onClose={(sent) => {
           setComposeOpen(false);
+          setComposeInitial({to: '', subject: '', body: ''});
           if (sent) {
             setChat((prev) => [...prev, {role: 'assistant', text: '✅ Email sent.'}]);
           }
         }}
         userId={userId}
+        initialTo={composeInitial.to}
+        initialSubject={composeInitial.subject}
+        initialBody={composeInitial.body}
       />
       </KeyboardAvoidingView>
     </SafeAreaView>

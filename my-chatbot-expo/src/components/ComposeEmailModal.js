@@ -5,7 +5,7 @@ import {colors} from '../styles/colors';
 import {commonStyles} from '../styles/commonStyles';
 import {API_BASE_URL} from '../config/api';
 
-export default function ComposeEmailModal({visible, onClose, userId}) {
+export default function ComposeEmailModal({visible, onClose, userId, initialTo, initialSubject, initialBody}) {
   const [to, setTo] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -16,7 +16,12 @@ export default function ComposeEmailModal({visible, onClose, userId}) {
   const defaultSignature = `Kind regards,\n${(userId || 'Your Name')}`;
 
   useEffect(() => {
-    if (!visible) {
+    if (visible) {
+      // Set initial values when modal opens
+      if (initialTo) setTo(initialTo);
+      if (initialSubject) setSubject(initialSubject);
+      if (initialBody) setBody(initialBody);
+    } else {
       setTo('');
       setSubject('');
       setBody('');
@@ -24,7 +29,7 @@ export default function ComposeEmailModal({visible, onClose, userId}) {
       setSending(false);
       setError(null);
     }
-  }, [visible]);
+  }, [visible, initialTo, initialSubject, initialBody]);
 
   const handleRewrite = async () => {
     if (!body.trim()) return;

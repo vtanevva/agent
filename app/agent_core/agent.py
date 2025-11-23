@@ -33,6 +33,14 @@ def run_agent(user_id: str, message: str, history: list):
             "If the user asks to see recent mail, ALWAYS call the "
             "list_recent_emails tool once and reply ONLY with its raw JSON. "
             "This applies even if emails were shown before in the conversation.\n\n"
+            # ── reply to contact ──────────────────────────────────────
+            "If the user asks to 'reply to [contact name]' or 'show emails from [contact name]', "
+            "ALWAYS call the list_recent_emails tool with the contact_name parameter set to the contact's name. "
+            "Extract the contact name from phrases like 'reply to marin', 'reply to deya', 'emails from john', etc. "
+            "If the user specifies both name and company (e.g., 'reply to marin fontys' or 'marin - fontys'), "
+            "pass the full string including company to filter emails from that specific person at that company. "
+            "If only a first name is given (e.g., 'reply to marin'), it will show emails from all contacts with that first name. "
+            "Reply ONLY with the raw JSON returned by the tool.\n\n"
             # ── replying inside a thread ─────────────────────────────
             "If the user asks to reply to a Gmail thread and provides a threadId "
             "(or the UI pre‑fills 'Reply to thread <ID> to <email>: <body>'), "
@@ -140,6 +148,18 @@ def run_agent(user_id: str, message: str, history: list):
             tool_call_id = tc["id"]
         
         fn_args["user_id"] = user_id            # enforce real user_id
+        
+        # ── NEW: short‑circuit for send_email - return compose modal data (before calling tool) ───────────────
+        if fn_name == "send_email":
+            print("Short-circuiting for send_email - opening compose modal")
+            compose_data = {
+                "action": "open_compose",
+                "to": fn_args.get("to", ""),
+                "subject": fn_args.get("subject", ""),
+                "body": fn_args.get("body", ""),
+            }
+            return json.dumps(compose_data)  # Return JSON for UI to parse
+        # ────────────────────────────────────────────────────────
         
         print(f"Executing tool: {fn_name} with args: {fn_args}")
 

@@ -121,6 +121,111 @@ def save_message(user_id, session_id, user_message, bot_reply,
         )
     except Exception as e:
         print(f"[ERROR] Failed to save message: {e}", flush=True)
+    
+    # Extract and store contact notes in background
+    try:
+        _extract_contact_notes(user_id, user_message, bot_reply)
+    except Exception as e:
+        print(f"[ERROR] Failed to extract contact notes: {e}", flush=True)
+
+
+def _extract_contact_notes(user_id: str, user_message: str, bot_reply: str):
+    """Extract contact-related information from conversation and store as notes."""
+    contacts_col = get_contacts_collection()
+    if contacts_col is None:
+        return
+    
+    # Get all contacts for this user
+    contacts = list(contacts_col.find({"user_id": user_id}, {"email": 1, "name": 1, "nickname": 1}))
+    if not contacts:
+        return
+    
+    # Check if conversation mentions any contacts
+    conversation_text = f"{user_message} {bot_reply}".lower()
+    mentioned_contacts = []
+    
+    for contact in contacts:
+        email = (contact.get("email") or "").lower()
+        name = (contact.get("name") or "").lower()
+        nickname = (contact.get("nickname") or "").lower()
+        
+        # Check if contact is mentioned
+        if email and email in conversation_text:
+            mentioned_contacts.append(contact)
+        elif name and name in conversation_text:
+            mentioned_contacts.append(contact)
+        elif nickname and nickname in conversation_text:
+            mentioned_contacts.append(contact)
+    
+    if not mentioned_contacts:
+        return
+    
+    # Extract notes for each mentioned contact
+    for contact in mentioned_contacts:
+        try:
+            email = contact.get("email", "")
+            contact_name = contact.get("name", "")
+            contact_nickname = contact.get("nickname", "")
+            
+            # Build prompt to extract contact-specific information
+            prompt = f"""Extract and summarize any relevant information about this contact from the conversation.
+Contact: {contact_name or email} {f'("{contact_nickname}")' if contact_nickname else ''}
+Email: {email}
+
+Conversation:
+User: {user_message}
+Assistant: {bot_reply}
+
+Extract any:
+- Personal details mentioned (work, interests, preferences, etc.)
+- Relationship context
+- Important facts or events
+- Communication style or preferences
+
+Return a concise summary (2-3 sentences) or "None" if nothing relevant was mentioned.
+Summary:"""
+            
+            # Use OpenAI to extract notes
+            response = openai.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a contact information extractor. Extract relevant information about contacts from conversations."},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=150,
+                temperature=0.3,
+            )
+            
+            extracted_note = response.choices[0].message.content.strip()
+            
+            # Skip if no relevant information
+            if not extracted_note or extracted_note.lower() == "none" or len(extracted_note) < 10:
+                continue
+            
+            # Get existing notes
+            existing_contact = contacts_col.find_one({"user_id": user_id, "email": email})
+            existing_notes = existing_contact.get("notes", "") if existing_contact else ""
+            
+            # Combine with existing notes (keep last 5 notes to avoid bloat)
+            if existing_notes:
+                # Split existing notes by newlines or periods to get individual notes
+                notes_list = [n.strip() for n in existing_notes.split("\n\n") if n.strip()]
+                notes_list.append(f"[{datetime.utcnow().strftime('%Y-%m-%d')}] {extracted_note}")
+                # Keep only last 5 notes
+                notes_list = notes_list[-5:]
+                updated_notes = "\n\n".join(notes_list)
+            else:
+                updated_notes = f"[{datetime.utcnow().strftime('%Y-%m-%d')}] {extracted_note}"
+            
+            # Update contact with new notes
+            contacts_col.update_one(
+                {"user_id": user_id, "email": email},
+                {"$set": {"notes": updated_notes, "notes_updated_at": datetime.utcnow().isoformat()}},
+            )
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to extract notes for contact {contact.get('email')}: {e}", flush=True)
+            continue
 
 
 def _build_flow(redirect_uri: str, state: str | None = None):
@@ -286,6 +391,21 @@ def chat():
             reply = run_agent(user_id=user_id, message=user_message, history=session_memory)
             emotion = None
             suicide_flag = False
+            # Check if reply is a compose modal request
+            try:
+                compose_data = json.loads(reply)
+                if isinstance(compose_data, dict) and compose_data.get("action") == "open_compose":
+                    # Look up contact email if needed
+                    to = compose_data.get("to", "")
+                    to = _lookup_contact_email(user_id, to)
+                    compose_data["to"] = to
+                    # Return special response for UI to open compose modal
+                    return jsonify({
+                        "reply": f"I'll help you compose an email to {to}.",
+                        "compose": compose_data
+                    })
+            except (json.JSONDecodeError, ValueError, TypeError):
+                pass  # Not a JSON response, continue normally
         else:
             # Default: GPT chat with memory
             reply, emotion, suicide_flag = chat_with_gpt(
@@ -662,6 +782,30 @@ def contacts_sync():
                             {"user_id": user_id, "email": em},
                             {"$set": {"name": new_name}}
                         )
+            
+            # Generate nicknames for all contacts that don't have one
+            no_nickname = list(contacts_col.find(
+                {
+                    "user_id": user_id,
+                    "$or": [
+                        {"nickname": {"$exists": False}},
+                        {"nickname": ""},
+                    ],
+                    "name": {"$exists": True, "$ne": "", "$ne": "(No name)"}
+                },
+                {"_id": 0, "email": 1, "name": 1}
+            ))
+            for d in no_nickname:
+                em = d.get("email", "")
+                nm = d.get("name", "")
+                if nm:
+                    auto_nickname = _generate_nickname(nm, em)
+                    if auto_nickname:
+                        contacts_col.update_one(
+                            {"user_id": user_id, "email": em},
+                            {"$set": {"nickname": auto_nickname}}
+                        )
+            
             # Add category-based groups (travel/food/events/housing) for all existing contacts FIRST
             all_existing = list(contacts_col.find({"user_id": user_id}, {"_id": 0, "email": 1}))
             for ed in all_existing:
@@ -810,6 +954,9 @@ def contacts_sync():
 
         # Upsert into DB
         for email_norm, doc in seen.items():
+            normalized_name = _normalized_display_name(doc.get("name") or "", email_norm)
+            auto_nickname = _generate_nickname(normalized_name, email_norm) if normalized_name else ""
+            
             contacts_col.update_one(
                 {"user_id": user_id, "email": email_norm},
                 {
@@ -817,7 +964,8 @@ def contacts_sync():
                         "user_id": user_id,
                         "email": email_norm,
                         "first_seen": doc["first_seen"],
-                        "name": _normalized_display_name(doc.get("name") or "", email_norm),
+                        "name": normalized_name,
+                        "nickname": auto_nickname,  # Auto-generate nickname on insert
                     },
                     "$set": {
                         "last_seen": doc["last_seen"],
@@ -827,6 +975,13 @@ def contacts_sync():
                 },
                 upsert=True,
             )
+            
+            # Also update nickname for existing contacts if they don't have one
+            if auto_nickname:
+                contacts_col.update_one(
+                    {"user_id": user_id, "email": email_norm, "nickname": {"$exists": False}},
+                    {"$set": {"nickname": auto_nickname}}
+                )
 
         # Normalize names for any existing contacts with placeholder or missing names
         needs = list(contacts_col.find(
@@ -848,6 +1003,29 @@ def contacts_sync():
                     {"user_id": user_id, "email": em},
                     {"$set": {"name": new_name}}
                 )
+        
+        # Generate nicknames for all contacts that don't have one
+        no_nickname = list(contacts_col.find(
+            {
+                "user_id": user_id,
+                "$or": [
+                    {"nickname": {"$exists": False}},
+                    {"nickname": ""},
+                ],
+                "name": {"$exists": True, "$ne": "", "$ne": "(No name)"}
+            },
+            {"_id": 0, "email": 1, "name": 1}
+        ))
+        for d in no_nickname:
+            em = d.get("email", "")
+            nm = d.get("name", "")
+            if nm:
+                auto_nickname = _generate_nickname(nm, em)
+                if auto_nickname:
+                    contacts_col.update_one(
+                        {"user_id": user_id, "email": em},
+                        {"$set": {"nickname": auto_nickname}}
+                    )
 
         # Add category-based groups (travel/food/events/housing) for all existing contacts FIRST
         # (Note: category groups are already added during upsert for new contacts, but we ensure all contacts have them)
@@ -1003,6 +1181,38 @@ def contacts_list():
                 if g not in entry["groups"]:
                     entry["groups"].append(g)
     return jsonify({"success": True, "contacts": list(merged.values())})
+
+
+def _generate_nickname(name: str, email: str = None) -> str:
+    """Generate a nickname from a full name. Format: 'First Name - Company' if company exists, else just first name."""
+    if not name or name.lower() == "(no name)":
+        return ""
+    
+    name = name.strip()
+    parts = name.split()
+    
+    if len(parts) == 0:
+        return ""
+    
+    # Extract first name
+    first_name = parts[0]
+    
+    # Check if name already contains company (format: "Name - Company")
+    if " - " in name:
+        # Already has company format, use as is
+        return name
+    
+    # Try to extract company from email domain
+    company = None
+    if email:
+        company = _company_from_email(email)
+    
+    # Build nickname: "First Name - Company" or just "First Name"
+    if company:
+        nickname = f"{first_name} - {company}"
+        return nickname[:50]  # Cap at 50 chars
+    else:
+        return first_name
 
 
 def _name_from_email(email: str) -> str:
@@ -1293,6 +1503,347 @@ def contacts_groups():
     return jsonify({"success": True, "groups": groups})
 
 
+@app.route("/api/contacts/detail", methods=["POST"])
+def contacts_detail():
+    """Get detailed contact information including notes, last interaction, and past conversations."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    email = (data.get("email") or "").strip().lower()
+
+    if not email:
+        return jsonify({"success": False, "error": "Missing email"}), 400
+
+    contacts_col = get_contacts_collection()
+    conversations_col = get_conversations_collection()
+    
+    if contacts_col is None or conversations_col is None:
+        return jsonify({"success": False, "error": "Database not connected"}), 500
+
+    # Get contact info
+    contact = contacts_col.find_one({"user_id": user_id, "email": email}, {"_id": 0})
+    if not contact:
+        return jsonify({"success": False, "error": "Contact not found"}), 404
+
+    # Get last interaction from Gmail
+    last_interaction = None
+    try:
+        auth_response = require_google_auth(user_id)
+        if not auth_response:
+            creds = load_google_credentials(user_id)
+            service = build("gmail", "v1", credentials=creds)
+            # Search for emails from/to this contact
+            query = f"from:{email} OR to:{email}"
+            resp = service.users().messages().list(
+                userId="me",
+                q=query,
+                maxResults=1,
+            ).execute()
+            messages = resp.get("messages", [])
+            if messages:
+                msg = service.users().messages().get(
+                    userId="me", id=messages[0]["id"], format="metadata",
+                    metadataHeaders=["Subject", "From", "To", "Date"]
+                ).execute()
+                headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
+                last_interaction = {
+                    "subject": headers.get("Subject", "(No subject)"),
+                    "from": headers.get("From", ""),
+                    "to": headers.get("To", ""),
+                    "date": headers.get("Date", ""),
+                    "snippet": msg.get("snippet", "")[:200],
+                }
+    except Exception as e:
+        print(f"[ERROR] Failed to get last interaction: {e}", flush=True)
+
+    # Get past conversations mentioning this contact
+    past_conversations = []
+    try:
+        # Search conversations for mentions of the contact's email, name, or nickname
+        contact_name = contact.get("name", "").lower()
+        contact_nickname = contact.get("nickname", "").lower()
+        search_terms = [email]
+        if contact_name:
+            search_terms.append(contact_name)
+        if contact_nickname:
+            search_terms.append(contact_nickname)
+
+        # Find conversations that mention this contact
+        all_conversations = conversations_col.find({"user_id": user_id})
+        for conv in all_conversations:
+            messages = conv.get("messages", [])
+            for msg in messages:
+                text = (msg.get("text") or "").lower()
+                # Check if message mentions the contact
+                if any(term in text for term in search_terms if term):
+                    session_id = conv.get("session_id", "")
+                    created_at = conv.get("created_at", "")
+                    past_conversations.append({
+                        "session_id": session_id,
+                        "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
+                        "message": msg.get("text", "")[:200],
+                        "role": msg.get("role", ""),
+                    })
+                    break  # Only add each conversation once
+            if len(past_conversations) >= 10:  # Limit to 10 most recent
+                break
+    except Exception as e:
+        print(f"[ERROR] Failed to get past conversations: {e}", flush=True)
+
+    # Get general notes (stored in contact document)
+    general_notes = contact.get("notes", "")
+
+    return jsonify({
+        "success": True,
+        "contact": contact,
+        "last_interaction": last_interaction,
+        "general_notes": general_notes,
+        "past_conversations": past_conversations,
+    })
+
+
+@app.route("/api/contacts/conversations", methods=["POST"])
+def contacts_conversations():
+    """Get all conversations related to a specific contact."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    email = (data.get("email") or "").strip().lower()
+    limit = int(data.get("limit", 20))
+
+    if not email:
+        return jsonify({"success": False, "error": "Missing email"}), 400
+
+    conversations_col = get_conversations_collection()
+    contacts_col = get_contacts_collection()
+    
+    if conversations_col is None or contacts_col is None:
+        return jsonify({"success": False, "error": "Database not connected"}), 500
+
+    # Get contact info for search terms
+    contact = contacts_col.find_one({"user_id": user_id, "email": email}, {"_id": 0})
+    if not contact:
+        return jsonify({"success": False, "error": "Contact not found"}), 404
+
+    contact_name = contact.get("name", "").lower()
+    contact_nickname = contact.get("nickname", "").lower()
+    search_terms = [email]
+    if contact_name:
+        search_terms.append(contact_name)
+    if contact_nickname:
+        search_terms.append(contact_nickname)
+
+    # Find all conversations mentioning this contact
+    conversations = []
+    try:
+        all_conversations = conversations_col.find({"user_id": user_id}).sort("created_at", -1)
+        for conv in all_conversations:
+            messages = conv.get("messages", [])
+            relevant_messages = []
+            for msg in messages:
+                text = (msg.get("text") or "").lower()
+                if any(term in text for term in search_terms if term):
+                    relevant_messages.append({
+                        "text": msg.get("text", ""),
+                        "role": msg.get("role", ""),
+                        "timestamp": msg.get("timestamp", ""),
+                    })
+            
+            if relevant_messages:
+                conversations.append({
+                    "session_id": conv.get("session_id", ""),
+                    "created_at": conv.get("created_at", "").isoformat() if hasattr(conv.get("created_at"), "isoformat") else str(conv.get("created_at", "")),
+                    "messages": relevant_messages,
+                })
+            
+            if len(conversations) >= limit:
+                break
+    except Exception as e:
+        print(f"[ERROR] Failed to get conversations: {e}", flush=True)
+
+    return jsonify({
+        "success": True,
+        "conversations": conversations,
+    })
+
+
+def _lookup_contact_email(user_id: str, name_or_email: str) -> str:
+    """Look up email address from contacts by name or return the input if it's already an email.
+    Prioritizes exact matches over partial matches."""
+    if not name_or_email or "@" in name_or_email:
+        return name_or_email  # Already an email or empty
+    
+    contacts_col = get_contacts_collection()
+    if contacts_col is None:
+        return name_or_email
+    
+    name_lower = name_or_email.strip().lower()
+    
+    # 1. Try exact match first (name or nickname exactly equals the search term)
+    contact = contacts_col.find_one(
+        {
+            "user_id": user_id,
+            "$or": [
+                {"name": {"$regex": f"^{name_lower}$", "$options": "i"}},
+                {"nickname": {"$regex": f"^{name_lower}$", "$options": "i"}},
+            ]
+        },
+        {"email": 1}
+    )
+    if contact:
+        return contact.get("email", name_or_email)
+    
+    # 2. Try word boundary match (whole word, not substring) - prevents "marin" matching "marina"
+    contact = contacts_col.find_one(
+        {
+            "user_id": user_id,
+            "$or": [
+                {"name": {"$regex": f"\\b{name_lower}\\b", "$options": "i"}},
+                {"nickname": {"$regex": f"\\b{name_lower}\\b", "$options": "i"}},
+            ]
+        },
+        {"email": 1}
+    )
+    if contact:
+        return contact.get("email", name_or_email)
+    
+    # 3. Last resort: partial match (only if name starts with the search term)
+    contact = contacts_col.find_one(
+        {
+            "user_id": user_id,
+            "$or": [
+                {"name": {"$regex": f"^{name_lower}", "$options": "i"}},
+                {"nickname": {"$regex": f"^{name_lower}", "$options": "i"}},
+            ]
+        },
+        {"email": 1}
+    )
+    if contact:
+        return contact.get("email", name_or_email)
+    
+    return name_or_email  # Not found, return original
+
+
+def _lookup_contact_emails(user_id: str, name: str) -> list:
+    """Look up all email addresses for a contact by name. Returns list of email strings.
+    Supports two modes:
+    - "Marin" → matches all contacts with first name "Marin" (across all companies)
+    - "Marin Fontys" or "Marin - Fontys" → matches only "Marin" at "Fontys" company
+    """
+    if not name or "@" in name:
+        return [name] if name else []  # Already an email or empty
+    
+    contacts_col = get_contacts_collection()
+    if contacts_col is None:
+        return []
+    
+    name_lower = name.strip().lower()
+    emails = []
+    
+    # Parse query to detect if it contains company info
+    # Check for " - " separator or multiple words (likely "First Company")
+    has_company = False
+    first_name = name_lower
+    company_name = None
+    
+    if " - " in name_lower:
+        # Format: "Marin - Fontys"
+        parts = name_lower.split(" - ", 1)
+        first_name = parts[0].strip()
+        company_name = parts[1].strip() if len(parts) > 1 else None
+        has_company = bool(company_name)
+    else:
+        # Check if multiple words (likely "Marin Fontys")
+        words = name_lower.split()
+        if len(words) >= 2:
+            # Assume first word is first name, rest is company
+            first_name = words[0]
+            company_name = " ".join(words[1:])
+            has_company = True
+    
+    # Build query based on whether company is specified
+    if has_company and company_name:
+        # Match by first name AND company
+        # Try exact nickname match first (format: "First - Company")
+        exact_nickname = f"{first_name} - {company_name}"
+        exact_contacts = contacts_col.find(
+            {
+                "user_id": user_id,
+                "nickname": {"$regex": f"^{exact_nickname}$", "$options": "i"}
+            },
+            {"email": 1}
+        )
+        
+        for contact in exact_contacts:
+            email = contact.get("email")
+            if email and email not in emails:
+                emails.append(email)
+        
+        if emails:
+            return emails
+        
+        # Try matching name starting with first name AND company in email domain or groups
+        all_contacts = contacts_col.find(
+            {
+                "user_id": user_id,
+                "$or": [
+                    {"name": {"$regex": f"^{first_name}", "$options": "i"}},
+                    {"nickname": {"$regex": f"^{first_name}", "$options": "i"}},
+                ]
+            },
+            {"email": 1, "name": 1, "groups": 1}
+        )
+        
+        # Filter by company
+        for contact in all_contacts:
+            email = contact.get("email", "")
+            # Check if company matches email domain or groups
+            company_match = False
+            if email:
+                # Extract company from email domain
+                try:
+                    domain = email.split("@", 1)[1].lower()
+                    domain_parts = domain.split(".")
+                    domain_company = domain_parts[-2] if len(domain_parts) >= 2 else ""
+                    if company_name.lower() in domain_company.lower() or domain_company.lower() in company_name.lower():
+                        company_match = True
+                except:
+                    pass
+            
+            # Check groups
+            if not company_match:
+                groups = contact.get("groups", [])
+                for g in groups:
+                    if isinstance(g, str) and company_name.lower() in g.lower():
+                        company_match = True
+                        break
+            
+            if company_match:
+                if email and email not in emails:
+                    emails.append(email)
+        
+        return emails
+    else:
+        # No company specified - match all contacts with this first name
+        # Try exact first name match in nickname (format: "First - Company" or just "First")
+        first_name_regex = f"^{first_name}( - |$)"
+        contacts = contacts_col.find(
+            {
+                "user_id": user_id,
+                "$or": [
+                    {"name": {"$regex": f"^{first_name}\\b", "$options": "i"}},
+                    {"nickname": {"$regex": first_name_regex, "$options": "i"}},
+                ]
+            },
+            {"email": 1}
+        )
+        
+        for contact in contacts:
+            email = contact.get("email")
+            if email and email not in emails:
+                emails.append(email)
+        
+        return emails
+
+
 @app.route("/api/gmail/send", methods=["POST"])
 def gmail_send_new():
     """Send a new email (compose)."""
@@ -1304,6 +1855,9 @@ def gmail_send_new():
 
     if not to or not body:
         return jsonify({"success": False, "error": "Missing 'to' or 'body'"}), 400
+
+    # Look up contact if needed
+    to = _lookup_contact_email(user_id, to)
 
     auth_response = require_google_auth(user_id)
     if auth_response:

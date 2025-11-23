@@ -45,6 +45,7 @@ export default function ChatPage() {
   const [replyThreadId, setReplyThreadId] = useState(null);
   const [replyTo, setReplyTo] = useState(null);
   const [composeOpen, setComposeOpen] = useState(false);
+  const [composeInitial, setComposeInitial] = useState({to: '', subject: '', body: ''});
   const [hiddenThreads, setHiddenThreads] = useState([]);
   const [emailChoices, setEmailChoices] = useState(null);
   const [currentEmailIndex, setCurrentEmailIndex] = useState(0);
@@ -227,6 +228,19 @@ export default function ChatPage() {
             checkGoogleConnection();
           }, 2000);
         }
+        return;
+      }
+      
+      // Handle compose modal request
+      if (data.compose && data.compose.action === 'open_compose') {
+        setComposeInitial({
+          to: data.compose.to || '',
+          subject: data.compose.subject || '',
+          body: data.compose.body || '',
+        });
+        setComposeOpen(true);
+        setChat((c) => [...c, {role: 'assistant', text: data.reply || 'Opening compose email...'}]);
+        setLoading(false);
         return;
       }
       
@@ -705,11 +719,15 @@ export default function ChatPage() {
           visible={composeOpen}
           onClose={(sent) => {
             setComposeOpen(false);
+            setComposeInitial({to: '', subject: '', body: ''});
             if (sent) {
               setChat((c) => [...c, {role: 'assistant', text: '✅ Email sent.'}]);
             }
           }}
           userId={userId}
+          initialTo={composeInitial.to}
+          initialSubject={composeInitial.subject}
+          initialBody={composeInitial.body}
         />
       </View>
       </KeyboardAvoidingView>

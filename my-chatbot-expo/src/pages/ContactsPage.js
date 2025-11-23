@@ -4,12 +4,12 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import {colors} from '../styles/colors';
 import {commonStyles} from '../styles/commonStyles';
 import {API_BASE_URL} from '../config/api';
-import {useRoute} from '@react-navigation/native';
-import EditContactModal from '../components/EditContactModal';
+import {useRoute, useNavigation} from '@react-navigation/native';
 import { Svg, Path } from 'react-native-svg';
 
 export default function ContactsPage() {
   const route = useRoute();
+  const navigation = useNavigation();
   const {userId} = route.params || {};
   const [contacts, setContacts] = useState([]);
   const [filter, setFilter] = useState('');
@@ -17,8 +17,6 @@ export default function ContactsPage() {
   const [working, setWorking] = useState(false);
   const [groups, setGroups] = useState([]);
   const [activeGroup, setActiveGroup] = useState(null);
-  const [editOpen, setEditOpen] = useState(false);
-  const [editContact, setEditContact] = useState(null);
   const didForceSyncRef = useRef(false);
   const [fetchLimit, setFetchLimit] = useState(1000);
 
@@ -296,14 +294,18 @@ export default function ContactsPage() {
                 </View>
               </View>
               {items.map((c, idx) => (
-                <View key={c.email || idx} style={styles.item}>
+                <TouchableOpacity
+                  key={c.email || idx}
+                  style={styles.item}
+                  onPress={() => navigation.navigate('ContactDetail', {userId, contact: c})}
+                  activeOpacity={0.7}>
                   <View style={styles.avatar}>
                     <Text style={styles.avatarText}>{(c.name || c.email || 'C').charAt(0).toUpperCase()}</Text>
                   </View>
                   <View style={styles.meta}>
                     <Text style={styles.name} numberOfLines={1}>{c.name || '(No name)'}</Text>
                     <Text style={styles.email} numberOfLines={1}>{c.email}</Text>
-                    {!!c.nickname && <Text style={styles.nick} numberOfLines={1}>“{c.nickname}”</Text>}
+                    {!!c.nickname && <Text style={styles.nick} numberOfLines={1}>"{c.nickname}"</Text>}
                     <View style={styles.groupRow}>
                       {Array.from(new Set(((c.groups || []).map(gg => (gg || '').toLowerCase()))))
                         .filter(Boolean)
@@ -319,14 +321,16 @@ export default function ContactsPage() {
                     <View style={styles.badge}>
                       <Text style={styles.badgeText}>{c.count || 1}</Text>
                     </View>
-                    <TouchableOpacity onPress={() => { setEditContact(c); setEditOpen(true); }} style={styles.editBtn}>
-                      <Text style={styles.editText}>Edit</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => archiveContact(c.email)} style={styles.archiveBtn}>
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        archiveContact(c.email);
+                      }}
+                      style={styles.archiveBtn}>
                       <Text style={styles.archiveText}>Archive</Text>
                     </TouchableOpacity>
                   </View>
-                </View>
+                </TouchableOpacity>
               ))}
             </View>
           );
@@ -336,19 +340,6 @@ export default function ContactsPage() {
           <Text style={styles.empty}>{loading ? 'Loading…' : 'No contacts found.'}</Text>
         )}
       </ScrollView>
-      <EditContactModal
-        visible={editOpen}
-        onClose={(saved, updated) => {
-          setEditOpen(false);
-          if (saved && updated) {
-            // merge updated contact into list
-            setContacts((prev) => prev.map((x) => (x.email === updated.email ? {...x, ...updated} : x)));
-            loadGroups();
-          }
-        }}
-        userId={userId}
-        contact={editContact}
-      />
     </SafeAreaView>
   );
 }
@@ -427,15 +418,6 @@ const styles = StyleSheet.create({
   },
   badgeText: { textAlign: 'center', color: colors.secondary[700], fontWeight: '600' },
   itemActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  editBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.dark[500] + '20',
-    backgroundColor: colors.primary[200] + '30',
-  },
-  editText: { color: colors.primary[900], fontSize: 12, fontWeight: '500' },
   archiveBtn: {
     paddingHorizontal: 8,
     paddingVertical: 6,
