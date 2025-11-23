@@ -39,7 +39,7 @@ from app.tools.calendar_manager import (
     detect_calendar_requests, parse_datetime_from_text, 
     create_calendar_event, list_calendar_events
 )
-from app.database import init_database
+from app.database import init_database, get_db
 from app.utils.db_utils import get_conversations_collection, get_tokens_collection, get_contacts_collection
 from app.utils.oauth_utils import (
     load_google_credentials, save_google_credentials, get_gmail_profile,
@@ -51,6 +51,7 @@ from app.autogen_agents.gmail_agent import run_gmail_autogen
 from app.tools.gmail_style import analyze_email_style, generate_reply_draft
 from app.tools.gmail_reply import reply_email as tool_reply_email
 from app.tools.gmail_detail import get_thread_detail
+from app.tools.email_classifier import classify_email
 from app.utils.oauth_utils import load_google_credentials
 from googleapiclient.errors import HttpError
 from googleapiclient.discovery import build
@@ -731,6 +732,517 @@ def gmail_search_threads():
             if len(results) >= max_results:
                 break
         return jsonify({"success": True, "threads": results})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/gmail/classify-email", methods=["POST"])
+def gmail_classify_email():
+    """Classify a single email using the Smart Inbox Triage system."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    
+    # Email data can come from request or be fetched by thread_id
+    thread_id = data.get("thread_id")
+    email_data = data.get("email", {})
+    
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+    
+    try:
+        # If thread_id provided, fetch email details
+        if thread_id:
+            creds = load_google_credentials(user_id)
+            service = build("gmail", "v1", credentials=creds)
+            
+            # Get thread details
+            thread = service.users().threads().get(userId="me", id=thread_id, format="full").execute()
+            first_msg = thread.get("messages", [{}])[0]
+            headers = {h["name"]: h["value"] for h in first_msg.get("payload", {}).get("headers", [])}
+            
+            # Extract body
+            from app.tools.gmail_detail import _extract_plain_text
+            body = _extract_plain_text(first_msg.get("payload", {}))
+            
+            email_data = {
+                "threadId": thread_id,
+                "from": headers.get("From", ""),
+                "subject": headers.get("Subject", "(No subject)"),
+                "snippet": first_msg.get("snippet", "")[:200],
+                "body": body[:1000],  # Limit body length
+            }
+        
+        if not email_data:
+            return jsonify({"success": False, "error": "Missing email data or thread_id"}), 400
+        
+        # Classify email
+        classification = classify_email(email_data, user_id)
+        
+        # Store classification in database if thread_id exists
+        if thread_id:
+            try:
+                from app.utils.db_utils import get_conversations_collection
+                emails_col = get_db().db.get_collection("emails") if get_db().is_connected else None
+                if emails_col:
+                            from app.tools.email_classifier import CLASSIFICATION_VERSION
+                            emails_col.update_one(
+                                {"user_id": user_id, "thread_id": thread_id},
+                                {
+                                    "$set": {
+                                        "category": classification["category"],
+                                        "scores": classification["scores"],
+                                        "classified_at": datetime.utcnow().isoformat(),
+                                        "classification_version": CLASSIFICATION_VERSION,
+                                    }
+                                },
+                                upsert=True,
+                            )
+            except Exception as e:
+                print(f"[WARNING] Failed to store classification: {e}", flush=True)
+        
+        return jsonify({
+            "success": True,
+            "classification": classification,
+            "email": email_data,
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/gmail/triaged-inbox", methods=["POST"])
+def gmail_triaged_inbox():
+    """Get triaged inbox with emails categorized by priority. Returns cached data immediately, classifies new emails in background."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    max_results = int(data.get("max_results", 50))
+    category_filter = data.get("category")  # Optional: filter by specific category
+
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    try:
+        from app.tools.email_classifier import CLASSIFICATION_VERSION
+        
+        # Get stored classifications from database FIRST - return immediately
+        emails_col = None
+        stored_classifications = {}
+        stored_emails_metadata = {}
+        needs_reclassification = []  # Emails that need re-classification due to version change
+        
+        try:
+            if get_db().is_connected:
+                emails_col = get_db().db.get_collection("emails")
+                # Get stored emails, sorted by classified_at (most recent first)
+                # Load more than max_results to have enough for filtering, but cap at reasonable limit
+                # We'll apply the limit later after all processing
+                stored = list(emails_col.find(
+                    {"user_id": user_id},
+                    {"thread_id": 1, "category": 1, "scores": 1, "from": 1, "subject": 1, "snippet": 1, "classification_version": 1}
+                ).sort("classified_at", -1).limit(max(max_results * 2, 2000)))  # Load at least 2x the limit, but cap at 2000
+                
+                for s in stored:
+                    thread_id = s.get("thread_id")
+                    stored_version = s.get("classification_version")
+                    
+                    # If version doesn't match or is missing, mark for re-classification but STILL use it for now
+                    # This ensures we show emails immediately, then update them in background
+                    if stored_version != CLASSIFICATION_VERSION:
+                        needs_reclassification.append(thread_id)
+                        # Still use the cached data for immediate display, will update in background
+                    
+                    stored_classifications[thread_id] = {
+                        "category": s.get("category", "normal"),
+                        "scores": s.get("scores", {}),
+                    }
+                    stored_emails_metadata[thread_id] = {
+                        "from": s.get("from", ""),
+                        "subject": s.get("subject", "(No subject)"),
+                        "snippet": s.get("snippet", "")[:200],
+                    }
+        except Exception as e:
+            print(f"[WARNING] Failed to load stored classifications: {e}", flush=True)
+        
+        # Return cached emails immediately - no Gmail API call needed!
+        # Don't limit here - we'll limit after all processing to respect user's selection
+        classified_emails = []
+        for thread_id, classification in stored_classifications.items():
+            email_meta = stored_emails_metadata.get(thread_id, {})
+            classified_emails.append({
+                "threadId": thread_id,
+                "from": email_meta.get("from", ""),
+                "subject": email_meta.get("subject", "(No subject)"),
+                "snippet": email_meta.get("snippet", ""),
+                "category": classification["category"],
+                "scores": classification["scores"],
+            })
+        
+        # If we have fewer emails than requested, fetch from Gmail in main request
+        # Otherwise, fetch in background only
+        needs_more_emails = len(classified_emails) < max_results
+        
+        def fetch_and_classify_new():
+            nonlocal classified_emails, max_results  # Allow modification of outer scope variable
+            try:
+                creds = load_google_credentials(user_id)
+                service = build("gmail", "v1", credentials=creds)
+                
+                unclassified_threads = []  # Store for background classification
+                # Fetch recent emails from inbox - respect max_results limit
+                # Fetch enough to fill up to max_results, but cap at reasonable limit
+                # We need to fetch more than max_results because some might already be in cache
+                gmail_fetch_limit = min(max(max_results, 200), 1000)  # Fetch at least max_results, but cap at 1000
+                resp = service.users().messages().list(
+                    userId="me",
+                    q="in:inbox -from:me",
+                    maxResults=gmail_fetch_limit,
+                ).execute()
+                
+                messages = resp.get("messages", []) or []
+                seen_threads = set(stored_classifications.keys())  # Track what we already have
+                
+                from app.tools.gmail_detail import _extract_plain_text
+                
+                for msg in messages:
+                    try:
+                        meta = service.users().messages().get(
+                            userId="me", id=msg["id"], format="metadata",
+                            metadataHeaders=["Subject", "From"]
+                        ).execute()
+                        
+                        thread_id = meta.get("threadId")
+                        if thread_id in seen_threads:
+                            continue
+                        seen_threads.add(thread_id)
+                        
+                        headers = {h["name"]: h["value"] for h in meta.get("payload", {}).get("headers", [])}
+                        
+                        # Store ALL emails we find (even if already cached) to ensure database is complete
+                        # But only classify if not in cache
+                        if thread_id not in stored_classifications:
+                            unclassified_threads.append({
+                                "thread_id": thread_id,
+                                "message_id": msg["id"],
+                                "headers": headers,
+                                "snippet": meta.get("snippet", "")[:200],
+                            })
+                        else:
+                            # Even if cached, ensure it's in database with metadata
+                            if emails_col:
+                                emails_col.update_one(
+                                    {"user_id": user_id, "thread_id": thread_id},
+                                    {
+                                        "$set": {
+                                            "from": headers.get("From", ""),
+                                            "subject": headers.get("Subject", "(No subject)"),
+                                            "snippet": meta.get("snippet", "")[:200],
+                                        }
+                                    },
+                                    upsert=True,
+                                )
+                    except Exception as e:
+                        print(f"[WARNING] Failed to process message {msg.get('id')}: {e}", flush=True)
+                        continue
+                
+                # Classify new emails (process enough to reach max_results)
+                if unclassified_threads and emails_col:
+                    # Process enough emails to potentially reach max_results
+                    # We need to process at least (max_results - current_count) emails
+                    current_count = len(classified_emails)
+                    needed = max_results - current_count
+                    # Process at least the needed amount, but cap at reasonable limit
+                    limit = min(max(needed, 50), 200)  # Process at least needed, but between 50-200
+                    newly_classified = []  # Store newly classified emails to add to response
+                    
+                    for unclass in unclassified_threads[:limit]:
+                        try:
+                            thread_id = unclass["thread_id"]
+                            full_msg = service.users().messages().get(
+                                userId="me", id=unclass["message_id"], format="full"
+                            ).execute()
+                            body = _extract_plain_text(full_msg.get("payload", {}))
+                            
+                            email_data = {
+                                "threadId": thread_id,
+                                "from": unclass["headers"].get("From", ""),
+                                "subject": unclass["headers"].get("Subject", "(No subject)"),
+                                "snippet": unclass["snippet"],
+                                "body": body[:1000],
+                            }
+                            
+                            from app.tools.email_classifier import classify_email
+                            classification = classify_email(email_data, user_id)
+                            
+                            # Store in database with version
+                            emails_col.update_one(
+                                {"user_id": user_id, "thread_id": thread_id},
+                                {
+                                    "$set": {
+                                        "user_id": user_id,
+                                        "thread_id": thread_id,
+                                        "from": unclass["headers"].get("From", ""),
+                                        "subject": unclass["headers"].get("Subject", "(No subject)"),
+                                        "snippet": unclass["snippet"],
+                                        "category": classification["category"],
+                                        "scores": classification["scores"],
+                                        "classified_at": datetime.utcnow().isoformat(),
+                                        "classification_version": CLASSIFICATION_VERSION,
+                                    }
+                                },
+                                upsert=True,
+                            )
+                            
+                            # Store newly classified email
+                            newly_classified.append({
+                                "threadId": thread_id,
+                                "from": unclass["headers"].get("From", ""),
+                                "subject": unclass["headers"].get("Subject", "(No subject)"),
+                                "snippet": unclass["snippet"],
+                                "category": classification["category"],
+                                "scores": classification["scores"],
+                            })
+                        except Exception as e:
+                            print(f"[WARNING] Background classification failed: {e}", flush=True)
+                            continue
+                    
+                    # If we need more emails, add newly classified emails to the response
+                    # But respect max_results limit - only add up to the limit
+                    if needs_more_emails and newly_classified:
+                        current_count = len(classified_emails)
+                        if current_count < max_results:
+                            remaining_slots = max_results - current_count
+                            classified_emails.extend(newly_classified[:remaining_slots])
+                        # If we're already at or over the limit, don't add more
+                
+                # Re-classify emails that need version update (in background, don't block)
+                if needs_reclassification and emails_col:
+                    def reclassify_old_emails():
+                        try:
+                            for thread_id in needs_reclassification[:10]:  # Limit to 10 per run
+                                try:
+                                    # Find a message with this thread_id from Gmail
+                                    resp = service.users().messages().list(
+                                        userId="me",
+                                        q=f"rfc822msgid:{thread_id} OR thread:{thread_id}",
+                                        maxResults=1,
+                                    ).execute()
+                                    messages = resp.get("messages", [])
+                                    if not messages:
+                                        # Try alternative: search by thread
+                                        try:
+                                            thread = service.users().threads().get(userId="me", id=thread_id).execute()
+                                            if thread.get("messages"):
+                                                message_id = thread["messages"][0]["id"]
+                                            else:
+                                                continue
+                                        except:
+                                            continue
+                                    else:
+                                        message_id = messages[0]["id"]
+                                    
+                                    full_msg = service.users().messages().get(
+                                        userId="me", id=message_id, format="full"
+                                    ).execute()
+                                    from app.tools.gmail_detail import _extract_plain_text
+                                    body = _extract_plain_text(full_msg.get("payload", {}))
+                                    headers = {h["name"]: h["value"] for h in full_msg.get("payload", {}).get("headers", [])}
+                                    
+                                    email_data = {
+                                        "threadId": thread_id,
+                                        "from": headers.get("From", ""),
+                                        "subject": headers.get("Subject", "(No subject)"),
+                                        "snippet": full_msg.get("snippet", "")[:200],
+                                        "body": body[:1000],
+                                    }
+                                    
+                                    from app.tools.email_classifier import classify_email
+                                    classification = classify_email(email_data, user_id)
+                                    
+                                    # Update with new classification and version
+                                    bg_emails_col = get_db().db.get_collection("emails")
+                                    bg_emails_col.update_one(
+                                        {"user_id": user_id, "thread_id": thread_id},
+                                        {
+                                            "$set": {
+                                                "category": classification["category"],
+                                                "scores": classification["scores"],
+                                                "classified_at": datetime.utcnow().isoformat(),
+                                                "classification_version": CLASSIFICATION_VERSION,
+                                            }
+                                        },
+                                    )
+                                except Exception as e:
+                                    print(f"[WARNING] Re-classification failed for {thread_id}: {e}", flush=True)
+                                    continue
+                        except Exception as e:
+                            print(f"[WARNING] Re-classification batch error: {e}", flush=True)
+                    
+                    # Start re-classification in separate background thread
+                    threading.Thread(target=reclassify_old_emails, daemon=True).start()
+            except Exception as e:
+                print(f"[WARNING] Background fetch/classify error: {e}", flush=True)
+        
+        # If we need more emails to reach max_results, fetch immediately
+        # Otherwise, fetch in background
+        import threading
+        if needs_more_emails:
+            # Fetch immediately to get enough emails to reach max_results
+            # This ensures user gets the requested number of emails
+            # Note: This will modify classified_emails inside the function
+            fetch_and_classify_new()
+        else:
+            # We have enough emails, fetch in background only for updates
+            threading.Thread(target=fetch_and_classify_new, daemon=True).start()
+        
+        # Apply category filter if specified
+        if category_filter:
+            classified_emails = [e for e in classified_emails if e.get("category") == category_filter]
+        
+        # Ensure we don't exceed max_results (respect user's limit selection)
+        classified_emails = classified_emails[:max_results]
+        
+        # Group by category
+        categories = {
+            "urgent": [],
+            "waiting_for_reply": [],
+            "action_items": [],
+            "newsletters": [],
+            "invoices": [],
+            "clients": [],
+            "normal": [],
+        }
+        
+        for email in classified_emails:
+            cat = email.get("category", "normal")
+            if cat in categories:
+                categories[cat].append(email)
+        
+        return jsonify({
+            "success": True,
+            "categories": categories,
+            "total": len(classified_emails),
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/gmail/classify-background", methods=["POST"])
+def gmail_classify_background():
+    """Trigger background classification for unclassified emails. Returns immediately."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    max_emails = int(data.get("max_emails", 20))
+
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    try:
+        import threading
+        
+        def classify_background():
+            try:
+                creds = load_google_credentials(user_id)
+                service = build("gmail", "v1", credentials=creds)
+                
+                # Get unclassified emails from inbox
+                resp = service.users().messages().list(
+                    userId="me",
+                    q="in:inbox -from:me",
+                    maxResults=max_emails * 2,
+                ).execute()
+                
+                messages = resp.get("messages", []) or []
+                seen_threads = set()
+                
+                # Get already classified thread IDs
+                emails_col = None
+                classified_threads = set()
+                try:
+                    if get_db().is_connected:
+                        emails_col = get_db().db.get_collection("emails")
+                        classified = list(emails_col.find(
+                            {"user_id": user_id},
+                            {"thread_id": 1}
+                        ))
+                        classified_threads = {c.get("thread_id") for c in classified}
+                except Exception:
+                    pass
+                
+                from app.tools.gmail_detail import _extract_plain_text
+                
+                count = 0
+                for msg in messages:
+                    if count >= max_emails:
+                        break
+                    
+                    try:
+                        meta = service.users().messages().get(
+                            userId="me", id=msg["id"], format="metadata",
+                            metadataHeaders=["Subject", "From"]
+                        ).execute()
+                        
+                        thread_id = meta.get("threadId")
+                        if thread_id in seen_threads or thread_id in classified_threads:
+                            continue
+                        seen_threads.add(thread_id)
+                        
+                        # Fetch full message
+                        full_msg = service.users().messages().get(
+                            userId="me", id=msg["id"], format="full"
+                        ).execute()
+                        
+                        headers = {h["name"]: h["value"] for h in full_msg.get("payload", {}).get("headers", [])}
+                        body = _extract_plain_text(full_msg.get("payload", {}))
+                        
+                        email_data = {
+                            "threadId": thread_id,
+                            "from": headers.get("From", ""),
+                            "subject": headers.get("Subject", "(No subject)"),
+                            "snippet": full_msg.get("snippet", "")[:200],
+                            "body": body[:1000],
+                        }
+                        
+                        classification = classify_email(email_data, user_id)
+                        
+                        # Store in database
+                        if emails_col:
+                            from app.tools.email_classifier import CLASSIFICATION_VERSION
+                            emails_col.update_one(
+                                {"user_id": user_id, "thread_id": thread_id},
+                                {
+                                    "$set": {
+                                        "user_id": user_id,
+                                        "thread_id": thread_id,
+                                        "from": headers.get("From", ""),
+                                        "subject": headers.get("Subject", "(No subject)"),
+                                        "snippet": full_msg.get("snippet", "")[:200],
+                                        "category": classification["category"],
+                                        "scores": classification["scores"],
+                                        "classified_at": datetime.utcnow().isoformat(),
+                                        "classification_version": CLASSIFICATION_VERSION,
+                                    }
+                                },
+                                upsert=True,
+                            )
+                        
+                        count += 1
+                    except Exception as e:
+                        print(f"[WARNING] Background classification failed: {e}", flush=True)
+                        continue
+                
+                print(f"[INFO] Background classification completed: {count} emails classified", flush=True)
+            except Exception as e:
+                print(f"[ERROR] Background classification error: {e}", flush=True)
+        
+        # Start background thread
+        threading.Thread(target=classify_background, daemon=True).start()
+        
+        return jsonify({
+            "success": True,
+            "message": "Background classification started",
+        })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
