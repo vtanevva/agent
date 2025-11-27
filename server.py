@@ -31,15 +31,41 @@ logging.basicConfig(
 # Local modules
 from app.agent_core.agent import run_agent
 from app.agent_core.tool_registry import all_openai_schemas
-from app.chatbot import chat_with_gpt
 from app.chat_embeddings import (
     get_user_facts, save_chat_to_memory, extract_facts_with_gpt
 )
-from app.tools.calendar_manager import (
-    detect_calendar_requests, parse_datetime_from_text, 
-    create_calendar_event, list_calendar_events
-)
 from app.database import init_database, get_db
+from app.orchestrator.aivis_orchestrator import handle_chat, detect_intent
+from app.orchestrator.session_memory import load_session_memory
+from app.services.gmail_service import (
+    get_thread_detail as gmail_get_thread_detail,
+    reply_to_thread as gmail_reply_to_thread,
+    archive_thread as gmail_archive_thread,
+    mark_thread_handled as gmail_mark_handled,
+    list_threads as gmail_list_threads_service,
+    search_threads as gmail_search_threads_service,
+    classify_single_email as gmail_classify_single_email,
+    triaged_inbox as gmail_triaged_inbox_service,
+    classify_background as gmail_classify_background_service,
+    send_new_email as gmail_send_new_email,
+    rewrite_email_text as gmail_rewrite_email_text,
+)
+from app.services.contacts_service import (
+    sync_contacts as contacts_sync_service,
+    list_contacts as contacts_list_service,
+    normalize_contact_names as contacts_normalize_names_service,
+    archive_contact as contacts_archive_service,
+    update_contact as contacts_update_service,
+    list_contact_groups as contacts_groups_service,
+    get_contact_detail as contacts_detail_service,
+    get_contact_conversations as contacts_conversations_service,
+)
+from app.tools.calendar_manager import (
+    detect_calendar_requests,
+    parse_datetime_from_text,
+    create_calendar_event,
+    list_calendar_events,
+)
 from app.utils.db_utils import get_conversations_collection, get_tokens_collection, get_contacts_collection
 from app.utils.oauth_utils import (
     load_google_credentials, save_google_credentials, get_gmail_profile,
@@ -320,79 +346,29 @@ def chat():
         if not user_message:
             return jsonify({"reply": "No message received. Please enter something."}), 400
 
-        # Detect features that require Google auth
-        calendar_requests = detect_calendar_requests(user_message)
-        calendar_keywords = ["calendar", "events", "schedule", "appointments", "meetings"]
-        email_keywords = ["emails", "email", "inbox", "reply to"]
+        # Determine high-level intent (calendar, email, or general chat)
+        intent = detect_intent(user_message)
 
-        if calendar_requests or any(k in user_message.lower() for k in calendar_keywords + email_keywords):
+        # Detect features that require Google auth
+        if intent in ("calendar", "email"):
             auth_response = require_google_auth(user_id)
             if auth_response:
                 return auth_response
 
-        # Handle calendar event creation
-        if calendar_requests:
-            try:
-                for calendar_request in calendar_requests:
-                    start_time, end_time = parse_datetime_from_text(calendar_request["full_match"])
-                    if start_time and end_time:
-                        result = create_calendar_event(
+        # Load session history via helper
+        session_memory = load_session_memory(user_id=user_id, session_id=session_id, limit=20)
+
+        # Delegate to orchestrator for the actual handling
+        reply = handle_chat(
                             user_id=user_id,
-                            summary=calendar_request["description"],
-                            start_time=start_time.isoformat(),
-                            end_time=end_time.isoformat(),
-                            description=f"Event created from chat: {user_message}",
-                        )
+            session_id=session_id,
+            user_message=user_message,
+            session_memory=session_memory,
+            intent=intent,
+        )
 
-                        if result.get("success"):
-                            reply = (
-                                f"✅ I've scheduled '{calendar_request['description']}' for "
-                                f"{start_time.strftime('%B %d at %I:%M %p')}."
-                                " You can view it in your calendar!"
-                            )
-                        else:
-                            reply = (
-                                "❌ Sorry, I couldn't schedule the event. Please make sure "
-                                "you're connected to Google Calendar."
-                            )
-
-                        save_message(user_id, session_id, user_message, reply, None, False)
-                        return jsonify({"reply": reply})
-            except Exception as e:
-                reply = f"❌ Error creating calendar event: {str(e)}"
-                save_message(user_id, session_id, user_message, reply, None, False)
-                return jsonify({"reply": reply})
-
-        # Load session history
-        session_memory = []
-        conversations = get_conversations_collection()
-        if conversations is not None:
-            try:
-                chat_doc = conversations.find_one({"user_id": user_id, "session_id": session_id})
-                if chat_doc and "messages" in chat_doc:
-                    for msg in chat_doc["messages"][-20:]:
-                        role = "assistant" if msg["role"] == "bot" else msg["role"]
-                        # Ensure content is a string for model compatibility
-                        text = msg.get("text", "")
-                        if not isinstance(text, str):
-                            try:
-                                text = json.dumps(text, ensure_ascii=False)
-                            except Exception:
-                                text = str(text)
-                        session_memory.append({"role": role, "content": text})
-            except Exception as e:
-                print(f"[ERROR] Failed to load session history: {e}", flush=True)
-
-        # Feature-specific handling
-        if any(k in user_message.lower() for k in calendar_keywords):
-            reply = run_agent(user_id=user_id, message=user_message, history=[])
-            emotion = None
-            suicide_flag = False
-        elif any(k in user_message.lower() for k in email_keywords):
-            reply = run_agent(user_id=user_id, message=user_message, history=session_memory)
-            emotion = None
-            suicide_flag = False
-            # Check if reply is a compose modal request
+        # Preserve compose-modal behaviour for email-style replies
+        if intent == "email":
             try:
                 compose_data = json.loads(reply)
                 if isinstance(compose_data, dict) and compose_data.get("action") == "open_compose":
@@ -406,18 +382,13 @@ def chat():
                         "compose": compose_data
                     })
             except (json.JSONDecodeError, ValueError, TypeError):
-                pass  # Not a JSON response, continue normally
-        else:
-            # Default: GPT chat with memory
-            reply, emotion, suicide_flag = chat_with_gpt(
-                user_message,
-                user_id=user_id,
-                session_id=session_id,
-                return_meta=True,
-                session_memory=session_memory,
-            )
+                # Not a JSON response, continue normally
+                pass
 
         # Save conversation
+        # We no longer track emotion/suicide flags on the main chat path.
+        emotion = None
+        suicide_flag = False
         save_message(user_id, session_id, user_message, reply, emotion, suicide_flag)
 
         # Extract and save new facts
@@ -528,11 +499,9 @@ def gmail_thread_detail():
     if auth_response:
         return auth_response
 
-    result = get_thread_detail(user_id=user_id, thread_id=thread_id)
-    try:
-        return jsonify(json.loads(result))
-    except Exception:
-        return jsonify({"success": False, "error": "Invalid detail output"}), 500
+    result = gmail_get_thread_detail(user_id=user_id, thread_id=thread_id)
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
 
 @app.route("/api/gmail/reply", methods=["POST"])
 def gmail_reply_send():
@@ -551,11 +520,15 @@ def gmail_reply_send():
     if auth_response:
         return auth_response
 
-    try:
-        msg = tool_reply_email(user_id=user_id, thread_id=thread_id, to=to, body=body, subj_prefix=subj_prefix)
-        return jsonify({"success": True, "message": msg})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    result = gmail_reply_to_thread(
+        user_id=user_id,
+        thread_id=thread_id,
+        to=to,
+        body=body,
+        subj_prefix=subj_prefix,
+    )
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
 
 
 @app.route("/api/gmail/archive", methods=["POST"])
@@ -571,28 +544,9 @@ def gmail_archive_thread():
     if auth_response:
         return auth_response
 
-    try:
-        creds = load_google_credentials(user_id)
-        service = build("gmail", "v1", credentials=creds)
-
-        # If a messageId was provided, resolve to threadId
-        try:
-            meta = service.users().messages().get(userId="me", id=thread_id, format="minimal").execute()
-            real_thread_id = meta.get("threadId", thread_id)
-        except HttpError as e:
-            if e.resp.status in (400, 404):
-                real_thread_id = thread_id
-            else:
-                raise
-
-        service.users().threads().modify(
-            userId="me",
-            id=real_thread_id,
-            body={"removeLabelIds": ["INBOX"]}
-        ).execute()
-        return jsonify({"success": True, "thread_id": real_thread_id})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    result = gmail_archive_thread(user_id=user_id, thread_id=thread_id)
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
 
 
 @app.route("/api/gmail/mark-handled", methods=["POST"])
@@ -608,43 +562,9 @@ def gmail_mark_handled():
     if auth_response:
         return auth_response
 
-    try:
-        creds = load_google_credentials(user_id)
-        service = build("gmail", "v1", credentials=creds)
-
-        # Ensure label exists (create if missing)
-        labels = service.users().labels().list(userId="me").execute().get("labels", [])
-        handled_label = next((l for l in labels if l.get("name") == "Handled"), None)
-        if not handled_label:
-            handled_label = service.users().labels().create(
-                userId="me",
-                body={
-                    "name": "Handled",
-                    "labelListVisibility": "labelShow",
-                    "messageListVisibility": "show",
-                    "type": "user"
-                }
-            ).execute()
-        handled_label_id = handled_label["id"]
-
-        # If a messageId was provided, resolve to threadId
-        try:
-            meta = service.users().messages().get(userId="me", id=thread_id, format="minimal").execute()
-            real_thread_id = meta.get("threadId", thread_id)
-        except HttpError as e:
-            if e.resp.status in (400, 404):
-                real_thread_id = thread_id
-            else:
-                raise
-
-        service.users().threads().modify(
-            userId="me",
-            id=real_thread_id,
-            body={"addLabelIds": [handled_label_id], "removeLabelIds": ["UNREAD"]}
-        ).execute()
-        return jsonify({"success": True, "thread_id": real_thread_id, "label": "Handled"})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    result = gmail_mark_handled(user_id=user_id, thread_id=thread_id)
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
 
 
 @app.route("/api/gmail/list", methods=["POST"])
@@ -659,33 +579,9 @@ def gmail_list_threads():
     if auth_response:
         return auth_response
 
-    try:
-        creds = load_google_credentials(user_id)
-        service = build("gmail", "v1", credentials=creds)
-        resp = service.users().threads().list(
-            userId="me",
-            labelIds=[label] if label else None,
-            maxResults=max_results,
-        ).execute()
-        threads = resp.get("threads", []) or []
-        items = []
-        for idx, t in enumerate(threads, start=1):
-            th = service.users().threads().get(userId="me", id=t["id"], format="metadata").execute()
-            first = th.get("messages", [{}])[0]
-            headers = {h["name"]: h["value"] for h in first.get("payload", {}).get("headers", [])}
-            items.append({
-                "idx": idx,
-                "threadId": th.get("id"),
-                "from": headers.get("From", ""),
-                "subject": headers.get("Subject", "(No subject)"),
-                "snippet": first.get("snippet", "")[:200],
-                "label": label or "",
-            })
-            if len(items) >= max_results:
-                break
-        return jsonify({"success": True, "threads": items})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    result = gmail_list_threads_service(user_id=user_id, label=label, max_results=max_results)
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
 
 
 @app.route("/api/gmail/search", methods=["POST"])
@@ -703,37 +599,9 @@ def gmail_search_threads():
     if auth_response:
         return auth_response
 
-    try:
-        creds = load_google_credentials(user_id)
-        service = build("gmail", "v1", credentials=creds)
-        resp = service.users().messages().list(
-            userId="me",
-            q=query,
-            maxResults=max_results * 2,
-        ).execute()
-        msgs = resp.get("messages", []) or []
-        seen = set()
-        results = []
-        for m in msgs:
-            meta = service.users().messages().get(
-                userId="me", id=m["id"], format="metadata", metadataHeaders=["Subject", "From"]
-            ).execute()
-            tid = meta.get("threadId")
-            if tid in seen:
-                continue
-            seen.add(tid)
-            headers = {h["name"]: h["value"] for h in meta.get("payload", {}).get("headers", [])}
-            results.append({
-                "threadId": tid,
-                "from": headers.get("From", ""),
-                "subject": headers.get("Subject", "(No subject)"),
-                "snippet": meta.get("snippet", "")[:200],
-            })
-            if len(results) >= max_results:
-                break
-        return jsonify({"success": True, "threads": results})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    result = gmail_search_threads_service(user_id=user_id, query=query, max_results=max_results)
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
 
 
 @app.route("/api/gmail/classify-email", methods=["POST"])
@@ -750,64 +618,13 @@ def gmail_classify_email():
     if auth_response:
         return auth_response
     
-    try:
-        # If thread_id provided, fetch email details
-        if thread_id:
-            creds = load_google_credentials(user_id)
-            service = build("gmail", "v1", credentials=creds)
-            
-            # Get thread details
-            thread = service.users().threads().get(userId="me", id=thread_id, format="full").execute()
-            first_msg = thread.get("messages", [{}])[0]
-            headers = {h["name"]: h["value"] for h in first_msg.get("payload", {}).get("headers", [])}
-            
-            # Extract body
-            from app.tools.gmail_detail import _extract_plain_text
-            body = _extract_plain_text(first_msg.get("payload", {}))
-            
-            email_data = {
-                "threadId": thread_id,
-                "from": headers.get("From", ""),
-                "subject": headers.get("Subject", "(No subject)"),
-                "snippet": first_msg.get("snippet", "")[:200],
-                "body": body[:1000],  # Limit body length
-            }
-        
-        if not email_data:
-            return jsonify({"success": False, "error": "Missing email data or thread_id"}), 400
-        
-        # Classify email
-        classification = classify_email(email_data, user_id)
-        
-        # Store classification in database if thread_id exists
-        if thread_id:
-            try:
-                from app.utils.db_utils import get_conversations_collection
-                emails_col = get_db().db.get_collection("emails") if get_db().is_connected else None
-                if emails_col:
-                            from app.tools.email_classifier import CLASSIFICATION_VERSION
-                            emails_col.update_one(
-                                {"user_id": user_id, "thread_id": thread_id},
-                                {
-                                    "$set": {
-                                        "category": classification["category"],
-                                        "scores": classification["scores"],
-                                        "classified_at": datetime.utcnow().isoformat(),
-                                        "classification_version": CLASSIFICATION_VERSION,
-                                    }
-                                },
-                                upsert=True,
-                            )
-            except Exception as e:
-                print(f"[WARNING] Failed to store classification: {e}", flush=True)
-        
-        return jsonify({
-            "success": True,
-            "classification": classification,
-            "email": email_data,
-        })
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    # Delegate to service; it handles fetching by thread_id when needed.
+    result = gmail_classify_single_email(user_id=user_id, thread_id=thread_id, email_data=email_data or None)
+    # Keep 400 response if request was structurally invalid
+    if not result.get("success") and result.get("error") == "Missing email data or thread_id":
+        return jsonify(result), 400
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
 
 
 @app.route("/api/gmail/triaged-inbox", methods=["POST"])
@@ -822,309 +639,13 @@ def gmail_triaged_inbox():
     if auth_response:
         return auth_response
 
-    try:
-        from app.tools.email_classifier import CLASSIFICATION_VERSION
-        
-        # Get stored classifications from database FIRST - return immediately
-        emails_col = None
-        stored_classifications = {}
-        stored_emails_metadata = {}
-        needs_reclassification = []  # Emails that need re-classification due to version change
-        
-        try:
-            if get_db().is_connected:
-                emails_col = get_db().db.get_collection("emails")
-                # Get stored emails, sorted by classified_at (most recent first)
-                # Load more than max_results to have enough for filtering, but cap at reasonable limit
-                # We'll apply the limit later after all processing
-                stored = list(emails_col.find(
-                    {"user_id": user_id},
-                    {"thread_id": 1, "category": 1, "scores": 1, "from": 1, "subject": 1, "snippet": 1, "classification_version": 1}
-                ).sort("classified_at", -1).limit(max(max_results * 2, 2000)))  # Load at least 2x the limit, but cap at 2000
-                
-                for s in stored:
-                    thread_id = s.get("thread_id")
-                    stored_version = s.get("classification_version")
-                    
-                    # If version doesn't match or is missing, mark for re-classification but STILL use it for now
-                    # This ensures we show emails immediately, then update them in background
-                    if stored_version != CLASSIFICATION_VERSION:
-                        needs_reclassification.append(thread_id)
-                        # Still use the cached data for immediate display, will update in background
-                    
-                    stored_classifications[thread_id] = {
-                        "category": s.get("category", "normal"),
-                        "scores": s.get("scores", {}),
-                    }
-                    stored_emails_metadata[thread_id] = {
-                        "from": s.get("from", ""),
-                        "subject": s.get("subject", "(No subject)"),
-                        "snippet": s.get("snippet", "")[:200],
-                    }
-        except Exception as e:
-            print(f"[WARNING] Failed to load stored classifications: {e}", flush=True)
-        
-        # Return cached emails immediately - no Gmail API call needed!
-        # Don't limit here - we'll limit after all processing to respect user's selection
-        classified_emails = []
-        for thread_id, classification in stored_classifications.items():
-            email_meta = stored_emails_metadata.get(thread_id, {})
-            classified_emails.append({
-                "threadId": thread_id,
-                "from": email_meta.get("from", ""),
-                "subject": email_meta.get("subject", "(No subject)"),
-                "snippet": email_meta.get("snippet", ""),
-                "category": classification["category"],
-                "scores": classification["scores"],
-            })
-        
-        # If we have fewer emails than requested, fetch from Gmail in main request
-        # Otherwise, fetch in background only
-        needs_more_emails = len(classified_emails) < max_results
-        
-        def fetch_and_classify_new():
-            nonlocal classified_emails, max_results  # Allow modification of outer scope variable
-            try:
-                creds = load_google_credentials(user_id)
-                service = build("gmail", "v1", credentials=creds)
-                
-                unclassified_threads = []  # Store for background classification
-                # Fetch recent emails from inbox - respect max_results limit
-                # Fetch enough to fill up to max_results, but cap at reasonable limit
-                # We need to fetch more than max_results because some might already be in cache
-                gmail_fetch_limit = min(max(max_results, 200), 1000)  # Fetch at least max_results, but cap at 1000
-                resp = service.users().messages().list(
-                    userId="me",
-                    q="in:inbox -from:me",
-                    maxResults=gmail_fetch_limit,
-                ).execute()
-                
-                messages = resp.get("messages", []) or []
-                seen_threads = set(stored_classifications.keys())  # Track what we already have
-                
-                from app.tools.gmail_detail import _extract_plain_text
-                
-                for msg in messages:
-                    try:
-                        meta = service.users().messages().get(
-                            userId="me", id=msg["id"], format="metadata",
-                            metadataHeaders=["Subject", "From"]
-                        ).execute()
-                        
-                        thread_id = meta.get("threadId")
-                        if thread_id in seen_threads:
-                            continue
-                        seen_threads.add(thread_id)
-                        
-                        headers = {h["name"]: h["value"] for h in meta.get("payload", {}).get("headers", [])}
-                        
-                        # Store ALL emails we find (even if already cached) to ensure database is complete
-                        # But only classify if not in cache
-                        if thread_id not in stored_classifications:
-                            unclassified_threads.append({
-                                "thread_id": thread_id,
-                                "message_id": msg["id"],
-                                "headers": headers,
-                                "snippet": meta.get("snippet", "")[:200],
-                            })
-                        else:
-                            # Even if cached, ensure it's in database with metadata
-                            if emails_col:
-                                emails_col.update_one(
-                                    {"user_id": user_id, "thread_id": thread_id},
-                                    {
-                                        "$set": {
-                                            "from": headers.get("From", ""),
-                                            "subject": headers.get("Subject", "(No subject)"),
-                                            "snippet": meta.get("snippet", "")[:200],
-                                        }
-                                    },
-                                    upsert=True,
-                                )
-                    except Exception as e:
-                        print(f"[WARNING] Failed to process message {msg.get('id')}: {e}", flush=True)
-                        continue
-                
-                # Classify new emails (process enough to reach max_results)
-                if unclassified_threads and emails_col:
-                    # Process enough emails to potentially reach max_results
-                    # We need to process at least (max_results - current_count) emails
-                    current_count = len(classified_emails)
-                    needed = max_results - current_count
-                    # Process at least the needed amount, but cap at reasonable limit
-                    limit = min(max(needed, 50), 200)  # Process at least needed, but between 50-200
-                    newly_classified = []  # Store newly classified emails to add to response
-                    
-                    for unclass in unclassified_threads[:limit]:
-                        try:
-                            thread_id = unclass["thread_id"]
-                            full_msg = service.users().messages().get(
-                                userId="me", id=unclass["message_id"], format="full"
-                            ).execute()
-                            body = _extract_plain_text(full_msg.get("payload", {}))
-                            
-                            email_data = {
-                                "threadId": thread_id,
-                                "from": unclass["headers"].get("From", ""),
-                                "subject": unclass["headers"].get("Subject", "(No subject)"),
-                                "snippet": unclass["snippet"],
-                                "body": body[:1000],
-                            }
-                            
-                            from app.tools.email_classifier import classify_email
-                            classification = classify_email(email_data, user_id)
-                            
-                            # Store in database with version
-                            emails_col.update_one(
-                                {"user_id": user_id, "thread_id": thread_id},
-                                {
-                                    "$set": {
-                                        "user_id": user_id,
-                                        "thread_id": thread_id,
-                                        "from": unclass["headers"].get("From", ""),
-                                        "subject": unclass["headers"].get("Subject", "(No subject)"),
-                                        "snippet": unclass["snippet"],
-                                        "category": classification["category"],
-                                        "scores": classification["scores"],
-                                        "classified_at": datetime.utcnow().isoformat(),
-                                        "classification_version": CLASSIFICATION_VERSION,
-                                    }
-                                },
-                                upsert=True,
-                            )
-                            
-                            # Store newly classified email
-                            newly_classified.append({
-                                "threadId": thread_id,
-                                "from": unclass["headers"].get("From", ""),
-                                "subject": unclass["headers"].get("Subject", "(No subject)"),
-                                "snippet": unclass["snippet"],
-                                "category": classification["category"],
-                                "scores": classification["scores"],
-                            })
-                        except Exception as e:
-                            print(f"[WARNING] Background classification failed: {e}", flush=True)
-                            continue
-                    
-                    # If we need more emails, add newly classified emails to the response
-                    # But respect max_results limit - only add up to the limit
-                    if needs_more_emails and newly_classified:
-                        current_count = len(classified_emails)
-                        if current_count < max_results:
-                            remaining_slots = max_results - current_count
-                            classified_emails.extend(newly_classified[:remaining_slots])
-                        # If we're already at or over the limit, don't add more
-                
-                # Re-classify emails that need version update (in background, don't block)
-                if needs_reclassification and emails_col:
-                    def reclassify_old_emails():
-                        try:
-                            for thread_id in needs_reclassification[:10]:  # Limit to 10 per run
-                                try:
-                                    # Find a message with this thread_id from Gmail
-                                    resp = service.users().messages().list(
-                                        userId="me",
-                                        q=f"rfc822msgid:{thread_id} OR thread:{thread_id}",
-                                        maxResults=1,
-                                    ).execute()
-                                    messages = resp.get("messages", [])
-                                    if not messages:
-                                        # Try alternative: search by thread
-                                        try:
-                                            thread = service.users().threads().get(userId="me", id=thread_id).execute()
-                                            if thread.get("messages"):
-                                                message_id = thread["messages"][0]["id"]
-                                            else:
-                                                continue
-                                        except:
-                                            continue
-                                    else:
-                                        message_id = messages[0]["id"]
-                                    
-                                    full_msg = service.users().messages().get(
-                                        userId="me", id=message_id, format="full"
-                                    ).execute()
-                                    from app.tools.gmail_detail import _extract_plain_text
-                                    body = _extract_plain_text(full_msg.get("payload", {}))
-                                    headers = {h["name"]: h["value"] for h in full_msg.get("payload", {}).get("headers", [])}
-                                    
-                                    email_data = {
-                                        "threadId": thread_id,
-                                        "from": headers.get("From", ""),
-                                        "subject": headers.get("Subject", "(No subject)"),
-                                        "snippet": full_msg.get("snippet", "")[:200],
-                                        "body": body[:1000],
-                                    }
-                                    
-                                    from app.tools.email_classifier import classify_email
-                                    classification = classify_email(email_data, user_id)
-                                    
-                                    # Update with new classification and version
-                                    bg_emails_col = get_db().db.get_collection("emails")
-                                    bg_emails_col.update_one(
-                                        {"user_id": user_id, "thread_id": thread_id},
-                                        {
-                                            "$set": {
-                                                "category": classification["category"],
-                                                "scores": classification["scores"],
-                                                "classified_at": datetime.utcnow().isoformat(),
-                                                "classification_version": CLASSIFICATION_VERSION,
-                                            }
-                                        },
-                                    )
-                                except Exception as e:
-                                    print(f"[WARNING] Re-classification failed for {thread_id}: {e}", flush=True)
-                                    continue
-                        except Exception as e:
-                            print(f"[WARNING] Re-classification batch error: {e}", flush=True)
-                    
-                    # Start re-classification in separate background thread
-                    threading.Thread(target=reclassify_old_emails, daemon=True).start()
-            except Exception as e:
-                print(f"[WARNING] Background fetch/classify error: {e}", flush=True)
-        
-        # If we need more emails to reach max_results, fetch immediately
-        # Otherwise, fetch in background
-        import threading
-        if needs_more_emails:
-            # Fetch immediately to get enough emails to reach max_results
-            # This ensures user gets the requested number of emails
-            # Note: This will modify classified_emails inside the function
-            fetch_and_classify_new()
-        else:
-            # We have enough emails, fetch in background only for updates
-            threading.Thread(target=fetch_and_classify_new, daemon=True).start()
-        
-        # Apply category filter if specified
-        if category_filter:
-            classified_emails = [e for e in classified_emails if e.get("category") == category_filter]
-        
-        # Ensure we don't exceed max_results (respect user's limit selection)
-        classified_emails = classified_emails[:max_results]
-        
-        # Group by category
-        categories = {
-            "urgent": [],
-            "waiting_for_reply": [],
-            "action_items": [],
-            "newsletters": [],
-            "invoices": [],
-            "clients": [],
-            "normal": [],
-        }
-        
-        for email in classified_emails:
-            cat = email.get("category", "normal")
-            if cat in categories:
-                categories[cat].append(email)
-        
-        return jsonify({
-            "success": True,
-            "categories": categories,
-            "total": len(classified_emails),
-        })
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    result = gmail_triaged_inbox_service(
+        user_id=user_id,
+        max_results=max_results,
+        category_filter=category_filter,
+    )
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
 
 
 @app.route("/api/gmail/classify-background", methods=["POST"])
@@ -1138,113 +659,9 @@ def gmail_classify_background():
     if auth_response:
         return auth_response
 
-    try:
-        import threading
-        
-        def classify_background():
-            try:
-                creds = load_google_credentials(user_id)
-                service = build("gmail", "v1", credentials=creds)
-                
-                # Get unclassified emails from inbox
-                resp = service.users().messages().list(
-                    userId="me",
-                    q="in:inbox -from:me",
-                    maxResults=max_emails * 2,
-                ).execute()
-                
-                messages = resp.get("messages", []) or []
-                seen_threads = set()
-                
-                # Get already classified thread IDs
-                emails_col = None
-                classified_threads = set()
-                try:
-                    if get_db().is_connected:
-                        emails_col = get_db().db.get_collection("emails")
-                        classified = list(emails_col.find(
-                            {"user_id": user_id},
-                            {"thread_id": 1}
-                        ))
-                        classified_threads = {c.get("thread_id") for c in classified}
-                except Exception:
-                    pass
-                
-                from app.tools.gmail_detail import _extract_plain_text
-                
-                count = 0
-                for msg in messages:
-                    if count >= max_emails:
-                        break
-                    
-                    try:
-                        meta = service.users().messages().get(
-                            userId="me", id=msg["id"], format="metadata",
-                            metadataHeaders=["Subject", "From"]
-                        ).execute()
-                        
-                        thread_id = meta.get("threadId")
-                        if thread_id in seen_threads or thread_id in classified_threads:
-                            continue
-                        seen_threads.add(thread_id)
-                        
-                        # Fetch full message
-                        full_msg = service.users().messages().get(
-                            userId="me", id=msg["id"], format="full"
-                        ).execute()
-                        
-                        headers = {h["name"]: h["value"] for h in full_msg.get("payload", {}).get("headers", [])}
-                        body = _extract_plain_text(full_msg.get("payload", {}))
-                        
-                        email_data = {
-                            "threadId": thread_id,
-                            "from": headers.get("From", ""),
-                            "subject": headers.get("Subject", "(No subject)"),
-                            "snippet": full_msg.get("snippet", "")[:200],
-                            "body": body[:1000],
-                        }
-                        
-                        classification = classify_email(email_data, user_id)
-                        
-                        # Store in database
-                        if emails_col:
-                            from app.tools.email_classifier import CLASSIFICATION_VERSION
-                            emails_col.update_one(
-                                {"user_id": user_id, "thread_id": thread_id},
-                                {
-                                    "$set": {
-                                        "user_id": user_id,
-                                        "thread_id": thread_id,
-                                        "from": headers.get("From", ""),
-                                        "subject": headers.get("Subject", "(No subject)"),
-                                        "snippet": full_msg.get("snippet", "")[:200],
-                                        "category": classification["category"],
-                                        "scores": classification["scores"],
-                                        "classified_at": datetime.utcnow().isoformat(),
-                                        "classification_version": CLASSIFICATION_VERSION,
-                                    }
-                                },
-                                upsert=True,
-                            )
-                        
-                        count += 1
-                    except Exception as e:
-                        print(f"[WARNING] Background classification failed: {e}", flush=True)
-                        continue
-                
-                print(f"[INFO] Background classification completed: {count} emails classified", flush=True)
-            except Exception as e:
-                print(f"[ERROR] Background classification error: {e}", flush=True)
-        
-        # Start background thread
-        threading.Thread(target=classify_background, daemon=True).start()
-        
-        return jsonify({
-            "success": True,
-            "message": "Background classification started",
-        })
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    result = gmail_classify_background_service(user_id=user_id, max_emails=max_emails)
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
 
 
 @app.route("/api/contacts/sync", methods=["POST"])
@@ -1259,382 +676,9 @@ def contacts_sync():
     if auth_response:
         return auth_response
 
-    contacts_col = get_contacts_collection()
-    if contacts_col is None:
-        return jsonify({"success": False, "error": "Database not connected"}), 500
-
-    # If already initialized and not forced, return existing
-    if not force:
-        existing_count = contacts_col.count_documents({"user_id": user_id})
-        if existing_count > 0:
-            # Run normalization and grouping pass on existing data (no Gmail fetch)
-            existing_docs = list(contacts_col.find({"user_id": user_id}, {"_id": 0, "email": 1, "name": 1, "archived": 1}))
-            role_set = {
-                "info","hr","support","sales","contact","admin","hello","mail","team",
-                "office","careers","jobs","billing","help","service","services","enquiries","inquiries",
-                "noreply","no reply","no-reply"
-            }
-            for d in existing_docs:
-                em = (d.get("email") or "").lower()
-                nm = (d.get("name") or "").strip()
-                needs_norm = (not nm) or (nm.lower() == "(no name)") or (nm.lower() in role_set)
-                if not needs_norm and nm:
-                    # also normalize if name is actually an email string
-                    try:
-                        if "@" in nm and "." in nm.split("@",1)[1]:
-                            needs_norm = True
-                        else:
-                            needs_norm = False
-                    except Exception:
-                        pass
-                if needs_norm:
-                    new_name = _normalized_display_name(nm, em)
-                    if new_name and new_name != nm:
-                        contacts_col.update_one(
-                            {"user_id": user_id, "email": em},
-                            {"$set": {"name": new_name}}
-                        )
-            
-            # Generate nicknames for all contacts that don't have one
-            no_nickname = list(contacts_col.find(
-                {
-                    "user_id": user_id,
-                    "$or": [
-                        {"nickname": {"$exists": False}},
-                        {"nickname": ""},
-                    ],
-                    "name": {"$exists": True, "$ne": "", "$ne": "(No name)"}
-                },
-                {"_id": 0, "email": 1, "name": 1}
-            ))
-            for d in no_nickname:
-                em = d.get("email", "")
-                nm = d.get("name", "")
-                if nm:
-                    auto_nickname = _generate_nickname(nm, em)
-                    if auto_nickname:
-                        contacts_col.update_one(
-                            {"user_id": user_id, "email": em},
-                            {"$set": {"nickname": auto_nickname}}
-                        )
-            
-            # Add category-based groups (travel/food/events/housing) for all existing contacts FIRST
-            all_existing = list(contacts_col.find({"user_id": user_id}, {"_id": 0, "email": 1}))
-            for ed in all_existing:
-                em = (ed.get("email") or "").lower()
-                cats = _category_groups_for_email(em)
-                if cats:
-                    contacts_col.update_one(
-                        {"user_id": user_id, "email": em},
-                        {"$addToSet": {"groups": {"$each": cats}}}
-                    )
-            # Rebuild groups based on person/company for existing (non-archived) contacts
-            docs = list(contacts_col.find({"user_id": user_id, "archived": {"$ne": True}}, {"_id": 0, "email": 1, "name": 1}))
-            from collections import defaultdict
-            by_person = defaultdict(list)
-            by_company = defaultdict(list)
-            for d in docs:
-                em = d.get("email","")
-                nm = d.get("name","")
-                person = _canonical_person_name(nm, em)
-                if person:
-                    by_person[person].append(em)
-                comp = _company_from_email(em)
-                if comp:
-                    by_company[comp].append(em)
-            for person, emails in by_person.items():
-                if len(emails) >= 2:
-                    # Ensure groups is an array for all targeted docs
-                    contacts_col.update_many(
-                        {"user_id": user_id, "email": {"$in": emails}, "groups": {"$exists": False}},
-                        {"$set": {"groups": []}}
-                    )
-                    contacts_col.update_many(
-                        {"user_id": user_id, "email": {"$in": emails}, "groups": {"$type": "object"}},
-                        {"$set": {"groups": []}}
-                    )
-                    contacts_col.update_many(
-                        {"user_id": user_id, "email": {"$in": emails}},
-                        {"$addToSet": {"groups": person}}
-                    )
-            for comp, emails in by_company.items():
-                if len(emails) >= 2:
-                    # Only add company group if contact doesn't already have a category group
-                    # Category groups: travel, food, events, housing
-                    category_groups = {"travel", "food", "events", "housing"}
-                    # Filter emails that don't have category groups
-                    emails_without_cats = []
-                    for em in emails:
-                        doc = contacts_col.find_one({"user_id": user_id, "email": em}, {"groups": 1})
-                        if doc:
-                            existing_groups = [g.lower() if isinstance(g, str) else "" for g in (doc.get("groups") or [])]
-                            if not any(cat in existing_groups for cat in category_groups):
-                                emails_without_cats.append(em)
-                    if emails_without_cats:
-                        # Ensure groups is an array for all targeted docs
-                        contacts_col.update_many(
-                            {"user_id": user_id, "email": {"$in": emails_without_cats}, "groups": {"$exists": False}},
-                            {"$set": {"groups": []}}
-                        )
-                        contacts_col.update_many(
-                            {"user_id": user_id, "email": {"$in": emails_without_cats}, "groups": {"$type": "object"}},
-                            {"$set": {"groups": []}}
-                        )
-                    contacts_col.update_many(
-                        {"user_id": user_id, "email": {"$in": emails_without_cats}},
-                        {"$addToSet": {"groups": comp}}
-                    )
-        # Cleanup: Remove company groups from contacts that have category groups
-        category_groups = {"travel", "food", "events", "housing"}
-        all_contacts = list(contacts_col.find({"user_id": user_id}, {"_id": 0, "email": 1, "groups": 1}))
-        for contact in all_contacts:
-            em = contact.get("email", "")
-            original_groups = [g if isinstance(g, str) else "" for g in (contact.get("groups") or [])]
-            existing_groups_lower = [g.lower() for g in original_groups if g]
-            has_category = any(cat in existing_groups_lower for cat in category_groups)
-            if has_category:
-                # Get company name from email
-                comp = _company_from_email(em)
-                if comp:
-                    comp_lower = comp.lower()
-                    # Find and remove company group in any case variation
-                    groups_to_remove = []
-                    for g in original_groups:
-                        if g and g.lower() == comp_lower:
-                            groups_to_remove.append(g)
-                    # Remove all variations
-                    for gtr in groups_to_remove:
-                        contacts_col.update_one(
-                            {"user_id": user_id, "email": em},
-                            {"$pull": {"groups": gtr}}
-                        )
-        items = list(contacts_col.find({"user_id": user_id}, {"_id": 0}).limit(500))
-        return jsonify({"success": True, "initialized": True, "contacts": items})
-
-    try:
-        creds = load_google_credentials(user_id)
-        svc = build("gmail", "v1", credentials=creds)
-        # Fetch up to max_sent messages from Sent via pagination (Gmail caps ~500 per page)
-        msgs = []
-        next_token = None
-        remaining = max(0, max_sent)
-        while remaining > 0:
-            page_size = min(500, remaining)
-            req = svc.users().messages().list(
-                userId="me",
-                q="in:sent -from:mailer-daemon@googlemail.com",
-                maxResults=page_size,
-                pageToken=next_token
-            )
-            resp = req.execute()
-            batch = resp.get("messages", []) or []
-            msgs.extend(batch)
-            remaining -= len(batch)
-            next_token = resp.get("nextPageToken")
-            if not next_token or not batch:
-                break
-
-        from datetime import datetime
-        seen = {}
-        for m in msgs:
-            meta = svc.users().messages().get(
-                userId="me", id=m["id"], format="metadata", metadataHeaders=["To", "Date"]
-            ).execute()
-            headers = {h["name"]: h["value"] for h in meta.get("payload", {}).get("headers", [])}
-            tos = headers.get("To", "")
-            dt = headers.get("Date", "")
-            try:
-                last_seen = datetime.utcnow().isoformat()
-            except Exception:
-                last_seen = datetime.utcnow().isoformat()
-            for name, email in getaddresses([tos]):
-                email_norm = (email or "").strip().lower()
-                if not email_norm:
-                    continue
-                if email_norm not in seen:
-                    seen[email_norm] = {
-                        "user_id": user_id,
-                        "email": email_norm,
-                        "name": (name or ""),
-                        "count": 1,
-                        "first_seen": last_seen,
-                        "last_seen": last_seen,
-                    }
-                else:
-                    seen[email_norm]["count"] += 1
-                    seen[email_norm]["last_seen"] = last_seen
-
-        # Upsert into DB
-        for email_norm, doc in seen.items():
-            normalized_name = _normalized_display_name(doc.get("name") or "", email_norm)
-            auto_nickname = _generate_nickname(normalized_name, email_norm) if normalized_name else ""
-            
-            contacts_col.update_one(
-                {"user_id": user_id, "email": email_norm},
-                {
-                    "$setOnInsert": {
-                        "user_id": user_id,
-                        "email": email_norm,
-                        "first_seen": doc["first_seen"],
-                        "name": normalized_name,
-                        "nickname": auto_nickname,  # Auto-generate nickname on insert
-                    },
-                    "$set": {
-                        "last_seen": doc["last_seen"],
-                    },
-                    "$inc": {"count": doc["count"]},
-                    "$addToSet": {"groups": {"$each": _category_groups_for_email(email_norm)}},
-                },
-                upsert=True,
-            )
-            
-            # Also update nickname for existing contacts if they don't have one
-            if auto_nickname:
-                contacts_col.update_one(
-                    {"user_id": user_id, "email": email_norm, "nickname": {"$exists": False}},
-                    {"$set": {"nickname": auto_nickname}}
-                )
-
-        # Normalize names for any existing contacts with placeholder or missing names
-        needs = list(contacts_col.find(
-            {
-                "user_id": user_id,
-                "$or": [
-                    {"name": {"$exists": False}},
-                    {"name": ""}, {"name": "(No name)"},
-                    {"name": {"$regex": r"^info$", "$options": "i"}}
-                ]
-            },
-            {"_id": 0, "email": 1, "name": 1}
-        ))
-        for d in needs:
-            em = d.get("email", "")
-            new_name = _normalized_display_name(d.get("name",""), em)
-            if new_name:
-                contacts_col.update_one(
-                    {"user_id": user_id, "email": em},
-                    {"$set": {"name": new_name}}
-                )
-        
-        # Generate nicknames for all contacts that don't have one
-        no_nickname = list(contacts_col.find(
-            {
-                "user_id": user_id,
-                "$or": [
-                    {"nickname": {"$exists": False}},
-                    {"nickname": ""},
-                ],
-                "name": {"$exists": True, "$ne": "", "$ne": "(No name)"}
-            },
-            {"_id": 0, "email": 1, "name": 1}
-        ))
-        for d in no_nickname:
-            em = d.get("email", "")
-            nm = d.get("name", "")
-            if nm:
-                auto_nickname = _generate_nickname(nm, em)
-                if auto_nickname:
-                    contacts_col.update_one(
-                        {"user_id": user_id, "email": em},
-                        {"$set": {"nickname": auto_nickname}}
-                    )
-
-        # Add category-based groups (travel/food/events/housing) for all existing contacts FIRST
-        # (Note: category groups are already added during upsert for new contacts, but we ensure all contacts have them)
-        all_existing = list(contacts_col.find({"user_id": user_id}, {"_id": 0, "email": 1}))
-        for ed in all_existing:
-            em = (ed.get("email") or "").lower()
-            cats = _category_groups_for_email(em)
-            if cats:
-                contacts_col.update_one(
-                    {"user_id": user_id, "email": em},
-                    {"$addToSet": {"groups": {"$each": cats}}}
-                )
-        # Auto-group by canonical person name and company (clusters with size >= 2)
-        docs = list(contacts_col.find({"user_id": user_id, "archived": {"$ne": True}}, {"_id": 0, "email": 1, "name": 1}))
-        from collections import defaultdict
-        by_person = defaultdict(list)
-        by_company = defaultdict(list)
-        for d in docs:
-            em = d.get("email","")
-            nm = d.get("name","")
-            person = _canonical_person_name(nm, em)
-            if person:
-                by_person[person].append(em)
-            comp = _company_from_email(em)
-            if comp:
-                by_company[comp].append(em)
-        for person, emails in by_person.items():
-            if len(emails) >= 2:
-                # Ensure groups is an array for all targeted docs
-                contacts_col.update_many(
-                    {"user_id": user_id, "email": {"$in": emails}, "groups": {"$exists": False}},
-                    {"$set": {"groups": []}}
-                )
-                contacts_col.update_many(
-                    {"user_id": user_id, "email": {"$in": emails}, "groups": {"$type": "object"}},
-                    {"$set": {"groups": []}}
-                )
-                contacts_col.update_many(
-                    {"user_id": user_id, "email": {"$in": emails}},
-                    {"$addToSet": {"groups": person}}
-                )
-        for comp, emails in by_company.items():
-            if len(emails) >= 2:
-                # Only add company group if contact doesn't already have a category group
-                # Category groups: travel, food, events, housing
-                category_groups = {"travel", "food", "events", "housing"}
-                # Filter emails that don't have category groups
-                emails_without_cats = []
-                for em in emails:
-                    doc = contacts_col.find_one({"user_id": user_id, "email": em}, {"groups": 1})
-                    if doc:
-                        existing_groups = [g.lower() if isinstance(g, str) else "" for g in (doc.get("groups") or [])]
-                        if not any(cat in existing_groups for cat in category_groups):
-                            emails_without_cats.append(em)
-                if emails_without_cats:
-                    # Ensure groups is an array for all targeted docs
-                    contacts_col.update_many(
-                        {"user_id": user_id, "email": {"$in": emails_without_cats}, "groups": {"$exists": False}},
-                        {"$set": {"groups": []}}
-                    )
-                    contacts_col.update_many(
-                        {"user_id": user_id, "email": {"$in": emails_without_cats}, "groups": {"$type": "object"}},
-                        {"$set": {"groups": []}}
-                    )
-                    contacts_col.update_many(
-                        {"user_id": user_id, "email": {"$in": emails_without_cats}},
-                        {"$addToSet": {"groups": comp}}
-                    )
-        # Cleanup: Remove company groups from contacts that have category groups
-        category_groups = {"travel", "food", "events", "housing"}
-        all_contacts = list(contacts_col.find({"user_id": user_id}, {"_id": 0, "email": 1, "groups": 1}))
-        for contact in all_contacts:
-            em = contact.get("email", "")
-            existing_groups = [g if isinstance(g, str) else "" for g in (contact.get("groups") or [])]
-            existing_groups_lower = [g.lower() for g in existing_groups if g]
-            has_category = any(cat in existing_groups_lower for cat in category_groups)
-            if has_category:
-                # Get company name from email
-                comp = _company_from_email(em)
-                if comp:
-                    comp_lower = comp.lower()
-                    # Find and remove company group in any case variation
-                    groups_to_remove = []
-                    for g in existing_groups:
-                        if g and g.lower() == comp_lower:
-                            groups_to_remove.append(g)
-                    # Remove all variations
-                    for gtr in groups_to_remove:
-                        contacts_col.update_one(
-                            {"user_id": user_id, "email": em},
-                            {"$pull": {"groups": gtr}}
-                        )
-
-        items = list(contacts_col.find({"user_id": user_id}, {"_id": 0}).limit(500))
-        return jsonify({"success": True, "initialized": True, "contacts": items})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    result = contacts_sync_service(user_id=user_id, max_sent=max_sent, force=force)
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
 
 
 @app.route("/api/contacts/list", methods=["POST"])
@@ -1644,55 +688,9 @@ def contacts_list():
     user_id = (data.get("user_id") or "anonymous").strip().lower()
     include_archived = bool(data.get("include_archived", False))
 
-    contacts_col = get_contacts_collection()
-    if contacts_col is None:
-        return jsonify({"success": False, "error": "Database not connected"}), 500
-
-    query = {"user_id": user_id}
-    if not include_archived:
-        query["archived"] = {"$ne": True}
-    docs = list(contacts_col.find(query, {"_id": 0}).sort([("last_seen", -1), ("count", -1)]).limit(2000))
-    # Merge duplicates by email (case-insensitive) and normalize groups to lower-case unique
-    merged = {}
-    for d in docs:
-        email = (d.get("email") or "").lower()
-        if not email:
-            continue
-        # normalize groups to lower-case unique list of strings
-        grps = []
-        for g in d.get("groups", []) or []:
-            if isinstance(g, str):
-                key = g.strip().lower()
-                if key and key not in grps:
-                    grps.append(key)
-        name = d.get("name")
-        entry = merged.get(email)
-        if not entry:
-            nd = dict(d)
-            nd["email"] = email
-            nd["groups"] = grps
-            nd["name"] = name or ""
-            merged[email] = nd
-        else:
-            # merge counts and timestamps
-            try:
-                entry["count"] = entry.get("count", 0) + int(d.get("count", 0))
-            except Exception:
-                pass
-            ls = d.get("last_seen")
-            if ls and (not entry.get("last_seen") or str(ls) > str(entry.get("last_seen"))):
-                entry["last_seen"] = ls
-            fs = d.get("first_seen")
-            if fs and (not entry.get("first_seen") or str(fs) < str(entry.get("first_seen"))):
-                entry["first_seen"] = fs
-            # prefer longer non-empty name
-            if name and (not entry.get("name") or len(name) > len(entry.get("name"))):
-                entry["name"] = name
-            # union groups (already normalized)
-            for g in grps:
-                if g not in entry["groups"]:
-                    entry["groups"].append(g)
-    return jsonify({"success": True, "contacts": list(merged.values())})
+    result = contacts_list_service(user_id=user_id, include_archived=include_archived)
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
 
 
 def _generate_nickname(name: str, email: str = None) -> str:
@@ -1886,29 +884,9 @@ def contacts_normalize_names():
     data = request.get_json(force=True, silent=True) or {}
     user_id = (data.get("user_id") or "anonymous").strip().lower()
 
-    contacts_col = get_contacts_collection()
-    if contacts_col is None:
-        return jsonify({"success": False, "error": "Database not connected"}), 500
-
-    docs = list(contacts_col.find(
-        {
-            "user_id": user_id,
-            "$or": [
-                {"name": {"$exists": False}},
-                {"name": ""}, {"name": "(No name)"},
-                {"name": {"$regex": r"^info$", "$options": "i"}}
-            ]
-        },
-        {"_id": 0, "email": 1, "name": 1}
-    ))
-    updated = 0
-    for d in docs:
-        email = d.get("email", "")
-        new_name = _normalized_display_name(d.get("name",""), email)
-        if new_name:
-            contacts_col.update_one({"user_id": user_id, "email": email}, {"$set": {"name": new_name}})
-            updated += 1
-    return jsonify({"success": True, "updated": updated})
+    result = contacts_normalize_names_service(user_id=user_id)
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
 
 
 @app.route("/api/contacts/archive", methods=["POST"])
@@ -1922,17 +900,9 @@ def contacts_archive():
     if not email:
         return jsonify({"success": False, "error": "Missing email"}), 400
 
-    contacts_col = get_contacts_collection()
-    if contacts_col is None:
-        return jsonify({"success": False, "error": "Database not connected"}), 500
-
-    from datetime import datetime
-    contacts_col.update_one(
-        {"user_id": user_id, "email": email},
-        {"$set": {"archived": archived, "archived_at": datetime.utcnow().isoformat() if archived else None}},
-        upsert=False,
-    )
-    return jsonify({"success": True, "email": email, "archived": archived})
+    result = contacts_archive_service(user_id=user_id, email=email, archived=archived)
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
 
 
 @app.route("/api/contacts/update", methods=["POST"])
@@ -1948,39 +918,17 @@ def contacts_update():
     if not email:
         return jsonify({"success": False, "error": "Missing email"}), 400
 
-    contacts_col = get_contacts_collection()
-    if contacts_col is None:
-        return jsonify({"success": False, "error": "Database not connected"}), 500
-
-    update_doc = {}
-    if name is not None:
-        update_doc["name"] = name
-    if nickname is not None:
-        update_doc["nickname"] = nickname
-    if groups is not None:
-        # normalize groups to unique list of lowercase strings
-        try:
-            norm = []
-            for g in groups:
-                s = (g or "").strip()
-                if not s:
-                    continue
-                if s.lower() not in [x.lower() for x in norm]:
-                    norm.append(s)
-            update_doc["groups"] = norm
-        except Exception:
-            update_doc["groups"] = []
-
-    if not update_doc:
-        return jsonify({"success": False, "error": "No fields to update"}), 400
-
-    contacts_col.update_one(
-        {"user_id": user_id, "email": email},
-        {"$set": update_doc},
-        upsert=False,
+    result = contacts_update_service(
+        user_id=user_id,
+        email=email,
+        name=name,
+        nickname=nickname,
+        groups=groups,
     )
-    doc = contacts_col.find_one({"user_id": user_id, "email": email}, {"_id": 0})
-    return jsonify({"success": True, "contact": doc})
+    if not result.get("success") and result.get("error") == "No fields to update":
+        return jsonify(result), 400
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
 
 
 @app.route("/api/contacts/groups", methods=["POST"])
@@ -1989,30 +937,9 @@ def contacts_groups():
     data = request.get_json(force=True, silent=True) or {}
     user_id = (data.get("user_id") or "anonymous").strip().lower()
 
-    contacts_col = get_contacts_collection()
-    if contacts_col is None:
-        return jsonify({"success": False, "error": "Database not connected"}), 500
-
-    pipeline = [
-        {"$match": {"user_id": user_id, "archived": {"$ne": True}}},
-        # Ensure groups is an array (if not present or wrong type -> empty array)
-        {"$project": {
-            "groups": {
-                "$cond": [
-                    {"$isArray": "$groups"},
-                    "$groups",
-                    []
-                ]
-            }
-        }},
-        {"$unwind": {"path": "$groups", "preserveNullAndEmptyArrays": False}},
-        # Only keep string values for groups
-        {"$match": {"groups": {"$type": "string"}}},
-        {"$group": {"_id": {"$toLower": "$groups"}}},
-        {"$sort": {"_id": 1}},
-    ]
-    groups = [d["_id"] for d in contacts_col.aggregate(pipeline)]
-    return jsonify({"success": True, "groups": groups})
+    result = contacts_groups_service(user_id=user_id)
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
 
 
 @app.route("/api/contacts/detail", methods=["POST"])
@@ -2025,92 +952,11 @@ def contacts_detail():
     if not email:
         return jsonify({"success": False, "error": "Missing email"}), 400
 
-    contacts_col = get_contacts_collection()
-    conversations_col = get_conversations_collection()
-    
-    if contacts_col is None or conversations_col is None:
-        return jsonify({"success": False, "error": "Database not connected"}), 500
-
-    # Get contact info
-    contact = contacts_col.find_one({"user_id": user_id, "email": email}, {"_id": 0})
-    if not contact:
-        return jsonify({"success": False, "error": "Contact not found"}), 404
-
-    # Get last interaction from Gmail
-    last_interaction = None
-    try:
-        auth_response = require_google_auth(user_id)
-        if not auth_response:
-            creds = load_google_credentials(user_id)
-            service = build("gmail", "v1", credentials=creds)
-            # Search for emails from/to this contact
-            query = f"from:{email} OR to:{email}"
-            resp = service.users().messages().list(
-                userId="me",
-                q=query,
-                maxResults=1,
-            ).execute()
-            messages = resp.get("messages", [])
-            if messages:
-                msg = service.users().messages().get(
-                    userId="me", id=messages[0]["id"], format="metadata",
-                    metadataHeaders=["Subject", "From", "To", "Date"]
-                ).execute()
-                headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
-                last_interaction = {
-                    "subject": headers.get("Subject", "(No subject)"),
-                    "from": headers.get("From", ""),
-                    "to": headers.get("To", ""),
-                    "date": headers.get("Date", ""),
-                    "snippet": msg.get("snippet", "")[:200],
-                }
-    except Exception as e:
-        print(f"[ERROR] Failed to get last interaction: {e}", flush=True)
-
-    # Get past conversations mentioning this contact
-    past_conversations = []
-    try:
-        # Search conversations for mentions of the contact's email, name, or nickname
-        contact_name = contact.get("name", "").lower()
-        contact_nickname = contact.get("nickname", "").lower()
-        search_terms = [email]
-        if contact_name:
-            search_terms.append(contact_name)
-        if contact_nickname:
-            search_terms.append(contact_nickname)
-
-        # Find conversations that mention this contact
-        all_conversations = conversations_col.find({"user_id": user_id})
-        for conv in all_conversations:
-            messages = conv.get("messages", [])
-            for msg in messages:
-                text = (msg.get("text") or "").lower()
-                # Check if message mentions the contact
-                if any(term in text for term in search_terms if term):
-                    session_id = conv.get("session_id", "")
-                    created_at = conv.get("created_at", "")
-                    past_conversations.append({
-                        "session_id": session_id,
-                        "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at),
-                        "message": msg.get("text", "")[:200],
-                        "role": msg.get("role", ""),
-                    })
-                    break  # Only add each conversation once
-            if len(past_conversations) >= 10:  # Limit to 10 most recent
-                break
-    except Exception as e:
-        print(f"[ERROR] Failed to get past conversations: {e}", flush=True)
-
-    # Get general notes (stored in contact document)
-    general_notes = contact.get("notes", "")
-
-    return jsonify({
-        "success": True,
-        "contact": contact,
-        "last_interaction": last_interaction,
-        "general_notes": general_notes,
-        "past_conversations": past_conversations,
-    })
+    result = contacts_detail_service(user_id=user_id, email=email)
+    if not result.get("success") and result.get("error") == "Contact not found":
+        return jsonify(result), 404
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
 
 
 @app.route("/api/contacts/conversations", methods=["POST"])
@@ -2124,57 +970,11 @@ def contacts_conversations():
     if not email:
         return jsonify({"success": False, "error": "Missing email"}), 400
 
-    conversations_col = get_conversations_collection()
-    contacts_col = get_contacts_collection()
-    
-    if conversations_col is None or contacts_col is None:
-        return jsonify({"success": False, "error": "Database not connected"}), 500
-
-    # Get contact info for search terms
-    contact = contacts_col.find_one({"user_id": user_id, "email": email}, {"_id": 0})
-    if not contact:
-        return jsonify({"success": False, "error": "Contact not found"}), 404
-
-    contact_name = contact.get("name", "").lower()
-    contact_nickname = contact.get("nickname", "").lower()
-    search_terms = [email]
-    if contact_name:
-        search_terms.append(contact_name)
-    if contact_nickname:
-        search_terms.append(contact_nickname)
-
-    # Find all conversations mentioning this contact
-    conversations = []
-    try:
-        all_conversations = conversations_col.find({"user_id": user_id}).sort("created_at", -1)
-        for conv in all_conversations:
-            messages = conv.get("messages", [])
-            relevant_messages = []
-            for msg in messages:
-                text = (msg.get("text") or "").lower()
-                if any(term in text for term in search_terms if term):
-                    relevant_messages.append({
-                        "text": msg.get("text", ""),
-                        "role": msg.get("role", ""),
-                        "timestamp": msg.get("timestamp", ""),
-                    })
-            
-            if relevant_messages:
-                conversations.append({
-                    "session_id": conv.get("session_id", ""),
-                    "created_at": conv.get("created_at", "").isoformat() if hasattr(conv.get("created_at"), "isoformat") else str(conv.get("created_at", "")),
-                    "messages": relevant_messages,
-                })
-            
-            if len(conversations) >= limit:
-                break
-    except Exception as e:
-        print(f"[ERROR] Failed to get conversations: {e}", flush=True)
-
-    return jsonify({
-        "success": True,
-        "conversations": conversations,
-    })
+    result = contacts_conversations_service(user_id=user_id, email=email, limit=limit)
+    if not result.get("success") and result.get("error") == "Contact not found":
+        return jsonify(result), 404
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
 
 
 def _lookup_contact_email(user_id: str, name_or_email: str) -> str:
