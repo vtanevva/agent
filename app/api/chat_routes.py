@@ -6,8 +6,8 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify
 
 from app.agents.orchestrator import get_orchestrator
-# Session memory now handled by orchestrator via MemoryService
-from app.chat_embeddings import extract_facts_with_gpt, save_chat_to_memory
+from app.services.memory_service import get_memory_service
+from app.services.llm_service import get_llm_service
 from app.db.collections import get_conversations_collection, get_contacts_collection
 from app.utils.oauth_utils import require_google_auth
 
@@ -239,13 +239,21 @@ def chat():
         # Save conversation
         save_message(user_id, session_id, user_message, reply)
 
-        # Extract and save new facts
-        extracted = extract_facts_with_gpt(user_message)
+        # Extract and save new facts using LLMService and MemoryService
+        llm_service = get_llm_service()
+        memory_service = get_memory_service()
+        
+        extracted = llm_service.extract_facts(user_message)
         for line in extracted.split("\n"):
             line = line.strip("- ").strip()
             if line and line.lower() != "none":
                 fact = line.removeprefix("FACT:").strip()
-                save_chat_to_memory(fact, session_id, user_id=user_id, emotion="neutral")
+                memory_service.save_fact(
+                    user_id=user_id,
+                    fact=fact,
+                    session_id=session_id,
+                    metadata={"emotion": "neutral"}
+                )
 
         return jsonify({"reply": reply})
 

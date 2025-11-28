@@ -32,9 +32,8 @@ logging.basicConfig(
 # agent_core removed - calendar now uses CalendarAgent
 # from app.agent_core.agent import run_agent
 # from app.agent_core.tool_registry import all_openai_schemas
-from app.chat_embeddings import (
-    get_user_facts, save_chat_to_memory, extract_facts_with_gpt
-)
+from app.services.memory_service import get_memory_service
+from app.services.llm_service import get_llm_service
 from app.database import init_database, get_db
 # Old orchestrator imports - now handled by agents/orchestrator.py
 # from app.orchestrator.aivis_orchestrator import handle_chat, detect_intent
@@ -1263,7 +1262,13 @@ def sessions_log():
         for sid in sorted(session_map)
     ]
 
-    memory = get_user_facts(user_id)
+    # Get user facts from MemoryService
+    memory_service = get_memory_service()
+    memory_facts = memory_service.retrieve_facts(user_id=user_id, limit=200)
+    
+    # Convert to old format for backward compatibility
+    memory = [{"text": fact} for fact in memory_facts]
+    
     return jsonify({
         "sessions": session_list,
         "memory": memory
