@@ -180,7 +180,7 @@
 │                               │                                              │
 │                     ┌─────────┴─────────┐                                   │
 │                     ▼                   ▼                                    │
-│               MongoDB              Pinecone (optional)                       │
+│               MongoDB              Pinecone                                  │
 │          (conversations,            (vector facts)                           │
 │           contacts, tokens)                                                  │
 │                                                                              │
@@ -277,7 +277,7 @@
 │                                                                              │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐          │
 │  │  OpenAI    │  │  MongoDB   │  │  Google    │  │  Pinecone  │          │
-│  │    API     │  │            │  │   APIs     │  │  (optional)│          │
+│  │    API     │  │            │  │   APIs     │  │            │          │
 │  ├────────────┤  ├────────────┤  ├────────────┤  ├────────────┤          │
 │  │• GPT-4o    │  │• Convs     │  │• Gmail     │  │• Vector    │          │
 │  │• Embedding │  │• Contacts  │  │• Calendar  │  │  Facts     │          │

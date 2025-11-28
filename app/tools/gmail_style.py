@@ -3,6 +3,7 @@
 import os
 import json
 from typing import Dict, List, Optional
+from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 import openai
@@ -15,6 +16,12 @@ from app.utils.google_api_helpers import get_gmail_service
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Style Cache - stores analyzed user writing styles in memory
+# ─────────────────────────────────────────────────────────────────────────────
+_STYLE_CACHE: Dict[str, Dict] = {}
+CACHE_EXPIRY_HOURS = 24  # Cache expires after 24 hours
 
 def _extract_plain_text(payload: Dict) -> str:
     """Recursively prefer text/plain; fallback to stripped text/html."""
@@ -115,28 +122,68 @@ def _fetch_recent_sent_texts(user_id: str, max_samples: int = 10) -> List[str]:
     return samples
 
 
-def analyze_email_style(user_id: str, max_samples: int = 10) -> str:
-    """Analyze user's writing style from recent Sent emails. Returns JSON profile."""
+def analyze_email_style(user_id: str, max_samples: int = 10, force_refresh: bool = False) -> str:
+    """
+    Analyze user's writing style from recent Sent emails. Returns JSON profile.
+    
+    Results are cached for 24 hours to avoid repeated Gmail API calls.
+    
+    Parameters
+    ----------
+    user_id : str
+        User identifier
+    max_samples : int
+        Number of sent emails to analyze (default: 10)
+    force_refresh : bool
+        If True, bypass cache and fetch fresh data
+    
+    Returns
+    -------
+    str
+        JSON string with success status and profile data
+    """
+    # Check cache first (unless force_refresh is True)
+    if not force_refresh and user_id in _STYLE_CACHE:
+        cached = _STYLE_CACHE[user_id]
+        cache_time = cached.get("timestamp")
+        if cache_time:
+            age = datetime.now() - cache_time
+            if age < timedelta(hours=CACHE_EXPIRY_HOURS):
+                print(f"[CACHE HIT] Using cached style for {user_id} (age: {age.seconds // 3600}h)")
+                return json.dumps({"success": True, "profile": cached.get("profile", {}), "cached": True})
+    
+    print(f"[CACHE MISS] Fetching fresh style analysis for {user_id}")
+    
+    # Fetch and analyze
     try:
         samples = _fetch_recent_sent_texts(user_id, max_samples=max_samples)
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)})
     if not samples:
         return json.dumps({"success": False, "error": "No sent emails found to analyze."})
+    
     joined = "\n\n---\n\n".join(samples[:max_samples])
     prompt = (
         "Analyze the user's writing style from the following email samples.\n"
-        "Return a concise JSON object with these fields:\n"
+        "Pay special attention to:\n"
+        "- Exact closing phrases (e.g., 'Kind regards', 'Best', 'Thanks', 'Cheers')\n"
+        "- Transition words and connectors (e.g., 'However', 'Additionally', 'Also')\n"
+        "- Common sentence starters (e.g., 'Just wanted to', 'I hope', 'Looking forward')\n"
+        "- Signature format (name only, full name, title, etc.)\n\n"
+        "Return a detailed JSON object with these fields:\n"
         "{\n"
-        '  "tone": "concise/warm/professional/... (short string)",\n'
+        '  "tone": "concise/warm/professional/casual/... (short string)",\n'
         '  "formality": "informal/semi-formal/formal",\n'
-        '  "greeting_style": "e.g., Hi {name}, Hello {name}, no greeting",\n'
-        '  "closing_style": "e.g., Best regards, Thanks, etc.",\n'
-        '  "signature_pattern": "short description of signature if any",\n'
-        '  "length_preference": "short/medium/long",\n'
-        '  "punctuation_caps": "notes on punctuation/capitalization quirks",\n'
-        '  "common_phrases": ["array","of","phrases"],\n'
-        '  "guidelines": ["bullet points for how to emulate the style"]\n'
+        '  "greeting_style": "exact greeting used (e.g., \'Hi\', \'Hello\', \'Hey\', none)",\n'
+        '  "closing_phrase": "EXACT closing phrase before signature (e.g., \'Kind regards\', \'Best\', \'Thanks\', \'Cheers\', none)",\n'
+        '  "signature_format": "how user signs (e.g., \'First name only\', \'Full name\', \'Name + Title\')",\n'
+        '  "length_preference": "short/medium/long (typical email length)",\n'
+        '  "sentence_starters": ["exact phrases user commonly starts sentences with"],\n'
+        '  "transition_words": ["connecting words/phrases user frequently uses"],\n'
+        '  "common_phrases": ["other recurring phrases or expressions"],\n'
+        '  "punctuation_style": "notes on exclamation marks, ellipsis, dashes, etc.",\n'
+        '  "paragraph_style": "single paragraph/multiple short paragraphs/structured sections",\n'
+        '  "guidelines": ["specific instructions to replicate this exact style"]\n'
         "}\n"
         "Only output valid JSON with double quotes and no commentary.\n\n"
         f"EMAIL SAMPLES:\n{joined}"
@@ -150,7 +197,16 @@ def analyze_email_style(user_id: str, max_samples: int = 10) -> str:
         content = resp.choices[0].message.content or "{}"
         # Validate JSON
         profile = json.loads(content)
-        return json.dumps({"success": True, "profile": profile})
+        
+        # Cache the result
+        _STYLE_CACHE[user_id] = {
+            "profile": profile,
+            "timestamp": datetime.now(),
+            "samples_analyzed": len(samples)
+        }
+        print(f"[CACHE STORED] Cached style for {user_id} ({len(samples)} samples)")
+        
+        return json.dumps({"success": True, "profile": profile, "cached": False})
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)})
 
@@ -317,25 +373,51 @@ def generate_reply_draft(
         print(f"[DEBUG] Could not extract first name: {e}")
         pass
     
-    # Build signature instruction
-    signature_instruction = ""
-    if user_first_name:
-        signature_instruction = f"\n- CRITICAL: You MUST end the email with ONLY the first name '{user_first_name}' on its own line at the very end. Do not add 'Best regards' or 'Thanks' before the name."
+    # Extract specific style elements for precise matching
+    closing_phrase = style_profile.get("closing_phrase", "")
+    greeting_style = style_profile.get("greeting_style", "")
+    transition_words = style_profile.get("transition_words", [])
+    sentence_starters = style_profile.get("sentence_starters", [])
+    
+    # Build detailed style instruction
+    style_instruction = "\n\nSTYLE REQUIREMENTS (MUST FOLLOW EXACTLY):\n"
+    
+    if greeting_style and greeting_style.lower() != "none":
+        style_instruction += f"- Start with greeting: '{greeting_style}'\n"
+    
+    if transition_words:
+        style_instruction += f"- Use these transition words naturally: {', '.join(transition_words[:3])}\n"
+    
+    if sentence_starters:
+        style_instruction += f"- Consider starting sentences with: {', '.join(sentence_starters[:3])}\n"
+    
+    # Punctuation correctness
+    style_instruction += "- Use proper punctuation: periods at sentence ends, commas for clarity, correct apostrophes.\n"
+   
+    # Closing and signature
+    if closing_phrase and closing_phrase.lower() != "none" and user_first_name:
+        # Add comma to closing phrase if it doesn't have one
+        closing_with_comma = closing_phrase if closing_phrase.endswith(',') else f"{closing_phrase},"
+        style_instruction += f"- CRITICAL: End with EXACTLY this closing phrase WITH A COMMA: '{closing_with_comma}'\n"
+        style_instruction += f"- Then on a new line, sign with ONLY: '{user_first_name}'\n"
+        style_instruction += f"- Example format:\n{closing_with_comma}\n{user_first_name}\n"
+    elif user_first_name:
+        style_instruction += f"- End with the first name '{user_first_name}' on its own line.\n"
     else:
-        signature_instruction = "\n- End with an appropriate closing and the sender's first name on a new line."
+        style_instruction += "- End with an appropriate closing matching the user's style.\n"
     
     prompt = (
         f"Subject: {ctx.get('subject','(No subject)')}\n"
         f"Last message snippet (from them): {ctx.get('context','')}\n\n"
         f"User style profile (JSON): {style_desc}\n\n"
         f"User's points to include (optional): {user_points}\n\n"
-        "Write a direct reply email body from ME to THEM that matches the user's style.\n"
+        "Write a direct reply email body from ME to THEM.\n"
         "- DO NOT quote, restate, or paraphrase the sender's text.\n"
         "- Produce NEW content that acknowledges key points and moves the conversation forward.\n"
         "- Answer requests/questions and propose a clear next step when appropriate.\n"
         "- Avoid meta phrases like 'you said' or 'as mentioned'.\n"
         "- No subject line; body only. Keep 2–6 sentences."
-        + signature_instruction
+        + style_instruction
     )
     try:
         resp = openai.chat.completions.create(

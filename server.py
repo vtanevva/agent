@@ -393,10 +393,10 @@ def autogen_gmail():
     data = request.get_json(force=True, silent=True) or {}
     user_message = (data.get("message") or "").strip()
     user_id = (data.get("user_id") or "anonymous").strip().lower()
-    
+
     if not user_message:
         return jsonify({"reply": "No message received. Please enter something."}), 400
-    
+
     # Redirect to new chat endpoint
     from app.agents.orchestrator import get_orchestrator
     
