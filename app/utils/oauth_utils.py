@@ -12,7 +12,7 @@ from google.oauth2.credentials import Credentials
 from requests_oauthlib import OAuth2Session
 
 from app.config import Config
-from app.utils.db_utils import get_tokens_collection
+from app.db.collections import get_tokens_collection
 
 # Google OAuth scopes
 GOOGLE_SCOPES = [

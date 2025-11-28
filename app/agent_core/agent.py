@@ -2,7 +2,6 @@
 
 import os
 import json
-import openai
 from dotenv import load_dotenv
 
 from app.agent_core.tool_registry import all_openai_schemas, call
@@ -16,7 +15,12 @@ except Exception as e:
     print(f"Error importing calendar tools: {e}")
 
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+
+
+def _get_llm_service():
+    """Get the LLM service instance."""
+    from app.services.llm_service import get_llm_service
+    return get_llm_service()
 
 
 def run_agent(user_id: str, message: str, history: list):
@@ -119,9 +123,10 @@ def run_agent(user_id: str, message: str, history: list):
 
     # 1 – first pass: GPT chooses / is forced to a tool
     print(f"Making OpenAI call with forced_choice: {forced_choice}")
-    first = openai.chat.completions.create(
-        model="gpt-4o-mini",
+    llm_service = _get_llm_service()
+    first = llm_service.chat_completion(
         messages=messages,
+        model="gpt-4o-mini",
         tools=all_openai_schemas(),
         tool_choice=forced_choice,
     )
@@ -188,6 +193,9 @@ def run_agent(user_id: str, message: str, history: list):
         )
 
 
-    # 3 – final pass: GPT narrates result or returns raw JSON
-    final = openai.chat.completions.create(model="gpt-4o-mini", messages=messages)
-    return final.choices[0].message.content
+    # 3 – final pass: GPT narrates result or returns raw JSON
+    llm_service = _get_llm_service()
+    return llm_service.chat_completion_text(
+        messages=messages,
+        model="gpt-4o-mini",
+    )

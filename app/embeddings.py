@@ -1,18 +1,20 @@
 import os
-import openai
 import faiss
 import pickle
 import numpy as np
-import openai
-import os
 from dotenv import load_dotenv
 from typing import List
 from tiktoken import get_encoding
 
 load_dotenv()
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
 encoding = get_encoding("cl100k_base")
+
+
+def _get_llm_service():
+    """Get the LLM service instance."""
+    from app.services.llm_service import get_llm_service
+    return get_llm_service()
 
 def split_text(text: str, max_tokens=300) -> List[str]:
     words = text.split()
@@ -32,11 +34,9 @@ def split_text(text: str, max_tokens=300) -> List[str]:
     return chunks
 
 def embed_text_chunks(chunks: List[str]):
-    response = openai.embeddings.create(
-        input=chunks,
-        model="text-embedding-ada-002"
-    )
-    return [record.embedding for record in response.data]
+    """Generate embeddings for text chunks using LLM service."""
+    llm_service = _get_llm_service()
+    return llm_service.generate_embeddings_batch(chunks)
 
 def build_vector_store(file_path: str):
     with open(file_path, 'r', encoding='utf-8') as f:
@@ -76,6 +76,7 @@ def load_vector_store():
         return None, []
 
 def search_similar_chunks(user_query: str, top_k=3):
+    """Search for similar chunks using FAISS and LLM service embeddings."""
     index, chunks = load_vector_store()
     
     # If vector store is not available, return empty results
@@ -83,10 +84,8 @@ def search_similar_chunks(user_query: str, top_k=3):
         print("Vector store not available. Returning empty search results.")
         return []
     
-    query_embedding = openai.embeddings.create(
-        input=user_query,
-        model="text-embedding-ada-002",
-    ).data[0].embedding
+    llm_service = _get_llm_service()
+    query_embedding = llm_service.generate_embedding(user_query)
 
     D, I = index.search(np.array([query_embedding], dtype='float32'), top_k)
     results = [chunks[i] for i in I[0]]

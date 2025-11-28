@@ -10,22 +10,10 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.errors import HttpError
 
 from app.agent_core.tool_registry import register, ToolSchema
-from app.utils import db_utils, oauth_utils
+from app.utils import oauth_utils
+from app.utils.google_api_helpers import get_calendar_service
+from app.db.collections import get_calendar_events_collection
 
-
-def _service(user_id: str):
-    """Get Google Calendar service for user"""
-    tokens = db_utils.get_tokens_collection()
-    if tokens is None:
-        raise RuntimeError("MongoDB is not available. Calendar features are disabled.")
-    
-    try:
-        creds = oauth_utils.load_google_credentials(user_id)
-        if not creds:
-            raise FileNotFoundError(f"Google OAuth token for user '{user_id}' not found.")
-        return build("calendar", "v3", credentials=creds, cache_discovery=False)
-    except Exception as e:
-        raise RuntimeError(f"Failed to load Calendar service: {e}")
 
 def create_calendar_event(
     user_id: str,
@@ -69,7 +57,7 @@ def create_calendar_event(
         }
         
         # Insert into database
-        calendar_collection = db_utils.get_calendar_events_collection()
+        calendar_collection = get_calendar_events_collection()
         if calendar_collection is None:
             return {
                 "success": False,
@@ -99,7 +87,7 @@ def list_calendar_events(
 ) -> Dict:
     """List upcoming calendar events from app's internal calendar"""
     try:
-        calendar_collection = db_utils.get_calendar_events_collection()
+        calendar_collection = get_calendar_events_collection()
         if calendar_collection is None:
             return {
                 "success": False,

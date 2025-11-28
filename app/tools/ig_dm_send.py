@@ -17,11 +17,11 @@ from datetime import datetime
 import requests
 
 from app.agent_core.tool_registry import register, ToolSchema
-from ..utils import db_utils
+from app.db.collections import get_tokens_collection
 
 def _get_auth(user_id: str):
     """Get Instagram authentication from MongoDB"""
-    tokens = db_utils.get_tokens_collection()
+    tokens = get_tokens_collection()
     if tokens is None:
         raise RuntimeError(
             "MongoDB is not available. Instagram features are disabled. "

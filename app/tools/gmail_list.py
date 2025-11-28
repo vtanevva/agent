@@ -17,26 +17,8 @@ from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 
 from ..agent_core.tool_registry import register, ToolSchema
-from ..utils import db_utils, oauth_utils
-
-
-def _service(user_id: str):
-    """Get Gmail service for user"""
-    tokens = db_utils.get_tokens_collection()
-    if tokens is None:
-        raise RuntimeError(
-            "MongoDB is not available. Gmail features are disabled. Please set up a database connection."
-        )
-    
-    try:
-        creds = oauth_utils.load_google_credentials(user_id)
-        if not creds:
-            raise FileNotFoundError(
-                f"Google OAuth token for user '{user_id}' not found. Ask the user to connect Gmail first."
-            )
-        return build("gmail", "v1", credentials=creds, cache_discovery=False)
-    except Exception as e:
-        raise RuntimeError(f"Failed to load Gmail service: {e}")
+from app.utils.google_api_helpers import get_gmail_service
+from app.db.collections import get_contacts_collection
 
 
 def _lookup_contact_emails(user_id: str, name: str) -> list:
@@ -48,7 +30,7 @@ def _lookup_contact_emails(user_id: str, name: str) -> list:
     if not name or "@" in name:
         return [name] if name else []  # Already an email or empty
     
-    contacts_col = db_utils.get_contacts_collection()
+    contacts_col = get_contacts_collection()
     if contacts_col is None:
         return []
     
@@ -163,7 +145,7 @@ def _lookup_contact_emails(user_id: str, name: str) -> list:
 
 def list_recent_emails(user_id: str, max_results: int = 5, from_email: str = None, contact_name: str = None):
     try:
-        svc = _service(user_id)
+        svc = get_gmail_service(user_id)
     except Exception as e:
         return json.dumps([{
             "error": "Gmail service unavailable",

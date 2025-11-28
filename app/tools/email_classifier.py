@@ -126,7 +126,7 @@ def compute_sender_score(email: Dict, user_id: str) -> Dict[str, int]:
     cache_key = f"{user_id}_contacts"
     if cache_key not in compute_sender_score._contacts_cache:
         try:
-            from app.utils.db_utils import get_contacts_collection
+            from app.db.collections import get_contacts_collection
             contacts_col = get_contacts_collection()
             if contacts_col:
                 # Load all contacts for this user once and cache

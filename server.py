@@ -35,8 +35,9 @@ from app.chat_embeddings import (
     get_user_facts, save_chat_to_memory, extract_facts_with_gpt
 )
 from app.database import init_database, get_db
-from app.orchestrator.aivis_orchestrator import handle_chat, detect_intent
-from app.orchestrator.session_memory import load_session_memory
+# Old orchestrator imports - now handled by agents/orchestrator.py
+# from app.orchestrator.aivis_orchestrator import handle_chat, detect_intent
+# from app.orchestrator.session_memory import load_session_memory
 from app.services.gmail_service import (
     get_thread_detail as gmail_get_thread_detail,
     reply_to_thread as gmail_reply_to_thread,
@@ -66,14 +67,14 @@ from app.tools.calendar_manager import (
     create_calendar_event,
     list_calendar_events,
 )
-from app.utils.db_utils import get_conversations_collection, get_tokens_collection, get_contacts_collection
+from app.db.collections import get_conversations_collection, get_tokens_collection, get_contacts_collection
 from app.utils.oauth_utils import (
     load_google_credentials, save_google_credentials, get_gmail_profile,
     require_google_auth, build_google_flow, parse_expo_state,
     GOOGLE_SCOPES, IG_SCOPES, OAUTH_BASE, TOKEN_URL
 )
 from app.config import Config
-from app.autogen_agents.gmail_agent import run_gmail_autogen
+from app.agents.gmail_agent import run_gmail_autogen
 from app.tools.gmail_style import analyze_email_style, generate_reply_draft
 from app.tools.gmail_reply import reply_email as tool_reply_email
 from app.tools.gmail_detail import get_thread_detail
@@ -84,31 +85,56 @@ from googleapiclient.discovery import build
 from app.tools.gmail_mail import send_email as tool_send_email
 from email.utils import getaddresses
 
+# Import new blueprints
+from app.api.chat_routes import chat_bp
+from app.api.gmail_routes import gmail_bp
+from app.api.contacts_routes import contacts_bp
+
 # Environment setup
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
-# App setup
-app = Flask(__name__, static_folder="my-chatbot/build", static_url_path="")
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
-app.secret_key = Config.FLASK_SECRET_KEY or "change-me-in-prod"
 
-# Initialize database
-db_connected = init_database()
-if db_connected:
-    print("[INIT] ✅ MongoDB connected successfully")
-else:
-    print("[INIT] ⚠️ MongoDB not connected - running in offline mode")
+def create_app():
+    """
+    Application factory pattern for Flask app.
+    
+    This creates and configures the Flask application with all necessary
+    blueprints, extensions, and middleware.
+    """
+    app = Flask(__name__, static_folder="my-chatbot/build", static_url_path="")
+    CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+    app.secret_key = Config.FLASK_SECRET_KEY or "change-me-in-prod"
+    
+    # Initialize database
+    db_connected = init_database()
+    if db_connected:
+        print("[INIT] ✅ MongoDB connected successfully")
+    else:
+        print("[INIT] ⚠️ MongoDB not connected - running in offline mode")
+    
+    # Verify calendar tools are registered
+    available_tools = [tool['function']['name'] for tool in all_openai_schemas()]
+    print(f"[INIT] Available tools: {available_tools}")
+    
+    # Register new blueprints (Phase 1)
+    app.register_blueprint(chat_bp)
+    app.register_blueprint(gmail_bp)
+    app.register_blueprint(contacts_bp)
+    
+    print("[INIT] ✅ Registered API blueprints: chat, gmail, contacts")
+    
+    return app
 
-# Instagram OAuth config
+
+# Create the app instance
+app = create_app()
+
+# Instagram OAuth config (these are used by routes below)
 IG_APP_ID = Config.IG_APP_ID
 IG_APP_SECRET = Config.IG_APP_SECRET
-
-# Verify calendar tools are registered
-available_tools = [tool['function']['name'] for tool in all_openai_schemas()]
-print(f"[INIT] Available tools: {available_tools}")
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -334,76 +360,13 @@ def memory_usage():
         return jsonify({"error": str(e), "timestamp": datetime.now().isoformat()}), 500
 
 
-@app.route("/api/chat", methods=["POST"])
-def chat():
-    """Main chat endpoint that handles user messages."""
-    try:
-        data = request.get_json(force=True, silent=True) or {}
-        user_message = (data.get("message") or "").strip()
-        user_id = (data.get("user_id") or "anonymous").strip().lower()
-        session_id = data.get("session_id") or f"{user_id}-{uuid.uuid4().hex[:8]}"
-
-        if not user_message:
-            return jsonify({"reply": "No message received. Please enter something."}), 400
-
-        # Determine high-level intent (calendar, email, or general chat)
-        intent = detect_intent(user_message)
-
-        # Detect features that require Google auth
-        if intent in ("calendar", "email"):
-            auth_response = require_google_auth(user_id)
-            if auth_response:
-                return auth_response
-
-        # Load session history via helper
-        session_memory = load_session_memory(user_id=user_id, session_id=session_id, limit=20)
-
-        # Delegate to orchestrator for the actual handling
-        reply = handle_chat(
-                            user_id=user_id,
-            session_id=session_id,
-            user_message=user_message,
-            session_memory=session_memory,
-            intent=intent,
-        )
-
-        # Preserve compose-modal behaviour for email-style replies
-        if intent == "email":
-            try:
-                compose_data = json.loads(reply)
-                if isinstance(compose_data, dict) and compose_data.get("action") == "open_compose":
-                    # Look up contact email if needed
-                    to = compose_data.get("to", "")
-                    to = _lookup_contact_email(user_id, to)
-                    compose_data["to"] = to
-                    # Return special response for UI to open compose modal
-                    return jsonify({
-                        "reply": f"I'll help you compose an email to {to}.",
-                        "compose": compose_data
-                    })
-            except (json.JSONDecodeError, ValueError, TypeError):
-                # Not a JSON response, continue normally
-                pass
-
-        # Save conversation
-        # We no longer track emotion/suicide flags on the main chat path.
-        emotion = None
-        suicide_flag = False
-        save_message(user_id, session_id, user_message, reply, emotion, suicide_flag)
-
-        # Extract and save new facts
-        extracted = extract_facts_with_gpt(user_message)
-        for line in extracted.split("\n"):
-            line = line.strip("- ").strip()
-            if line and line.lower() != "none":
-                fact = line.removeprefix("FACT:").strip()
-                save_chat_to_memory(fact, session_id, user_id=user_id, emotion=emotion)
-
-        return jsonify({"reply": reply})
-
-    except Exception as e:
-        print(f"[ERROR] Error in chat endpoint: {e}", flush=True)
-        return jsonify({"error": "Invalid request", "message": str(e)}), 400
+# OLD /api/chat endpoint - now handled by app/api/chat_routes.py blueprint
+# This is kept here temporarily for reference during Phase 1
+# @app.route("/api/chat", methods=["POST"])
+# def chat():
+#     """Main chat endpoint that handles user messages."""
+#     ...
+# (Code moved to app/api/chat_routes.py)
 
 
 @app.post("/agent")

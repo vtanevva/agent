@@ -1,9 +1,500 @@
+"""
+Gmail Agent - handles email-related tasks and conversations.
+
+This agent is responsible for:
+- Email listing and search
+- Email reading and classification
+- Email composition and sending
+- Email style analysis and drafting
+- Conversational email management
+"""
+
 import os
 from typing import Optional, List, Dict, Any
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+class GmailAgent:
+    """
+    Agent for Gmail/email operations.
+    
+    Handles both:
+    - Direct operations (list, read, send, reply)
+    - Conversational email management (via LLM + tool-calling)
+    """
+    
+    def __init__(
+        self,
+        llm_service,
+        memory_service,
+        gmail_service=None,
+    ):
+        """
+        Initialize the Gmail agent.
+        
+        Parameters
+        ----------
+        llm_service : LLMService
+            Service for LLM operations
+        memory_service : MemoryService
+            Service for conversation memory
+        gmail_service : module, optional
+            Gmail service module (defaults to app.services.gmail_service)
+        """
+        self.llm_service = llm_service
+        self.memory_service = memory_service
+        
+        # Import gmail_service if not provided
+        if gmail_service is None:
+            from app.services import gmail_service as gmail_service_module
+            self.gmail_service = gmail_service_module
+        else:
+            self.gmail_service = gmail_service
+    
+    def handle_chat(
+        self,
+        user_id: str,
+        message: str,
+        session_memory: Optional[List[Dict[str, Any]]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Handle a conversational email request using tool-calling agent.
+        
+        This delegates to the existing tool-calling agent for now.
+        
+        Parameters
+        ----------
+        user_id : str
+            User identifier
+        message : str
+            User's message/request
+        session_memory : list, optional
+            Recent conversation history
+        metadata : dict, optional
+            Additional metadata
+            
+        Returns
+        -------
+        str
+            Agent's response (may be JSON for UI actions)
+        """
+        # Delegate to tool-calling agent (legacy)
+        from app.agent_core.agent import run_agent
+        history = session_memory or []
+        return run_agent(user_id=user_id, message=message, history=history)
+    
+    # ──────────────────────────────────────────────────────────────────
+    # Direct Gmail Operations (wrapper methods for service layer)
+    # ──────────────────────────────────────────────────────────────────
+    
+    def list_threads(
+        self,
+        user_id: str,
+        label: str = "INBOX",
+        max_results: int = 50,
+    ) -> Dict[str, Any]:
+        """
+        List Gmail threads for a given label.
+        
+        Parameters
+        ----------
+        user_id : str
+            User identifier
+        label : str
+            Gmail label (default: INBOX)
+        max_results : int
+            Maximum threads to return
+            
+        Returns
+        -------
+        dict
+            Result with threads list
+        """
+        return self.gmail_service.list_threads(
+            user_id=user_id,
+            label=label,
+            max_results=max_results,
+        )
+    
+    def search_threads(
+        self,
+        user_id: str,
+        query: str,
+        max_results: int = 20,
+    ) -> Dict[str, Any]:
+        """
+        Search Gmail threads using Gmail search syntax.
+        
+        Parameters
+        ----------
+        user_id : str
+            User identifier
+        query : str
+            Gmail search query
+        max_results : int
+            Maximum threads to return
+            
+        Returns
+        -------
+        dict
+            Result with matching threads
+        """
+        return self.gmail_service.search_threads(
+            user_id=user_id,
+            query=query,
+            max_results=max_results,
+        )
+    
+    def get_thread_detail(
+        self,
+        user_id: str,
+        thread_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Get detailed information about a thread.
+        
+        Parameters
+        ----------
+        user_id : str
+            User identifier
+        thread_id : str
+            Thread/message ID
+            
+        Returns
+        -------
+        dict
+            Thread details with full content
+        """
+        return self.gmail_service.get_thread_detail(
+            user_id=user_id,
+            thread_id=thread_id,
+        )
+    
+    def send_email(
+        self,
+        user_id: str,
+        to: str,
+        subject: str,
+        body: str,
+    ) -> Dict[str, Any]:
+        """
+        Send a new email.
+        
+        Parameters
+        ----------
+        user_id : str
+            User identifier
+        to : str
+            Recipient email address
+        subject : str
+            Email subject
+        body : str
+            Email body
+            
+        Returns
+        -------
+        dict
+            Result with success status
+        """
+        return self.gmail_service.send_new_email(
+            user_id=user_id,
+            to=to,
+            subject=subject,
+            body=body,
+        )
+    
+    def reply_to_thread(
+        self,
+        user_id: str,
+        thread_id: str,
+        to: str,
+        body: str,
+        subj_prefix: str = "Re:",
+    ) -> Dict[str, Any]:
+        """
+        Reply to an existing thread.
+        
+        Parameters
+        ----------
+        user_id : str
+            User identifier
+        thread_id : str
+            Thread ID to reply to
+        to : str
+            Recipient email
+        body : str
+            Reply body
+        subj_prefix : str
+            Subject prefix (default: "Re:")
+            
+        Returns
+        -------
+        dict
+            Result with success status
+        """
+        return self.gmail_service.reply_to_thread(
+            user_id=user_id,
+            thread_id=thread_id,
+            to=to,
+            body=body,
+            subj_prefix=subj_prefix,
+        )
+    
+    def archive_thread(
+        self,
+        user_id: str,
+        thread_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Archive a thread (remove from INBOX).
+        
+        Parameters
+        ----------
+        user_id : str
+            User identifier
+        thread_id : str
+            Thread ID
+            
+        Returns
+        -------
+        dict
+            Result with success status
+        """
+        return self.gmail_service.archive_thread(
+            user_id=user_id,
+            thread_id=thread_id,
+        )
+    
+    def mark_thread_handled(
+        self,
+        user_id: str,
+        thread_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Mark a thread as handled (apply label).
+        
+        Parameters
+        ----------
+        user_id : str
+            User identifier
+        thread_id : str
+            Thread ID
+            
+        Returns
+        -------
+        dict
+            Result with success status
+        """
+        return self.gmail_service.mark_thread_handled(
+            user_id=user_id,
+            thread_id=thread_id,
+        )
+    
+    def classify_email(
+        self,
+        user_id: str,
+        thread_id: Optional[str] = None,
+        email_data: Optional[Dict] = None,
+    ) -> Dict[str, Any]:
+        """
+        Classify an email using Smart Inbox Triage.
+        
+        Parameters
+        ----------
+        user_id : str
+            User identifier
+        thread_id : str, optional
+            Thread ID to classify
+        email_data : dict, optional
+            Pre-fetched email data
+            
+        Returns
+        -------
+        dict
+            Classification result
+        """
+        return self.gmail_service.classify_single_email(
+            user_id=user_id,
+            thread_id=thread_id,
+            email_data=email_data,
+        )
+    
+    def get_triaged_inbox(
+        self,
+        user_id: str,
+        max_results: int = 50,
+        category_filter: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get inbox with emails categorized by priority.
+        
+        Parameters
+        ----------
+        user_id : str
+            User identifier
+        max_results : int
+            Maximum emails to return
+        category_filter : str, optional
+            Filter by specific category
+            
+        Returns
+        -------
+        dict
+            Categorized inbox
+        """
+        return self.gmail_service.triaged_inbox(
+            user_id=user_id,
+            max_results=max_results,
+            category_filter=category_filter,
+        )
+    
+    def classify_background(
+        self,
+        user_id: str,
+        max_emails: int = 20,
+    ) -> Dict[str, Any]:
+        """
+        Trigger background classification for unclassified emails.
+        
+        Parameters
+        ----------
+        user_id : str
+            User identifier
+        max_emails : int
+            Maximum emails to classify
+            
+        Returns
+        -------
+        dict
+            Result with number classified
+        """
+        return self.gmail_service.classify_background(
+            user_id=user_id,
+            max_emails=max_emails,
+        )
+    
+    def analyze_style(
+        self,
+        user_id: str,
+        max_samples: int = 10,
+    ) -> Dict[str, Any]:
+        """
+        Analyze user's email writing style.
+        
+        Parameters
+        ----------
+        user_id : str
+            User identifier
+        max_samples : int
+            Number of sent emails to analyze
+            
+        Returns
+        -------
+        dict
+            Style analysis result
+        """
+        from app.tools.gmail_style import analyze_email_style
+        import json
+        
+        try:
+            result = analyze_email_style(user_id=user_id, max_samples=max_samples)
+            return json.loads(result)
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    def generate_reply_draft(
+        self,
+        user_id: str,
+        thread_id: str,
+        to: str,
+        user_points: str = "",
+        max_samples: int = 10,
+    ) -> Dict[str, Any]:
+        """
+        Generate a reply draft matching user's style.
+        
+        Parameters
+        ----------
+        user_id : str
+            User identifier
+        thread_id : str
+            Thread to reply to
+        to : str
+            Recipient email
+        user_points : str
+            Points user wants to make
+        max_samples : int
+            Number of sent emails to analyze for style
+            
+        Returns
+        -------
+        dict
+            Draft reply
+        """
+        from app.tools.gmail_style import generate_reply_draft
+        import json
+        
+        try:
+            result = generate_reply_draft(
+                user_id=user_id,
+                thread_id=thread_id,
+                to=to,
+                user_points=user_points,
+                max_samples=max_samples,
+            )
+            return json.loads(result)
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    def rewrite_email(
+        self,
+        user_id: str,
+        text: str,
+        tone: str = "polite and professional",
+        include_signature: bool = False,
+        signature_text: str = "",
+        generate_subject: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Rewrite email text with improved tone and clarity.
+        
+        Parameters
+        ----------
+        user_id : str
+            User identifier
+        text : str
+            Original email text
+        tone : str
+            Desired tone
+        include_signature : bool
+            Whether to include signature
+        signature_text : str
+            Signature to append
+        generate_subject : bool
+            Whether to generate subject line
+            
+        Returns
+        -------
+        dict
+            Rewritten email
+        """
+        return self.gmail_service.rewrite_email_text(
+            user_id=user_id,
+            text=text,
+            tone=tone,
+            include_signature=include_signature,
+            signature_text=signature_text,
+            generate_subject=generate_subject,
+        )
+
+
+# ──────────────────────────────────────────────────────────────────
+# Legacy Autogen Function (kept for backward compatibility)
+# ──────────────────────────────────────────────────────────────────
 
 
 def run_gmail_autogen(user_id: str, message: str, history: Optional[List[Dict[str, str]]] = None) -> str:

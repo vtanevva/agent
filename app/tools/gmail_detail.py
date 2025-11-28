@@ -4,21 +4,7 @@ import base64
 import json
 from typing import Dict, Optional
 
-from googleapiclient.discovery import build
-
-from app.utils import db_utils, oauth_utils
-
-
-def _gmail_service(user_id: str):
-    tokens = db_utils.get_tokens_collection()
-    if tokens is None:
-        raise RuntimeError("MongoDB is not available. Gmail features are disabled.")
-    creds = oauth_utils.load_google_credentials(user_id)
-    if not creds:
-        raise FileNotFoundError(
-            f"Google OAuth token for user '{user_id}' not found. Connect Google first."
-        )
-    return build("gmail", "v1", credentials=creds, cache_discovery=False)
+from app.utils.google_api_helpers import get_gmail_service
 
 
 def _extract_plain_text(payload: Dict) -> str:
@@ -215,7 +201,7 @@ def get_thread_detail(user_id: str, thread_id: str) -> str:
     }
     """
     try:
-        svc = _gmail_service(user_id)
+        svc = get_gmail_service(user_id)
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)})
 

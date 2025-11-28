@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from email.utils import getaddresses
 from googleapiclient.discovery import build
 
-from app.utils.db_utils import get_contacts_collection, get_conversations_collection
+from app.db.collections import get_contacts_collection, get_conversations_collection
 from app.utils.oauth_utils import load_google_credentials
 
 

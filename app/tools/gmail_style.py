@@ -9,7 +9,8 @@ import openai
 from googleapiclient.discovery import build
 
 from app.agent_core.tool_registry import register, ToolSchema
-from app.utils import db_utils, oauth_utils
+from app.utils import oauth_utils
+from app.utils.google_api_helpers import get_gmail_service
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -88,20 +89,9 @@ def _extract_plain_text(payload: Dict) -> str:
         return best_plain
     return ""
 
-def _gmail_service(user_id: str):
-    tokens = db_utils.get_tokens_collection()
-    if tokens is None:
-        raise RuntimeError("MongoDB is not available. Gmail features are disabled.")
-    creds = oauth_utils.load_google_credentials(user_id)
-    if not creds:
-        raise FileNotFoundError(
-            f"Google OAuth token for user '{user_id}' not found. Connect Google first."
-        )
-    return build("gmail", "v1", credentials=creds, cache_discovery=False)
-
 
 def _fetch_recent_sent_texts(user_id: str, max_samples: int = 10) -> List[str]:
-    svc = _gmail_service(user_id)
+    svc = get_gmail_service(user_id)
     resp = svc.users().messages().list(
         userId="me",
         q="in:sent -from:mailer-daemon@googlemail.com",
@@ -166,7 +156,7 @@ def analyze_email_style(user_id: str, max_samples: int = 10) -> str:
 
 def _fetch_thread_context(user_id: str, thread_id: str) -> Dict[str, str]:
     """Fetch subject and a plain-text body/snippet from the referenced thread/message."""
-    svc = _gmail_service(user_id)
+    svc = get_gmail_service(user_id)
     # Try as message first; if not found, try as thread
     subject = "(No subject)"
     context_text = ""
