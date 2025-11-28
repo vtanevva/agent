@@ -1,8 +1,22 @@
 """Gmail-related API routes."""
 
+import json
 from flask import Blueprint, request, jsonify
 
-from app.agents.orchestrator import get_orchestrator
+from app.services.gmail_service import (
+    get_thread_detail,
+    reply_to_thread,
+    archive_thread,
+    mark_thread_handled,
+    list_threads,
+    search_threads,
+    classify_single_email,
+    triaged_inbox,
+    classify_background,
+    send_new_email,
+    rewrite_email_text,
+)
+from app.tools.gmail_style import analyze_email_style, generate_reply_draft
 from app.utils.oauth_utils import require_google_auth
 from app.db.collections import get_contacts_collection
 
@@ -63,8 +77,7 @@ def gmail_list_threads():
     if auth_response:
         return auth_response
 
-    orchestrator = get_orchestrator()
-    result = orchestrator.gmail_agent.list_threads(
+    result = list_threads(
         user_id=user_id,
         label=label,
         max_results=max_results
@@ -88,8 +101,7 @@ def gmail_search_threads():
     if auth_response:
         return auth_response
 
-    orchestrator = get_orchestrator()
-    result = orchestrator.gmail_agent.search_threads(
+    result = search_threads(
         user_id=user_id,
         query=query,
         max_results=max_results
@@ -111,8 +123,7 @@ def gmail_thread_detail():
     if auth_response:
         return auth_response
 
-    orchestrator = get_orchestrator()
-    result = orchestrator.gmail_agent.get_thread_detail(
+    result = get_thread_detail(
         user_id=user_id,
         thread_id=thread_id
     )
@@ -139,8 +150,7 @@ def gmail_send_new():
     if auth_response:
         return auth_response
 
-    orchestrator = get_orchestrator()
-    result = orchestrator.gmail_agent.send_email(
+    result = send_new_email(
         user_id=user_id,
         to=to,
         subject=subject,
@@ -167,8 +177,7 @@ def gmail_reply_send():
     if auth_response:
         return auth_response
 
-    orchestrator = get_orchestrator()
-    result = orchestrator.gmail_agent.reply_to_thread(
+    result = reply_to_thread(
         user_id=user_id,
         thread_id=thread_id,
         to=to,
@@ -192,8 +201,7 @@ def gmail_archive_thread():
     if auth_response:
         return auth_response
 
-    orchestrator = get_orchestrator()
-    result = orchestrator.gmail_agent.archive_thread(
+    result = archive_thread(
         user_id=user_id,
         thread_id=thread_id
     )
@@ -214,8 +222,7 @@ def gmail_mark_handled():
     if auth_response:
         return auth_response
 
-    orchestrator = get_orchestrator()
-    result = orchestrator.gmail_agent.mark_thread_handled(
+    result = mark_thread_handled(
         user_id=user_id,
         thread_id=thread_id
     )
@@ -237,8 +244,7 @@ def gmail_classify_email():
     if auth_response:
         return auth_response
     
-    orchestrator = get_orchestrator()
-    result = orchestrator.gmail_agent.classify_email(
+    result = classify_single_email(
         user_id=user_id,
         thread_id=thread_id,
         email_data=email_data or None
@@ -263,8 +269,7 @@ def gmail_triaged_inbox():
     if auth_response:
         return auth_response
 
-    orchestrator = get_orchestrator()
-    result = orchestrator.gmail_agent.get_triaged_inbox(
+    result = triaged_inbox(
         user_id=user_id,
         max_results=max_results,
         category_filter=category_filter
@@ -284,8 +289,7 @@ def gmail_classify_background():
     if auth_response:
         return auth_response
 
-    orchestrator = get_orchestrator()
-    result = orchestrator.gmail_agent.classify_background(
+    result = classify_background(
         user_id=user_id,
         max_emails=max_emails
     )
@@ -304,12 +308,16 @@ def gmail_analyze_style():
     if auth_response:
         return auth_response
 
-    orchestrator = get_orchestrator()
-    result = orchestrator.gmail_agent.analyze_style(
+    result = analyze_email_style(
         user_id=user_id,
         max_samples=max_samples
     )
-    return jsonify(result)
+    # analyze_email_style returns a JSON string, so parse it first
+    try:
+        result_dict = json.loads(result) if isinstance(result, str) else result
+        return jsonify(result_dict)
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Failed to parse style analysis: {str(e)}"}), 500
 
 
 @gmail_bp.route("/draft-reply", methods=["POST"])
@@ -329,15 +337,26 @@ def gmail_draft_reply():
     if auth_response:
         return auth_response
 
-    orchestrator = get_orchestrator()
-    result = orchestrator.gmail_agent.generate_reply_draft(
-        user_id=user_id,
-        thread_id=thread_id,
-        to=to,
-        user_points=user_points,
-        max_samples=max_samples
-    )
-    return jsonify(result)
+    try:
+        result = generate_reply_draft(
+            user_id=user_id,
+            thread_id=thread_id,
+            to=to,
+            user_points=user_points,
+            max_samples=max_samples
+        )
+        print(f"[DEBUG] generate_reply_draft returned: {result[:200] if len(str(result)) > 200 else result}")
+        print(f"[DEBUG] Result type: {type(result)}")
+        
+        # generate_reply_draft returns a JSON string, so parse it first
+        result_dict = json.loads(result) if isinstance(result, str) else result
+        print(f"[DEBUG] Parsed result: {result_dict}")
+        return jsonify(result_dict)
+    except Exception as e:
+        print(f"[ERROR] Draft generation failed: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": f"Failed to generate draft: {str(e)}"}), 500
 
 
 @gmail_bp.route("/rewrite", methods=["POST"])
@@ -354,8 +373,7 @@ def gmail_rewrite_text():
     if not text:
         return jsonify({"success": False, "error": "Missing 'text'"}), 400
 
-    orchestrator = get_orchestrator()
-    result = orchestrator.gmail_agent.rewrite_email(
+    result = rewrite_email_text(
         user_id=user_id,
         text=text,
         tone=tone,

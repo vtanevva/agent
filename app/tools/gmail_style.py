@@ -300,6 +300,30 @@ def generate_reply_draft(
     sys = "You are an assistant that drafts Gmail replies in the user's personal style."
     style_desc = json.dumps(style_profile, ensure_ascii=False)
     user_points = user_points or ""
+    
+    # Extract first name from user's Gmail email for signature
+    user_first_name = ""
+    try:
+        svc = get_gmail_service(user_id)
+        profile = svc.users().getProfile(userId="me").execute()
+        user_email = profile.get("emailAddress", "")
+        
+        if user_email and "@" in user_email:
+            email_local = user_email.split("@")[0]
+            # Handle common email formats like "john.doe" or "john_doe"
+            user_first_name = email_local.split(".")[0].split("_")[0].capitalize()
+            print(f"[DEBUG] Extracted first name '{user_first_name}' from email '{user_email}'")
+    except Exception as e:
+        print(f"[DEBUG] Could not extract first name: {e}")
+        pass
+    
+    # Build signature instruction
+    signature_instruction = ""
+    if user_first_name:
+        signature_instruction = f"\n- CRITICAL: You MUST end the email with ONLY the first name '{user_first_name}' on its own line at the very end. Do not add 'Best regards' or 'Thanks' before the name."
+    else:
+        signature_instruction = "\n- End with an appropriate closing and the sender's first name on a new line."
+    
     prompt = (
         f"Subject: {ctx.get('subject','(No subject)')}\n"
         f"Last message snippet (from them): {ctx.get('context','')}\n\n"
@@ -310,7 +334,8 @@ def generate_reply_draft(
         "- Produce NEW content that acknowledges key points and moves the conversation forward.\n"
         "- Answer requests/questions and propose a clear next step when appropriate.\n"
         "- Avoid meta phrases like 'you said' or 'as mentioned'.\n"
-        "- No subject line; body only. Keep 2–6 sentences. Include greeting/closing if appropriate."
+        "- No subject line; body only. Keep 2–6 sentences."
+        + signature_instruction
     )
     try:
         resp = openai.chat.completions.create(

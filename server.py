@@ -74,7 +74,8 @@ from app.utils.oauth_utils import (
     GOOGLE_SCOPES, IG_SCOPES, OAUTH_BASE, TOKEN_URL
 )
 from app.config import Config
-from app.agents.gmail_agent import run_gmail_autogen
+# Old AutoGen import removed - now using new GmailAgent via orchestrator
+# from app.agents.gmail_agent import run_gmail_autogen
 from app.tools.gmail_style import analyze_email_style, generate_reply_draft
 from app.tools.gmail_reply import reply_email as tool_reply_email
 from app.tools.gmail_detail import get_thread_detail
@@ -107,14 +108,14 @@ def create_app():
     app = Flask(__name__, static_folder="my-chatbot/build", static_url_path="")
     CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
     app.secret_key = Config.FLASK_SECRET_KEY or "change-me-in-prod"
-    
+
     # Initialize database
     db_connected = init_database()
     if db_connected:
         print("[INIT] ✅ MongoDB connected successfully")
     else:
         print("[INIT] ⚠️ MongoDB not connected - running in offline mode")
-    
+
     # Tool registry removed - agents call functions directly now
     # available_tools = [tool['function']['name'] for tool in all_openai_schemas()]
     # print(f"[INIT] Available tools: {available_tools}")
@@ -383,24 +384,33 @@ def agent_endpoint():
 
 @app.route("/api/autogen/gmail", methods=["POST"])
 def autogen_gmail():
-    """Invoke the AutoGen-based Gmail agent with a user message."""
+    """
+    DEPRECATED: Old AutoGen-based Gmail agent route.
+    
+    This route is kept for backward compatibility but now redirects to the new
+    /api/chat endpoint which uses the new agent architecture.
+    """
     data = request.get_json(force=True, silent=True) or {}
     user_message = (data.get("message") or "").strip()
     user_id = (data.get("user_id") or "anonymous").strip().lower()
-    history = data.get("history", [])
-
+    
     if not user_message:
         return jsonify({"reply": "No message received. Please enter something."}), 400
-
-    # Ensure Google OAuth is connected for Gmail features
-    email_keywords = ["emails", "email", "inbox", "reply to", "gmail"]
-    if any(k in user_message.lower() for k in email_keywords):
-        auth_response = require_google_auth(user_id)
-        if auth_response:
-            return auth_response
-
-    reply = run_gmail_autogen(user_id=user_id, message=user_message, history=history)
-    return jsonify({"reply": reply})
+    
+    # Redirect to new chat endpoint
+    from app.agents.orchestrator import get_orchestrator
+    
+    try:
+        orchestrator = get_orchestrator()
+        intent, reply = orchestrator.handle_chat(
+            user_id=user_id,
+            session_id=f"{user_id}-autogen",
+            user_message=user_message,
+        )
+        return jsonify({"reply": reply})
+    except Exception as e:
+        print(f"[ERROR] Error in autogen_gmail: {e}", flush=True)
+        return jsonify({"error": "Failed to process request", "message": str(e)}), 500
 
 @app.route("/api/gmail/analyze-style", methods=["POST"])
 def gmail_analyze_style():
