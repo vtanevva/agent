@@ -9,7 +9,8 @@ from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from googleapiclient.errors import HttpError
 
-from app.agent_core.tool_registry import register, ToolSchema
+# Tool registry removed - agents call functions directly now
+from app.utils.tool_registry import register, ToolSchema
 from app.utils import oauth_utils
 from app.utils.google_api_helpers import get_calendar_service
 from app.db.collections import get_calendar_events_collection

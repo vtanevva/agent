@@ -13,12 +13,7 @@ Architecture:
 
 from typing import Tuple, Optional, Dict, Any, Literal, List
 
-from app.agent_core.agent import run_agent
-from app.tools.calendar_manager import (
-    detect_calendar_requests,
-    parse_datetime_from_text,
-    create_calendar_event,
-)
+from app.tools.calendar_manager import detect_calendar_requests
 from app.utils.oauth_utils import require_google_auth
 from app.utils.logging_utils import get_logger
 
@@ -53,58 +48,6 @@ def detect_intent(user_message: str) -> IntentType:
         return "email"
     
     return "general"
-
-
-def _handle_calendar_chat(user_id: str, session_id: str, user_message: str) -> str:
-    """
-    Calendar-oriented handling.
-    
-    - Try to detect concrete calendar event requests.
-    - If found, create events directly via Google Calendar.
-    - Otherwise, delegate to the tool-calling agent for richer flows.
-    """
-    # First, try direct natural-language event creation
-    try:
-        calendar_requests = detect_calendar_requests(user_message) or []
-    except Exception:
-        calendar_requests = []
-    
-    if calendar_requests:
-        for calendar_request in calendar_requests:
-            try:
-                start_time, end_time = parse_datetime_from_text(calendar_request["full_match"])
-            except Exception:
-                start_time, end_time = None, None
-            
-            if start_time and end_time:
-                try:
-                    result = create_calendar_event(
-                        user_id=user_id,
-                        summary=calendar_request["description"],
-                        start_time=start_time.isoformat(),
-                        end_time=end_time.isoformat(),
-                        description=f"Event created from chat: {user_message}",
-                    )
-                except Exception as e:
-                    result = {"success": False, "error": str(e)}
-                
-                if result.get("success"):
-                    logger.info(f"Calendar event created for user {user_id}")
-                    return (
-                        f"✅ I've scheduled '{calendar_request['description']}' for "
-                        f"{start_time.strftime('%B %d at %I:%M %p')}."
-                        " You can view it in your calendar!"
-                    )
-                else:
-                    logger.warning(f"Failed to create calendar event: {result.get('error')}")
-                    return (
-                        "❌ Sorry, I couldn't schedule the event. Please make sure "
-                        "you're connected to Google Calendar."
-                    )
-    
-    # Fallback to the tool-calling agent with calendar tools available
-    logger.debug("Delegating to tool-calling agent for calendar")
-    return run_agent(user_id=user_id, message=user_message, history=[])
 
 
 class Orchestrator:
@@ -197,13 +140,17 @@ class Orchestrator:
         
         # Route to appropriate agent based on intent
         if intent == "calendar":
-            # Calendar intent - use calendar handling (legacy tool-calling)
-            logger.info(f"Routing to calendar handler for user {user_id}")
-            reply = _handle_calendar_chat(
-                user_id=user_id,
-                session_id=session_id,
-                user_message=user_message,
-            )
+            # Calendar intent - use CalendarAgent
+            logger.info(f"Routing to CalendarAgent for user {user_id}")
+            if self.calendar_agent:
+                reply = self.calendar_agent.handle_chat(
+                    user_id=user_id,
+                    message=user_message,
+                    metadata=metadata,
+                )
+            else:
+                logger.warning("CalendarAgent not available")
+                reply = "Calendar features are not available right now. Please try again later."
             return intent, reply
         
         elif intent == "email":
@@ -217,8 +164,8 @@ class Orchestrator:
                     metadata=metadata,
                 )
             else:
-                logger.warning("GmailAgent not available, using fallback")
-                reply = run_agent(user_id=user_id, message=user_message, history=session_memory or [])
+                logger.warning("GmailAgent not available")
+                reply = "Gmail features are not available right now. Please try again later."
             return intent, reply
         
         else:
@@ -272,8 +219,14 @@ def build_orchestrator() -> Orchestrator:
         memory_service=memory_service,
     )
     
-    # Calendar and Contacts agents are stubs
-    calendar_agent = CalendarAgent()
+    # CalendarAgent now fully implemented
+    from app.agents.calendar_agent import CalendarAgent
+    calendar_agent = CalendarAgent(
+        llm_service=llm_service,
+        memory_service=memory_service,
+    )
+    
+    # Contacts agent is still a stub
     contacts_agent = ContactsAgent()
     
     # Build orchestrator
@@ -286,7 +239,7 @@ def build_orchestrator() -> Orchestrator:
         contacts_agent=contacts_agent,
     )
     
-    print("[INIT] ✅ Orchestrator built with AivisCoreAgent + GmailAgent + services")
+    print("[INIT] ✅ Orchestrator built with AivisCore + Calendar + Gmail agents")
     return orchestrator
 
 

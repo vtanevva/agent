@@ -16,7 +16,8 @@ from datetime import datetime
 
 import requests
 
-from app.agent_core.tool_registry import register, ToolSchema
+# Tool registry removed - agents call functions directly now
+from app.utils.tool_registry import register, ToolSchema
 from app.db.collections import get_tokens_collection
 
 def _get_auth(user_id: str):

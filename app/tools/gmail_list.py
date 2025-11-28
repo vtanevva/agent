@@ -16,7 +16,7 @@ from collections import OrderedDict
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 
-from ..agent_core.tool_registry import register, ToolSchema
+from app.utils.tool_registry import register, ToolSchema
 from app.utils.google_api_helpers import get_gmail_service
 from app.db.collections import get_contacts_collection
 

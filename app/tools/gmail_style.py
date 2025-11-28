@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 import openai
 from googleapiclient.discovery import build
 
-from app.agent_core.tool_registry import register, ToolSchema
+# Tool registry removed - agents call functions directly now
+from app.utils.tool_registry import register, ToolSchema
 from app.utils import oauth_utils
 from app.utils.google_api_helpers import get_gmail_service
 

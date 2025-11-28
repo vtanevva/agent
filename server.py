@@ -29,8 +29,9 @@ logging.basicConfig(
 )
 
 # Local modules
-from app.agent_core.agent import run_agent
-from app.agent_core.tool_registry import all_openai_schemas
+# agent_core removed - calendar now uses CalendarAgent
+# from app.agent_core.agent import run_agent
+# from app.agent_core.tool_registry import all_openai_schemas
 from app.chat_embeddings import (
     get_user_facts, save_chat_to_memory, extract_facts_with_gpt
 )
@@ -115,9 +116,9 @@ def create_app():
     else:
         print("[INIT] ⚠️ MongoDB not connected - running in offline mode")
     
-    # Verify calendar tools are registered
-    available_tools = [tool['function']['name'] for tool in all_openai_schemas()]
-    print(f"[INIT] Available tools: {available_tools}")
+    # Tool registry removed - agents call functions directly now
+    # available_tools = [tool['function']['name'] for tool in all_openai_schemas()]
+    # print(f"[INIT] Available tools: {available_tools}")
     
     # Register new blueprints (Phase 1)
     app.register_blueprint(chat_bp)
