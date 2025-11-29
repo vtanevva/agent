@@ -62,7 +62,7 @@ def cache_get(key: str, default: Any = None) -> Optional[Any]:
         Cached value or default
     """
     cache_col = _get_cache_collection()
-    if not cache_col:
+    if cache_col is None:
         return default
     
     try:
@@ -105,7 +105,7 @@ def cache_set(key: str, value: Any, ttl: int = 3600) -> bool:
         True if cached successfully
     """
     cache_col = _get_cache_collection()
-    if not cache_col:
+    if cache_col is None:
         return False
     
     try:
@@ -133,7 +133,7 @@ def cache_set(key: str, value: Any, ttl: int = 3600) -> bool:
 def cache_delete(key: str) -> bool:
     """Delete a cache entry."""
     cache_col = _get_cache_collection()
-    if not cache_col:
+    if cache_col is None:
         return False
     
     try:
@@ -159,7 +159,7 @@ def cache_clear_pattern(pattern: str) -> int:
         Number of entries deleted
     """
     cache_col = _get_cache_collection()
-    if not cache_col:
+    if cache_col is None:
         return 0
     
     try:
@@ -176,7 +176,7 @@ def cache_clear_pattern(pattern: str) -> int:
 def cache_clear_expired() -> int:
     """Clear all expired cache entries. Returns number deleted."""
     cache_col = _get_cache_collection()
-    if not cache_col:
+    if cache_col is None:
         return 0
     
     try:

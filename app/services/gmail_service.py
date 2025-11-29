@@ -259,7 +259,8 @@ def classify_single_email(
         # Store classification in database if thread_id exists
         if thread_id:
             try:
-                emails_col = get_db().db.get_collection("emails") if get_db().is_connected else None
+                db = get_db()
+                emails_col = db.db.get_collection("emails") if (db.is_connected and db.db is not None) else None
                 if emails_col is not None:
                     emails_col.update_one(
                         {"user_id": user_id, "thread_id": thread_id},
@@ -301,8 +302,9 @@ def triaged_inbox(
 
     # Get stored classifications from database FIRST - return immediately
     try:
-        if get_db().is_connected:
-            emails_col = get_db().db.get_collection("emails")
+        db = get_db()
+        if db.is_connected and db.db is not None:
+            emails_col = db.db.get_collection("emails")
             # Get stored emails, sorted by classified_at (most recent first)
             stored = (
                 emails_col.find(
@@ -537,18 +539,20 @@ def triaged_inbox(
                                 classification = classify_email(email_data, user_id)
 
                                 # Update with new classification and version
-                                bg_emails_col = get_db().db.get_collection("emails")
-                                bg_emails_col.update_one(
-                                    {"user_id": user_id, "thread_id": thread_id},
-                                    {
-                                        "$set": {
-                                            "category": classification["category"],
-                                            "scores": classification["scores"],
-                                            "classified_at": datetime.utcnow().isoformat(),
-                                            "classification_version": CLASSIFICATION_VERSION,
-                                        }
-                                    },
-                                )
+                                bg_db = get_db()
+                                bg_emails_col = bg_db.db.get_collection("emails") if (bg_db.is_connected and bg_db.db is not None) else None
+                                if bg_emails_col is not None:
+                                    bg_emails_col.update_one(
+                                        {"user_id": user_id, "thread_id": thread_id},
+                                        {
+                                            "$set": {
+                                                "category": classification["category"],
+                                                "scores": classification["scores"],
+                                                "classified_at": datetime.utcnow().isoformat(),
+                                                "classification_version": CLASSIFICATION_VERSION,
+                                            }
+                                        },
+                                    )
                             except Exception as e:
                                 print(f"[WARNING] Re-classification failed for {thread_id}: {e}", flush=True)
                                 continue
@@ -620,8 +624,9 @@ def classify_background(user_id: str, max_emails: int = 20) -> Dict[str, Any]:
             emails_col = None
             classified_threads = set()
             try:
-                if get_db().is_connected:
-                    emails_col = get_db().db.get_collection("emails")
+                bg_db = get_db()
+                if bg_db.is_connected and bg_db.db is not None:
+                    emails_col = bg_db.db.get_collection("emails")
                     classified = list(
                         emails_col.find(
                             {"user_id": user_id},
@@ -671,7 +676,7 @@ def classify_background(user_id: str, max_emails: int = 20) -> Dict[str, Any]:
                     classification = classify_email(email_data, user_id)
 
                     # Store in database
-                    if emails_col:
+                    if emails_col is not None:
                         emails_col.update_one(
                             {"user_id": user_id, "thread_id": thread_id},
                             {

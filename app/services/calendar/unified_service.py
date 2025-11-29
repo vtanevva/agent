@@ -39,7 +39,7 @@ def check_user_calendar_connections(user_id: str) -> Dict[str, Any]:
     """
     try:
         tokens_col = get_tokens_collection()
-        if not tokens_col:
+        if tokens_col is None:
             return {
                 "google_connected": False,
                 "outlook_connected": False,
@@ -687,7 +687,7 @@ def _cache_event_in_db(user_id: str, event_data: Dict[str, Any]) -> None:
     """Cache an event in the database"""
     try:
         calendar_col = get_calendar_events_collection()
-        if not calendar_col:
+        if calendar_col is None:
             return
         
         event_doc = {
@@ -716,7 +716,7 @@ def _update_event_in_db(user_id: str, event_id: str, event_data: Dict[str, Any])
     """Update a cached event in the database"""
     try:
         calendar_col = get_calendar_events_collection()
-        if not calendar_col:
+        if calendar_col is None:
             return
         
         calendar_col.update_one(
@@ -737,7 +737,7 @@ def _delete_event_from_db(user_id: str, event_id: str) -> None:
     """Delete a cached event from the database"""
     try:
         calendar_col = get_calendar_events_collection()
-        if not calendar_col:
+        if calendar_col is None:
             return
         
         calendar_col.delete_one({"user_id": user_id, "event_id": event_id})
@@ -750,7 +750,7 @@ def _cache_events_background(user_id: str, events: List[Dict[str, Any]]) -> None
     """Cache events in database (runs in background thread)"""
     try:
         calendar_col = get_calendar_events_collection()
-        if not calendar_col:
+        if calendar_col is None:
             return
         
         for event in events:

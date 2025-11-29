@@ -27,7 +27,7 @@ class OutlookCalendarProvider(CalendarProvider):
         """Get Outlook access token from database"""
         try:
             tokens_col = get_tokens_collection()
-            if not tokens_col:
+            if tokens_col is None:
                 return None
             
             token_doc = tokens_col.find_one({
