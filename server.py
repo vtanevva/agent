@@ -89,6 +89,7 @@ from app.api.chat_routes import chat_bp
 from app.api.gmail_routes import gmail_bp
 from app.api.contacts_routes import contacts_bp
 from app.api.calendar_routes import calendar_bp
+from app.api.files_routes import files_bp
 
 # Environment setup
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -124,8 +125,9 @@ def create_app():
     app.register_blueprint(gmail_bp)
     app.register_blueprint(contacts_bp)
     app.register_blueprint(calendar_bp)
+    app.register_blueprint(files_bp)
     
-    print("[INIT] ✅ Registered API blueprints: chat, gmail, contacts, calendar")
+    print("[INIT] ✅ Registered API blueprints: chat, gmail, contacts, calendar, files")
     
     return app
 

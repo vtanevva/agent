@@ -49,6 +49,7 @@ export default function ChatPage() {
   const [hiddenThreads, setHiddenThreads] = useState([]);
   const [emailChoices, setEmailChoices] = useState(null);
   const [currentEmailIndex, setCurrentEmailIndex] = useState(0);
+  const [selectedImages, setSelectedImages] = useState([]);
   const chatRef = useRef(null);
   const lastUserMessage = useRef('');
   const sidebarAnim = useRef(new Animated.Value(-280)).current;
@@ -177,25 +178,38 @@ export default function ChatPage() {
     console.log('handleSend called with msg:', msg);
     console.log('current input:', input);
     console.log('userId:', userId, 'sessionId:', sessionId);
+    console.log('selectedImages:', selectedImages.length);
     
-    if (!msg.trim()) {
-      console.log('Empty message, returning');
+    if (!msg.trim() && selectedImages.length === 0) {
+      console.log('Empty message and no images, returning');
       return;
     }
     
-    lastUserMessage.current = msg;
+    const messageText = msg.trim() || (selectedImages.length > 0 ? "What's in this image?" : "");
+    lastUserMessage.current = messageText;
     setInput('');
-    setChat((c) => [...c, {role: 'user', text: msg}]);
+    
+    // Add user message to chat with images
+    setChat((c) => [...c, {
+      role: 'user',
+      text: messageText,
+      images: selectedImages.length > 0 ? selectedImages : undefined
+    }]);
+    
     setLoading(true);
     
     try {
       const requestBody = {
-        message: msg,
+        message: messageText,
         user_id: userId,
         session_id: sessionId,
+        images: selectedImages.length > 0 ? selectedImages : undefined,
       };
       
-      console.log('Sending request:', requestBody);
+      console.log('Sending request with images:', requestBody);
+      
+      // Clear images after sending
+      setSelectedImages([]);
       
       const r = await fetch(`${API_BASE_URL}/api/chat`, {
         method: 'POST',
@@ -265,11 +279,17 @@ export default function ChatPage() {
         setEmailChoices(parsed);
         setCurrentEmailIndex(0);
       } 
-      // Handle calendar events
-      else if (parsed && parsed.success && parsed.events) {
-        setCalendarEvents(parsed.events);
-        setShowCalendar(true);
-        setChat((c) => [...c, {role: 'assistant', text: '📅 Here are your calendar events:'}]);
+      // Handle calendar events - check for calendar JSON structure
+      else if (parsed && typeof parsed === 'object' && parsed.success !== undefined) {
+        console.log('Calendar JSON detected:', parsed);
+        if (parsed.events !== undefined) {
+          setCalendarEvents(parsed.events || []);
+          setShowCalendar(true);
+          setChat((c) => [...c, {role: 'assistant', text: '📅 Here are your calendar events:'}]);
+        } else {
+          // Calendar response but no events - might be error or empty
+          setChat((c) => [...c, {role: 'assistant', text: reply}]);
+        }
       } 
       // Handle regular text responses
       else {
@@ -682,6 +702,7 @@ export default function ChatPage() {
             onSend={handleSend}
             showConnectButton={false}
             onConnect={() => {}}
+            onImageSelect={setSelectedImages}
           />
         </View>
 

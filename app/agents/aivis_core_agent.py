@@ -92,16 +92,43 @@ Tone and style:
         if session_memory:
             messages.extend(session_memory[-20:])  # Last 20 messages
         
-        # Add current user message
-        messages.append({"role": "user", "content": user_message})
+        # Parse user message - check if it contains images
+        try:
+            import json
+            parsed_message = json.loads(user_message)
+            if isinstance(parsed_message, dict) and "content" in parsed_message:
+                # Message with images (from chat route)
+                messages.append({"role": "user", "content": parsed_message["content"]})
+            else:
+                # Regular text message
+                messages.append({"role": "user", "content": user_message})
+        except (json.JSONDecodeError, ValueError, TypeError):
+            # Regular text message
+            messages.append({"role": "user", "content": user_message})
         
         try:
-            # Generate response
-            reply = self.llm_service.chat_completion_text(
-                messages=messages,
-                temperature=0.3,
-                max_tokens=768
+            # Check if message contains images
+            has_images = any(
+                isinstance(msg.get("content"), list) and 
+                any(isinstance(item, dict) and item.get("type") == "image_url" for item in msg.get("content", []))
+                for msg in messages
             )
+            
+            if has_images:
+                # Use chat_completion for images (returns response object)
+                response = self.llm_service.chat_completion(
+                    messages=messages,
+                    temperature=0.3,
+                    max_tokens=768
+                )
+                reply = response.choices[0].message.content or ""
+            else:
+                # Use chat_completion_text for text-only (faster)
+                reply = self.llm_service.chat_completion_text(
+                    messages=messages,
+                    temperature=0.3,
+                    max_tokens=768
+                )
             
             return {"reply": reply}
         except Exception as e:

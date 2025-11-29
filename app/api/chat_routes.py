@@ -200,22 +200,48 @@ def _lookup_contact_email(user_id: str, name_or_email: str) -> str:
 
 @chat_bp.route("/chat", methods=["POST"])
 def chat():
-    """Main chat endpoint that handles user messages."""
+    """Main chat endpoint that handles user messages with optional image attachments."""
     try:
         data = request.get_json(force=True, silent=True) or {}
         user_message = (data.get("message") or "").strip()
         user_id = (data.get("user_id") or "anonymous").strip().lower()
         session_id = data.get("session_id") or f"{user_id}-{uuid.uuid4().hex[:8]}"
+        images = data.get("images", [])  # List of base64 data URIs
 
-        if not user_message:
-            return jsonify({"reply": "No message received. Please enter something."}), 400
+        if not user_message and not images:
+            return jsonify({"reply": "No message or image received. Please enter something."}), 400
+
+        # Build message with images if provided
+        if images:
+            # For vision-capable models, format message with images
+            content = []
+            if user_message:
+                content.append({"type": "text", "text": user_message})
+            
+            for image_data_uri in images:
+                content.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": image_data_uri
+                    }
+                })
+            
+            # Store formatted message for orchestrator
+            # The orchestrator will pass this to agents, which will use LLM with vision
+            user_message_with_images = json.dumps({
+                "text": user_message or "What's in this image?",
+                "images": images,
+                "content": content  # OpenAI format
+            })
+        else:
+            user_message_with_images = user_message
 
         # Get orchestrator and handle chat
         orchestrator = get_orchestrator()
         intent, reply = orchestrator.handle_chat(
             user_id=user_id,
             session_id=session_id,
-            user_message=user_message,
+            user_message=user_message_with_images,
         )
 
         # Preserve compose-modal behaviour for email-style replies
@@ -236,8 +262,26 @@ def chat():
                 # Not a JSON response, continue normally
                 pass
 
-        # Save conversation
-        save_message(user_id, session_id, user_message, reply)
+        # Check if reply is calendar JSON (for calendar UI)
+        if intent == "calendar":
+            try:
+                # Try to parse as JSON
+                parsed_reply = json.loads(reply)
+                if isinstance(parsed_reply, dict) and "success" in parsed_reply:
+                    # This is a calendar JSON response - return it directly so frontend can parse it
+                    # The frontend will check for parsed.success and parsed.events
+                    events_count = len(parsed_reply.get('events', []))
+                    logger.info(f"Calendar JSON response detected: success={parsed_reply.get('success')}, events_count={events_count}")
+                    save_message(user_id, session_id, user_message or (f"[{len(images)} image(s)]" if images else ""), "📅 Calendar events displayed")
+                    # Return JSON string so frontend can parse it
+                    return jsonify({"reply": reply})
+            except (json.JSONDecodeError, ValueError, TypeError) as e:
+                # Not JSON, continue normally - might be an error message
+                logger.debug(f"Calendar reply is not JSON (might be error message): {e}, reply={reply[:100]}")
+                pass
+
+        # Save conversation (save text message, images are stored separately)
+        save_message(user_id, session_id, user_message or (f"[{len(images)} image(s)]" if images else ""), reply)
 
         # Extract and save new facts using LLMService and MemoryService
         llm_service = get_llm_service()

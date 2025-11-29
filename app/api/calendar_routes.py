@@ -29,10 +29,11 @@ def _detect_calendar_intent(message: str) -> str:
     
     # List events
     if any(phrase in lower for phrase in [
-        "show my calendar", "list events", "what's on my calendar",
+        "show my calendar", "show calendar", "list events", "what's on my calendar",
         "my schedule", "upcoming events", "calendar events",
-        "show calendar", "display calendar", "view calendar",
-        "what events", "what meetings", "show meetings"
+        "display calendar", "view calendar", "see calendar",
+        "what events", "what meetings", "show meetings",
+        "calendar", "events", "schedule"  # Catch-all for calendar-related queries
     ]):
         return "list"
     

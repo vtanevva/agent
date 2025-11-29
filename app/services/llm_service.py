@@ -66,12 +66,19 @@ class LLMService:
         """
         Generate a chat completion.
         
+        Supports both text and image messages. If messages contain images,
+        automatically uses a vision-capable model.
+        
         Parameters
         ----------
         messages : list
             List of message dicts with 'role' and 'content'
+            Content can be:
+            - String (text message)
+            - List of dicts with 'type': 'text' or 'image_url' (multimodal)
         model : str, optional
             Model to use (defaults to self.default_model)
+            If images are detected, will use vision-capable model
         temperature : float
             Sampling temperature (0-2)
         max_tokens : int
@@ -88,6 +95,29 @@ class LLMService:
         client = self.get_client()
         model_name = model or self.default_model
         
+        # Check if messages contain images
+        has_images = False
+        for msg in messages:
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                has_images = any(
+                    isinstance(item, dict) and item.get("type") == "image_url"
+                    for item in content
+                )
+                if has_images:
+                    break
+        
+        # Use vision-capable model if images are present
+        if has_images:
+            # gpt-4o-mini supports vision, but gpt-4o is better
+            if "gpt-4o-mini" in model_name:
+                # Keep gpt-4o-mini (it supports vision)
+                pass
+            elif "gpt-4" not in model_name.lower():
+                # If not a vision model, switch to gpt-4o-mini
+                model_name = "gpt-4o-mini"
+                logger.info(f"Switching to vision-capable model: {model_name}")
+        
         try:
             kwargs = {
                 "model": model_name,
@@ -100,7 +130,7 @@ class LLMService:
                 kwargs["tools"] = tools
                 kwargs["tool_choice"] = tool_choice
             
-            logger.debug(f"Chat completion request: model={model_name}")
+            logger.debug(f"Chat completion request: model={model_name}, has_images={has_images}")
             response = client.chat.completions.create(**kwargs)
             logger.debug(f"Chat completion successful")
             return response

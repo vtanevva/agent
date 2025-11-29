@@ -1,5 +1,5 @@
 import React, {useEffect, useRef} from 'react';
-import {View, Text, ScrollView, StyleSheet} from 'react-native';
+import {View, Text, ScrollView, StyleSheet, Image} from 'react-native';
 import {LinearGradient} from 'expo-linear-gradient';
 import {Svg, Path, Circle} from 'react-native-svg';
 import {colors} from '../styles/colors';
@@ -152,6 +152,21 @@ export default function MessageList({chat, loading, onEmailSelect, onArchive, on
                   <Text style={styles.messageAuthor}>
                     {msg.role === 'user' ? 'You' : 'Aivis'}
                   </Text>
+                  
+                  {/* Display images if present */}
+                  {msg.images && msg.images.length > 0 && (
+                    <View style={styles.imagesContainer}>
+                      {msg.images.map((imageUri, imgIdx) => (
+                        <Image
+                          key={imgIdx}
+                          source={{uri: imageUri}}
+                          style={styles.messageImage}
+                          resizeMode="cover"
+                        />
+                      ))}
+                    </View>
+                  )}
+                  
                   {emailsToDisplay.length > 0 ? (
                     <EmailList
                       emails={emailsToDisplay}
@@ -249,6 +264,19 @@ const styles = StyleSheet.create({
     color: '#FFFFFF', // Pure white color for mobile compatibility
     flexShrink: 1, // Allow text to shrink and wrap
     backgroundColor: 'transparent', // Ensure text background is transparent
+  },
+  imagesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 8,
+  },
+  messageImage: {
+    width: 200,
+    height: 200,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
 });
 
