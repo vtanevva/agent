@@ -10,6 +10,9 @@ from app.services.memory_service import get_memory_service
 from app.services.llm_service import get_llm_service
 from app.db.collections import get_conversations_collection, get_contacts_collection
 from app.utils.oauth_utils import require_google_auth
+from app.utils.logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 chat_bp = Blueprint('chat', __name__, url_prefix='/api')
@@ -202,14 +205,30 @@ def _lookup_contact_email(user_id: str, name_or_email: str) -> str:
 def chat():
     """Main chat endpoint that handles user messages with optional image attachments."""
     try:
+        # Get request data
+        if not request.is_json:
+            logger.warning("Request is not JSON, content-type:", request.content_type)
+            return jsonify({"error": "Request must be JSON", "message": "Content-Type must be application/json"}), 400
+        
         data = request.get_json(force=True, silent=True) or {}
+        logger.debug(f"Received chat request: keys={list(data.keys())}, has_message={'message' in data}, has_images={'images' in data}")
+        
         user_message = (data.get("message") or "").strip()
         user_id = (data.get("user_id") or "anonymous").strip().lower()
         session_id = data.get("session_id") or f"{user_id}-{uuid.uuid4().hex[:8]}"
-        images = data.get("images", [])  # List of base64 data URIs
+        
+        # Handle images - ensure it's a list, not None or undefined
+        images_raw = data.get("images")
+        if images_raw is None or images_raw == "undefined":
+            images = []
+        elif isinstance(images_raw, list):
+            images = images_raw
+        else:
+            images = []
 
         if not user_message and not images:
-            return jsonify({"reply": "No message or image received. Please enter something."}), 400
+            logger.warning(f"Empty request: user_message='{user_message}', images_count={len(images)}")
+            return jsonify({"error": "No message or image received", "message": "Please enter something."}), 400
 
         # Build message with images if provided
         if images:
@@ -302,6 +321,13 @@ def chat():
         return jsonify({"reply": reply})
 
     except Exception as e:
-        print(f"[ERROR] Error in chat endpoint: {e}", flush=True)
-        return jsonify({"error": "Invalid request", "message": str(e)}), 400
+        logger.error(f"Error in chat endpoint: {e}", exc_info=True)
+        import traceback
+        error_trace = traceback.format_exc()
+        logger.error(f"Full traceback: {error_trace}")
+        return jsonify({
+            "error": "Invalid request",
+            "message": str(e),
+            "type": type(e).__name__
+        }), 400
 

@@ -199,14 +199,19 @@ export default function ChatPage() {
     setLoading(true);
     
     try {
+      // Build request body - only include images if there are any
       const requestBody = {
         message: messageText,
         user_id: userId,
         session_id: sessionId,
-        images: selectedImages.length > 0 ? selectedImages : undefined,
       };
       
-      console.log('Sending request with images:', requestBody);
+      // Only add images if there are any (don't send undefined)
+      if (selectedImages.length > 0) {
+        requestBody.images = selectedImages;
+      }
+      
+      console.log('Sending request:', { ...requestBody, images_count: selectedImages.length });
       
       // Clear images after sending
       setSelectedImages([]);
