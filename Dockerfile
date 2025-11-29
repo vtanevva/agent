@@ -28,10 +28,16 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 COPY . /app
 
 # ----------------------------
+# Setup startup script
+# ----------------------------
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
+# ----------------------------
 # Final runtime - use dynamic PORT from Railway
 # ----------------------------
 WORKDIR /app
 
 # Railway sets PORT environment variable automatically
-# Use PORT if set, otherwise default to 10000
-CMD sh -c 'gunicorn server:app --bind 0.0.0.0:${PORT:-10000} --workers 1 --timeout 120'
+# The start.sh script will handle the PORT variable properly
+CMD ["/app/start.sh"]
