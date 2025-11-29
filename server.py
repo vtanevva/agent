@@ -1495,28 +1495,69 @@ def google_callback():
 
     user_email = real_email if real_email else state
 
-    # Get base domain from request
-    scheme = 'https' if (request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https') else 'http'
-    host = request.host  # Gets the domain (e.g., aivis.pw)
-    base_url = f"{scheme}://{host}"
+    # Determine the frontend URL to redirect to
+    # Priority: 1) FRONTEND_URL env var, 2) expo_redirect param, 3) Request headers
+    from urllib.parse import urlparse
     
-    # Clean redirect URL - remove www if present, use clean domain
-    clean_host = host.replace('www.', '') if host.startswith('www.') else host
-    clean_base_url = f"{scheme}://{clean_host}"
+    frontend_url = os.getenv("FRONTEND_URL")  # e.g., https://aivis.pw
+    
+    # If no FRONTEND_URL, check expo_redirect parameter (most reliable for web apps)
+    if not frontend_url and expo_redirect:
+        if expo_redirect.startswith('http://') or expo_redirect.startswith('https://'):
+            # Extract domain from expo_redirect - this is where user started OAuth
+            parsed = urlparse(expo_redirect)
+            clean_host = parsed.netloc.replace('www.', '') if parsed.netloc.startswith('www.') else parsed.netloc
+            frontend_url = f"https://{clean_host}"  # Always use https in production
+    
+    # If still no frontend URL, check request headers (Referer/Origin)
+    if not frontend_url:
+        referer = request.headers.get('Referer', '')
+        origin = request.headers.get('Origin', '')
+        
+        # Check headers for custom domain
+        for header_value in [referer, origin]:
+            if header_value:
+                parsed = urlparse(header_value)
+                if parsed.netloc and 'aivis.pw' in parsed.netloc:
+                    clean_host = parsed.netloc.replace('www.', '') if parsed.netloc.startswith('www.') else parsed.netloc
+                    frontend_url = f"https://{clean_host}"
+                    break
+    
+    # Final fallback: use request host (but prefer aivis.pw if detected)
+    if not frontend_url:
+        scheme = 'https' if (request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https') else 'http'
+        host = request.host
+        
+        # If Railway domain, try to use custom domain from state or headers
+        if 'railway.app' in host:
+            # Check if we can find aivis.pw anywhere
+            referer = request.headers.get('Referer', '')
+            if 'aivis.pw' in referer:
+                frontend_url = "https://aivis.pw"
+            else:
+                # Default fallback - but you should set FRONTEND_URL env var
+                frontend_url = f"{scheme}://{host}"
+        else:
+            # Not Railway domain, use it
+            clean_host = host.replace('www.', '') if host.startswith('www.') else host
+            frontend_url = f"https://{clean_host}" if scheme == 'https' else f"{scheme}://{clean_host}"
+    
+    # Ensure clean URL (no www, https)
+    if frontend_url:
+        parsed = urlparse(frontend_url)
+        clean_host = parsed.netloc.replace('www.', '') if parsed.netloc.startswith('www.') else parsed.netloc
+        frontend_url = f"https://{clean_host}"  # Always https in production
+    
+    redirect_url = f"{frontend_url}/?username={state}&email={user_email}"
     
     if expo_app:
-        # Check if expo_redirect is a web URL (starts with http)
-        if expo_redirect and (expo_redirect.startswith('http://') or expo_redirect.startswith('https://')):
-            # Web app accessing via Expo - redirect to clean domain
-            redirect_url = f"{clean_base_url}/?username={state}&email={user_email}"
-            return redirect(redirect_url)
-        else:
+        # Check if expo_redirect is a mobile app (exp://)
+        if expo_redirect and not (expo_redirect.startswith('http://') or expo_redirect.startswith('https://')):
             # Mobile Expo app - show success page
             display_email = str(user_email) if user_email else str(state)
             return render_template_string(_get_success_page_template(display_email))
 
-    # Web app redirect - clean URL
-    redirect_url = f"{clean_base_url}/?username={state}&email={user_email}"
+    # Web app redirect - use frontend URL
     return redirect(redirect_url)
 
 
