@@ -1499,7 +1499,8 @@ def google_callback():
     # Priority: 1) FRONTEND_URL env var, 2) expo_redirect param, 3) Request headers
     from urllib.parse import urlparse
     
-    frontend_url = os.getenv("FRONTEND_URL")  # e.g., https://aivis.pw
+    # Default to aivis.pw
+    frontend_url = os.getenv("FRONTEND_URL", "https://aivis.pw")  # e.g., https://aivis.pw
     
     # If no FRONTEND_URL, check expo_redirect parameter (most reliable for web apps)
     if not frontend_url and expo_redirect:
@@ -1507,7 +1508,13 @@ def google_callback():
             # Extract domain from expo_redirect - this is where user started OAuth
             parsed = urlparse(expo_redirect)
             clean_host = parsed.netloc.replace('www.', '') if parsed.netloc.startswith('www.') else parsed.netloc
-            frontend_url = f"https://{clean_host}"  # Always use https in production
+            if clean_host:
+                frontend_url = f"https://{clean_host}"  # Always use https in production
+        elif 'aivis.pw' in expo_redirect:
+            # Handle case where expo_redirect is just the domain
+            clean_host = expo_redirect.replace('www.', '').replace('https://', '').replace('http://', '').split('/')[0]
+            if clean_host:
+                frontend_url = f"https://{clean_host}"
     
     # If still no frontend URL, check request headers (Referer/Origin)
     if not frontend_url:
@@ -1542,11 +1549,31 @@ def google_callback():
             clean_host = host.replace('www.', '') if host.startswith('www.') else host
             frontend_url = f"https://{clean_host}" if scheme == 'https' else f"{scheme}://{clean_host}"
     
-    # Ensure clean URL (no www, https)
+    # Ensure clean URL (no www, https) and proper formatting
     if frontend_url:
-        parsed = urlparse(frontend_url)
-        clean_host = parsed.netloc.replace('www.', '') if parsed.netloc.startswith('www.') else parsed.netloc
-        frontend_url = f"https://{clean_host}"  # Always https in production
+        # If it's just a domain (no protocol), add https://
+        if not frontend_url.startswith('http://') and not frontend_url.startswith('https://'):
+            # It's probably just a domain name
+            clean_host = frontend_url.replace('www.', '').split('/')[0]
+            frontend_url = f"https://{clean_host}"
+        else:
+            # Parse properly formatted URL
+            parsed = urlparse(frontend_url)
+            clean_host = parsed.netloc.replace('www.', '') if parsed.netloc and parsed.netloc.startswith('www.') else (parsed.netloc or frontend_url)
+            if clean_host and clean_host != frontend_url:
+                frontend_url = f"https://{clean_host}"
+    else:
+        # Fallback: use aivis.pw if nothing else is set
+        frontend_url = "https://aivis.pw"
+    
+    # Final validation: ensure URL has protocol
+    if not frontend_url.startswith('http://') and not frontend_url.startswith('https://'):
+        # Extract just the domain
+        domain = frontend_url.replace('www.', '').split('/')[0]
+        frontend_url = f"https://{domain}"
+    
+    # Ensure trailing slash - final redirect URL
+    final_redirect_url = frontend_url.rstrip('/') + '/'
     
     if expo_app:
         # Check if expo_redirect is a mobile app (exp://)
@@ -1568,13 +1595,13 @@ def google_callback():
       sessionStorage.setItem('oauth_timestamp', new Date().getTime().toString());
       
       // Redirect to clean URL (no parameters)
-      window.location.replace('{frontend_url}/');
+      window.location.replace('{final_redirect_url}');
     </script>
-    <meta http-equiv="refresh" content="0;url={frontend_url}/">
+    <meta http-equiv="refresh" content="0;url={final_redirect_url}">
   </head>
   <body>
     <p>Redirecting...</p>
-    <p>If you are not redirected, <a href="{frontend_url}/">click here</a>.</p>
+    <p>If you are not redirected, <a href="{final_redirect_url}">click here</a>.</p>
   </body>
 </html>"""
     return redirect_html
