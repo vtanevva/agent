@@ -12,7 +12,7 @@ import psutil
 import requests
 from dotenv import load_dotenv
 from flask import (
-    Flask, request, jsonify, 
+    Flask, request, jsonify, send_from_directory,
     redirect, session, render_template_string
 )
 from flask_cors import CORS
@@ -105,7 +105,7 @@ def create_app():
     This creates and configures the Flask application with all necessary
     blueprints, extensions, and middleware.
     """
-    app = Flask(__name__)
+    app = Flask(__name__, static_folder="web-build", static_url_path="")
     CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
     app.secret_key = Config.FLASK_SECRET_KEY or "change-me-in-prod"
 
@@ -1628,7 +1628,7 @@ def instagram_callback():
 
 
 # ──────────────────────────────────────────────────────────────────
-# Health Check & Root Route
+# Health Check & API Info Route
 # ──────────────────────────────────────────────────────────────────
 
 @app.route("/health", methods=["GET"])
@@ -1641,9 +1641,9 @@ def health_check():
     }), 200
 
 
-@app.route("/", methods=["GET"])
-def root():
-    """Root endpoint - API information."""
+@app.route("/api/info", methods=["GET"])
+def api_info():
+    """API information endpoint."""
     return jsonify({
         "service": "Mental Health AI Assistant API",
         "version": "1.0.0",
@@ -1658,6 +1658,41 @@ def root():
             "files": "/api/files/*"
         },
         "documentation": "See API endpoints for usage"
+    }), 200
+
+
+# ──────────────────────────────────────────────────────────────────
+# Frontend Serving - Expo Web App
+# ──────────────────────────────────────────────────────────────────
+
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def serve_frontend(path):
+    """Serve Expo web app or API routes."""
+    # Don't interfere with API routes
+    if path.startswith("api/"):
+        return jsonify({"error": "API endpoint not found"}), 404
+    
+    # Don't interfere with OAuth routes
+    if path.startswith("google/") or path.startswith("instagram/"):
+        return jsonify({"error": "Endpoint not found"}), 404
+    
+    # Serve static files if they exist
+    if path and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    
+    # Serve index.html for all other routes (SPA routing)
+    if os.path.exists(os.path.join(app.static_folder, "index.html")):
+        return send_from_directory(app.static_folder, "index.html")
+    
+    # Fallback: API info if web build doesn't exist
+    return jsonify({
+        "service": "Mental Health AI Assistant API",
+        "version": "1.0.0",
+        "status": "running",
+        "note": "Frontend web build not found. API endpoints available at /api/*",
+        "health": "/health",
+        "api_info": "/api/info"
     }), 200
 
 

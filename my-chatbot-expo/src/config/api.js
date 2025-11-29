@@ -17,7 +17,7 @@ const getApiBaseUrl = () => {
   
   // Railway production URL - UPDATE THIS with your Railway URL
   // Find it in Railway dashboard -> your project -> Settings -> Domains
-  const RAILWAY_URL = 'https://web-production-0b6ce.up.railway.app/'; // ⬅️ UPDATE THIS!
+  const RAILWAY_URL = 'https://web-production-0b6ce.up.railway.app'; // ⬅️ UPDATE THIS!
   
   // For development, you can still use localhost by setting USE_LOCAL=true
   const USE_LOCAL = process.env.USE_LOCAL === 'true' || false;

@@ -23,8 +23,26 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
 # ----------------------------
-# Copy application code (including start.sh from root)
+# Build Expo web app first (before copying everything)
 # ----------------------------
+COPY my-chatbot-expo/package*.json my-chatbot-expo/
+WORKDIR /app/my-chatbot-expo
+RUN npm ci || npm install
+
+# Copy Expo app source
+COPY my-chatbot-expo/ /app/my-chatbot-expo/
+
+# Build Expo web app
+# Try different Expo export commands for compatibility
+RUN npx expo export --platform web --output-dir /app/web-build 2>/dev/null || \
+    npx expo export:web --output-dir /app/web-build 2>/dev/null || \
+    (npx expo export --platform web && [ -d "dist" ] && mv dist /app/web-build) || \
+    echo "Warning: Expo web build failed, API will still work"
+
+# ----------------------------
+# Copy rest of application code
+# ----------------------------
+WORKDIR /app
 COPY . .
 
 # ----------------------------
