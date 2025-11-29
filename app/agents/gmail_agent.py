@@ -17,6 +17,7 @@ from app.tools.email import (
     reply_email,
     send_email,
 )
+from app.services.contacts_service import resolve_contact_email
 from app.utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
@@ -159,12 +160,62 @@ class GmailAgent:
         
         elif intent == "send":
             # Extract recipient and compose email
-            # For now, return compose modal data
-            to_match = re.search(r'(?:email|send)\s+(?:to\s+)?([^\s,]+@[^\s,]+|[a-zA-Z\s]+)', message, re.IGNORECASE)
-            to = to_match.group(1).strip() if to_match else ""
+            # Support natural phrases like:
+            #   "send an email to Marin - Fontys about the meeting"
+            #   "email Marin about the report"
+            #   "send email to marin@example.com"
+            lower_msg = message.lower()
+            raw_to = ""
+
+            # Try several patterns in order of specificity
+            patterns = [
+                r"send\s+an\s+email\s+to\s+(.+)",   # send an email to X...
+                r"send\s+email\s+to\s+(.+)",        # send email to X...
+                r"send\s+an\s+email\s+(.+)",        # send an email X...
+                r"email\s+(.+)",                    # email X...
+            ]
+
+            for pat in patterns:
+                m = re.search(pat, message, re.IGNORECASE)
+                if m:
+                    candidate = m.group(1).strip()
+                    # Strip common trailing phrases after the name/nickname
+                    # e.g. "Marin about the meeting" -> "Marin"
+                    split_tokens = [" about ", " regarding ", " re: ", " re ", " with ", " on ", " for "]
+                    cand_lower = candidate.lower()
+                    cut_idx = None
+                    for tok in split_tokens:
+                        pos = cand_lower.find(tok)
+                        if pos != -1:
+                            cut_idx = pos
+                            break
+                    if cut_idx is not None:
+                        candidate = candidate[:cut_idx].strip()
+                    raw_to = candidate
+                    break
+
+            # Fallback: simple "to X" extraction if patterns failed
+            if not raw_to:
+                m = re.search(r"\bto\s+([^\n,]+)", message, re.IGNORECASE)
+                if m:
+                    raw_to = m.group(1).strip()
+
+            # Resolve nickname/name to actual email using contacts
+            resolved_to = raw_to
+            if raw_to:
+                try:
+                    resolve_result = resolve_contact_email(user_id=user_id, name_or_email=raw_to)
+                    if resolve_result.get("success"):
+                        resolved_to = resolve_result.get("resolved_email", raw_to)
+                except Exception as e:
+                    logger.warning(f"Failed to resolve contact email for '{raw_to}': {e}")
+                    resolved_to = raw_to
             
             # Use LLM to generate subject and body
-            prompt = f"User wants to send an email to {to}. Message: {message}\n\nGenerate a brief subject line and email body."
+            prompt = (
+                f"User wants to send an email to {raw_to or resolved_to}. "
+                f"Message: {message}\n\nGenerate a brief subject line and email body."
+            )
             
             try:
                 llm_response = self.llm_service.chat_completion_text(
@@ -181,12 +232,15 @@ class GmailAgent:
                 body = lines[1].strip() if len(lines) > 1 else ""
                 
                 # Return compose modal data
-                return json.dumps({
-                    "action": "open_compose",
-                    "to": to,
-                    "subject": subject,
-                    "body": body
-                })
+                return json.dumps(
+                    {
+                        "action": "open_compose",
+                        # Use resolved email so the Compose modal "To" field shows the real address
+                        "to": resolved_to,
+                        "subject": subject,
+                        "body": body,
+                    }
+                )
             except Exception as e:
                 logger.error(f"Error composing email: {e}", exc_info=True)
                 return "I had trouble composing that email. Please try again."

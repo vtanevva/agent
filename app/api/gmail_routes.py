@@ -60,15 +60,59 @@ def _check_gmail_rate_limit(user_id: str):
 
 
 def _lookup_contact_email(user_id: str, name_or_email: str) -> str:
-    """Look up email address from contacts by name or return the input if it's already an email."""
-    if not name_or_email or "@" in name_or_email:
+    """
+    Look up email address from contacts by name or return the input if it's already an email.
+
+    Also handles natural language phrases like:
+      - "an email to Marin"
+      - "email Marin about the meeting"
+    by extracting the most likely name/nickname segment before lookup.
+    """
+    if not name_or_email:
         return name_or_email
-    
+
+    original = name_or_email.strip()
+    if "@" in original:
+        return original
+
+    # Try to extract a cleaner recipient name from phrases
+    candidate = original
+    lower = original.lower()
+
+    # Patterns in order of specificity
+    patterns = [
+        r"send\s+an\s+email\s+to\s+(.+)",
+        r"send\s+email\s+to\s+(.+)",
+        r"send\s+an\s+email\s+(.+)",
+        r"email\s+(.+)",
+        r"an\s+email\s+to\s+(.+)",
+    ]
+
+    for pat in patterns:
+        m = re.search(pat, original, re.IGNORECASE)
+        if m:
+            candidate = m.group(1).strip()
+            break
+
+    # Strip common trailing phrases after the name/nickname
+    split_tokens = [" about ", " regarding ", " re: ", " re ", " with ", " on ", " for "]
+    cand_lower = candidate.lower()
+    cut_idx = None
+    for tok in split_tokens:
+        pos = cand_lower.find(tok)
+        if pos != -1:
+            cut_idx = pos
+            break
+    if cut_idx is not None:
+        candidate = candidate[:cut_idx].strip()
+
+    name_to_lookup = candidate or original
+
     contacts_col = get_contacts_collection()
     if contacts_col is None:
-        return name_or_email
+        return name_to_lookup
     
-    name_lower = name_or_email.strip().lower()
+    name_lower = name_to_lookup.strip().lower()
     
     # Try exact match first
     contact = contacts_col.find_one(
@@ -81,8 +125,8 @@ def _lookup_contact_email(user_id: str, name_or_email: str) -> str:
         },
         {"email": 1}
     )
-    if contact:
-        return contact.get("email", name_or_email)
+    if contact and contact.get("email"):
+        return contact.get("email")
     
     # Try word boundary match
     contact = contacts_col.find_one(
@@ -95,10 +139,11 @@ def _lookup_contact_email(user_id: str, name_or_email: str) -> str:
         },
         {"email": 1}
     )
-    if contact:
-        return contact.get("email", name_or_email)
+    if contact and contact.get("email"):
+        return contact.get("email")
     
-    return name_or_email
+    # If no match, fall back to cleaned candidate, not the full phrase
+    return name_to_lookup
 
 
 @gmail_bp.route("/list", methods=["POST"])

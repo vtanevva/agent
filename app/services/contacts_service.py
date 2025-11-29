@@ -835,6 +835,107 @@ def list_contacts(user_id: str, include_archived: bool = False) -> Dict[str, Any
     return {"success": True, "contacts": list(merged.values())}
 
 
+def resolve_contact_email(user_id: str, name_or_email: str) -> Dict[str, Any]:
+    """
+    Resolve a human-friendly name or nickname to an email address.
+
+    Nicknames are taken directly from the contact details stored in the
+    `contacts` collection (the same nickname you see/edit in the Contacts UI).
+
+    This is used for commands like "send an email to Marin - Fontys" where
+    "Marin - Fontys" is a contact nickname. If the input is already an email
+    address, it is returned unchanged.
+
+    Returns
+    -------
+    dict
+        {
+          "success": True/False,
+          "input": original_string,
+          "resolved_email": email_or_original,
+          "matched": bool  # True if we found a contact match
+        }
+    """
+    original = (name_or_email or "").strip()
+    if not original:
+        return {
+            "success": False,
+            "input": original,
+            "resolved_email": "",
+            "matched": False,
+            "error": "Empty name_or_email",
+        }
+
+    # If it's already an email, just return it
+    if "@" in original:
+        return {
+            "success": True,
+            "input": original,
+            "resolved_email": original,
+            "matched": False,
+        }
+
+    contacts_col = get_contacts_collection()
+    if contacts_col is None:
+        return {
+            "success": False,
+            "input": original,
+            "resolved_email": original,
+            "matched": False,
+            "error": "Database not connected",
+        }
+
+    name_lower = original.strip().lower()
+
+    # Try exact match on name or nickname
+    contact = contacts_col.find_one(
+        {
+            "user_id": user_id,
+            "$or": [
+                {"name": {"$regex": f"^{name_lower}$", "$options": "i"}},
+                {"nickname": {"$regex": f"^{name_lower}$", "$options": "i"}},
+            ],
+        },
+        {"email": 1},
+    )
+    if contact and contact.get("email"):
+        email_val = contact.get("email")
+        return {
+            "success": True,
+            "input": original,
+            "resolved_email": email_val,
+            "matched": True,
+        }
+
+    # Try word-boundary match (partial name or nickname)
+    contact = contacts_col.find_one(
+        {
+            "user_id": user_id,
+            "$or": [
+                {"name": {"$regex": f"\\b{name_lower}\\b", "$options": "i"}},
+                {"nickname": {"$regex": f"\\b{name_lower}\\b", "$options": "i"}},
+            ],
+        },
+        {"email": 1},
+    )
+    if contact and contact.get("email"):
+        email_val = contact.get("email")
+        return {
+            "success": True,
+            "input": original,
+            "resolved_email": email_val,
+            "matched": True,
+        }
+
+    # No match found - return original
+    return {
+        "success": True,
+        "input": original,
+        "resolved_email": original,
+        "matched": False,
+    }
+
+
 def normalize_contact_names(user_id: str) -> Dict[str, Any]:
     """Fill missing names from email local-part for a user's contacts."""
     contacts_col = get_contacts_collection()

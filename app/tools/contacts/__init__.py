@@ -9,6 +9,7 @@ from .list import list_contacts
 from .update import update_contact, normalize_contact_names, archive_contact
 from .groups import list_contact_groups
 from .detail import get_contact_detail, get_contact_conversations
+from .resolve_email import resolve_contact_email
 
 __all__ = [
     "sync_contacts",
@@ -19,5 +20,6 @@ __all__ = [
     "list_contact_groups",
     "get_contact_detail",
     "get_contact_conversations",
+    "resolve_contact_email",
 ]
 
