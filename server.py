@@ -291,8 +291,22 @@ def _build_flow(redirect_uri: str, state: str | None = None):
 
 def _get_redirect_uri():
     """Get the appropriate redirect URI based on environment."""
+    # Check for Railway or other production URL from environment
+    railway_url = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
+    production_url = os.getenv("PRODUCTION_URL")
+    
     if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https':
-        return "https://web-production-0b6ce.up.railway.app/google/oauth2callback"
+        # Use Railway domain if available, otherwise check production URL, else fallback
+        if railway_url:
+            # Railway provides domain without protocol, add it
+            base_url = railway_url if railway_url.startswith('http') else f"https://{railway_url}"
+            return f"{base_url}/google/oauth2callback"
+        elif production_url:
+            base_url = production_url if production_url.startswith('http') else f"https://{production_url}"
+            return f"{base_url}/google/oauth2callback"
+        else:
+            # Fallback to old hardcoded URL if env vars not set (backward compatibility)
+            return "https://web-production-0b6ce.up.railway.app/google/oauth2callback"
     return "http://localhost:10000/google/oauth2callback"
 
 

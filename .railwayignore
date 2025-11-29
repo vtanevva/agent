@@ -1,0 +1,49 @@
+# Railway ignore file - files to exclude from deployment
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+test_env/
+venv/
+env/
+ENV/
+
+# Environment files
+.env
+.env.local
+*.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+!README.md
+
+# Logs
+*.log
+
+# Node modules (if frontend is separate)
+node_modules/
+npm-debug.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Railway specific
+railway.json
+
+# Google secrets (should use environment variables instead)
+google_client_secret.json
+

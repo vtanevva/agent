@@ -19,28 +19,19 @@ RUN apt-get update && apt-get install -y curl git build-essential && \
 # ----------------------------
 # Python deps (layer-cached)
 # ----------------------------
-COPY requirements-render-simple.txt .
-RUN pip install --upgrade pip && pip install -r requirements-render-simple.txt
+COPY requirements.txt .
+RUN pip install --upgrade pip && pip install -r requirements.txt
 
 # ----------------------------
-# Frontend deps (layer-cached)
-# ----------------------------
-COPY my-chatbot/package*.json my-chatbot/
-WORKDIR /app/my-chatbot
-RUN npm ci || npm install
-
-# ----------------------------
-# Copy rest of source & build frontend
+# Copy application code
 # ----------------------------
 COPY . /app
-WORKDIR /app/my-chatbot
-RUN npm run build
 
 # ----------------------------
-# Final runtime - go back to root where server.py is
+# Final runtime - use dynamic PORT from Railway
 # ----------------------------
 WORKDIR /app
 
-# Use environment variable PORT for Railway compatibility
-# Support both server.py and server_minimal.py
-CMD gunicorn server:app --bind 0.0.0.0:10000 --workers 1 --timeout 120
+# Railway sets PORT environment variable automatically
+# Use PORT if set, otherwise default to 10000
+CMD sh -c 'gunicorn server:app --bind 0.0.0.0:${PORT:-10000} --workers 1 --timeout 120'
