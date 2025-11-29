@@ -13,7 +13,7 @@ Architecture:
 
 from typing import Tuple, Optional, Dict, Any, Literal, List
 
-from app.tools.calendar_manager import detect_calendar_requests
+from app.tools.calendar import detect_calendar_requests
 from app.utils.oauth_utils import require_google_auth
 from app.utils.logging_utils import get_logger
 

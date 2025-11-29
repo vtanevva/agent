@@ -11,10 +11,12 @@ import json
 import re
 from typing import Dict, Any, Optional, List
 
-from app.tools.gmail_list import list_recent_emails
-from app.tools.gmail_detail import get_thread_detail
-from app.tools.gmail_reply import reply_email
-from app.tools.gmail_mail import send_email
+from app.tools.email import (
+    list_recent_emails,
+    get_thread_detail,
+    reply_email,
+    send_email,
+)
 from app.utils.logging_utils import get_logger
 
 logger = get_logger(__name__)

@@ -51,17 +51,17 @@ from app.services.gmail_service import (
     send_new_email as gmail_send_new_email,
     rewrite_email_text as gmail_rewrite_email_text,
 )
-from app.services.contacts_service import (
-    sync_contacts as contacts_sync_service,
-    list_contacts as contacts_list_service,
-    normalize_contact_names as contacts_normalize_names_service,
-    archive_contact as contacts_archive_service,
-    update_contact as contacts_update_service,
-    list_contact_groups as contacts_groups_service,
-    get_contact_detail as contacts_detail_service,
-    get_contact_conversations as contacts_conversations_service,
+from app.tools.contacts import (
+    sync_contacts,
+    list_contacts,
+    normalize_contact_names,
+    archive_contact,
+    update_contact,
+    list_contact_groups,
+    get_contact_detail,
+    get_contact_conversations,
 )
-from app.tools.calendar_manager import (
+from app.tools.calendar import (
     detect_calendar_requests,
     parse_datetime_from_text,
     create_calendar_event,
@@ -76,14 +76,17 @@ from app.utils.oauth_utils import (
 from app.config import Config
 # Old AutoGen import removed - now using new GmailAgent via orchestrator
 # from app.agents.gmail_agent import run_gmail_autogen
-from app.tools.gmail_style import analyze_email_style, generate_reply_draft
-from app.tools.gmail_reply import reply_email as tool_reply_email
-from app.tools.gmail_detail import get_thread_detail
-from app.tools.email_classifier import classify_email
+from app.tools.email import (
+    analyze_email_style,
+    generate_reply_draft,
+    reply_email as tool_reply_email,
+    get_thread_detail,
+    classify_email,
+    send_email as tool_send_email,
+)
 from app.utils.oauth_utils import load_google_credentials
 from googleapiclient.errors import HttpError
 from googleapiclient.discovery import build
-from app.tools.gmail_mail import send_email as tool_send_email
 from email.utils import getaddresses
 
 # Import new blueprints
@@ -649,7 +652,8 @@ def contacts_sync():
     if auth_response:
         return auth_response
 
-    result = contacts_sync_service(user_id=user_id, max_sent=max_sent, force=force)
+    result_json = sync_contacts(user_id=user_id, max_sent=max_sent, force=force)
+    result = json.loads(result_json)
     status = 200 if result.get("success", True) else 500
     return jsonify(result), status
 
@@ -661,7 +665,8 @@ def contacts_list():
     user_id = (data.get("user_id") or "anonymous").strip().lower()
     include_archived = bool(data.get("include_archived", False))
 
-    result = contacts_list_service(user_id=user_id, include_archived=include_archived)
+    result_json = list_contacts(user_id=user_id, include_archived=include_archived)
+    result = json.loads(result_json)
     status = 200 if result.get("success", True) else 500
     return jsonify(result), status
 
@@ -857,7 +862,8 @@ def contacts_normalize_names():
     data = request.get_json(force=True, silent=True) or {}
     user_id = (data.get("user_id") or "anonymous").strip().lower()
 
-    result = contacts_normalize_names_service(user_id=user_id)
+    result_json = normalize_contact_names(user_id=user_id)
+    result = json.loads(result_json)
     status = 200 if result.get("success", True) else 500
     return jsonify(result), status
 
@@ -873,7 +879,8 @@ def contacts_archive():
     if not email:
         return jsonify({"success": False, "error": "Missing email"}), 400
 
-    result = contacts_archive_service(user_id=user_id, email=email, archived=archived)
+    result_json = archive_contact(user_id=user_id, email=email, archived=archived)
+    result = json.loads(result_json)
     status = 200 if result.get("success", True) else 500
     return jsonify(result), status
 
@@ -891,13 +898,14 @@ def contacts_update():
     if not email:
         return jsonify({"success": False, "error": "Missing email"}), 400
 
-    result = contacts_update_service(
+    result_json = update_contact(
         user_id=user_id,
         email=email,
         name=name,
         nickname=nickname,
         groups=groups,
     )
+    result = json.loads(result_json)
     if not result.get("success") and result.get("error") == "No fields to update":
         return jsonify(result), 400
     status = 200 if result.get("success", True) else 500
@@ -910,7 +918,8 @@ def contacts_groups():
     data = request.get_json(force=True, silent=True) or {}
     user_id = (data.get("user_id") or "anonymous").strip().lower()
 
-    result = contacts_groups_service(user_id=user_id)
+    result_json = list_contact_groups(user_id=user_id)
+    result = json.loads(result_json)
     status = 200 if result.get("success", True) else 500
     return jsonify(result), status
 
@@ -925,7 +934,8 @@ def contacts_detail():
     if not email:
         return jsonify({"success": False, "error": "Missing email"}), 400
 
-    result = contacts_detail_service(user_id=user_id, email=email)
+    result_json = get_contact_detail(user_id=user_id, email=email)
+    result = json.loads(result_json)
     if not result.get("success") and result.get("error") == "Contact not found":
         return jsonify(result), 404
     status = 200 if result.get("success", True) else 500
@@ -943,7 +953,8 @@ def contacts_conversations():
     if not email:
         return jsonify({"success": False, "error": "Missing email"}), 400
 
-    result = contacts_conversations_service(user_id=user_id, email=email, limit=limit)
+    result_json = get_contact_conversations(user_id=user_id, email=email, max_results=limit)
+    result = json.loads(result_json)
     if not result.get("success") and result.get("error") == "Contact not found":
         return jsonify(result), 404
     status = 200 if result.get("success", True) else 500
@@ -1313,12 +1324,14 @@ def calendar_events():
         return jsonify({"error": "Missing user_id"}), 400
 
     try:
-        result = list_calendar_events(
+        # New tools return JSON string, parse it
+        result_json = list_calendar_events(
             user_id=user_id,
             max_results=max_results,
-            time_min=time_min,
-            time_max=time_max
+            days_ahead=30,  # Use days_ahead instead of time_min/time_max
+            unified=True
         )
+        result = json.loads(result_json)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1340,7 +1353,8 @@ def create_calendar_event_endpoint():
         return jsonify({"error": "Missing required fields"}), 400
 
     try:
-        result = create_calendar_event(
+        # New tools return JSON string, parse it
+        result_json = create_calendar_event(
             user_id=user_id,
             summary=summary,
             start_time=start_time,
@@ -1349,6 +1363,7 @@ def create_calendar_event_endpoint():
             location=location,
             attendees=attendees
         )
+        result = json.loads(result_json)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500

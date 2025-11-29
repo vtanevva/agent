@@ -3,23 +3,20 @@ CalendarAgent - handles calendar-related requests.
 
 This agent:
 1. Detects calendar operations (list, create, update events)
-2. Calls calendar services (supports Google & Outlook)
+2. Calls calendar tools (which use services internally)
 3. Returns formatted responses
+
+Follows the same pattern as GmailAgent: Agent → Tool → Service
 """
 
 import json
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 
-# Use new unified calendar service
-from app.services.calendar import (
+# Use calendar tools (which wrap services)
+from app.tools.calendar import (
     list_calendar_events,
     create_calendar_event,
-    check_user_calendar_connections,
-)
-
-# Keep old tools for event parsing
-from app.tools.calendar_manager import (
     detect_calendar_requests,
     parse_datetime_from_text,
 )
@@ -81,15 +78,18 @@ class CalendarAgent:
             "my schedule", "upcoming events", "calendar events"
         ]):
             try:
-                # Fetch events from ALL connected calendars (Google + Outlook)
+                # Call calendar tool (which uses services internally)
                 logger.info(f"Fetching calendar events for user_id: {user_id}")
-                result = list_calendar_events(
+                
+                # Tool returns JSON string, parse it
+                result_json = list_calendar_events(
                     user_id=user_id,
                     unified=True,  # ⭐ Auto-fetches from all connected calendars
                     max_results=50,
-                    time_min=datetime.utcnow().isoformat() + "Z",
-                    time_max=(datetime.utcnow() + timedelta(days=30)).isoformat() + "Z"
+                    days_ahead=30
                 )
+                
+                result = json.loads(result_json)
                 
                 if not result.get("success"):
                     error_msg = result.get("error", "Unknown error")
@@ -118,16 +118,6 @@ class CalendarAgent:
                 
                 events = result.get("events", [])
                 logger.info(f"Successfully fetched {len(events)} events")
-                
-                # Check which calendars are connected based on events received
-                connections = check_user_calendar_connections(user_id)
-                
-                # Add provider info to result for UI
-                result["connections"] = {
-                    "google_connected": connections.get("google_connected", False),
-                    "outlook_connected": connections.get("outlook_connected", False),
-                    "default_provider": connections.get("default_provider", "google")
-                }
                 
                 # Return JSON for the calendar UI to display
                 return json.dumps(result)
@@ -158,7 +148,8 @@ class CalendarAgent:
                 
                 if start_time and end_time:
                     try:
-                        result = create_calendar_event(
+                        # Call calendar tool (which uses services internally)
+                        result_json = create_calendar_event(
                             user_id=user_id,
                             summary=calendar_request["description"],
                             start_time=start_time.isoformat(),
@@ -166,6 +157,8 @@ class CalendarAgent:
                             description=f"Event created from chat: {message}",
                             # Provider is auto-selected based on user's default
                         )
+                        
+                        result = json.loads(result_json)
                         
                         if result.get("success"):
                             provider = result.get("provider", "google")

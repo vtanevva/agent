@@ -16,7 +16,7 @@ from app.services.gmail_service import (
     send_new_email,
     rewrite_email_text,
 )
-from app.tools.gmail_style import analyze_email_style, generate_reply_draft
+from app.tools.email import analyze_email_style, generate_reply_draft
 from app.utils.oauth_utils import require_google_auth
 from app.db.collections import get_contacts_collection
 

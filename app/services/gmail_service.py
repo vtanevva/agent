@@ -8,12 +8,16 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from app.database import get_db
-from app.tools.email_classifier import classify_email, CLASSIFICATION_VERSION
-from app.tools.gmail_detail import get_thread_detail as tool_get_thread_detail
-from app.tools.gmail_detail import _extract_plain_text
-from app.tools.gmail_mail import send_email as tool_send_email
-from app.tools.gmail_reply import reply_email as tool_reply_email
-from app.tools.gmail_style import analyze_email_style, generate_reply_draft
+from app.tools.email import (
+    classify_email,
+    CLASSIFICATION_VERSION,
+    get_thread_detail as tool_get_thread_detail,
+    _extract_plain_text,
+    send_email as tool_send_email,
+    reply_email as tool_reply_email,
+    analyze_email_style,
+    generate_reply_draft,
+)
 from app.utils.oauth_utils import load_google_credentials
 
 
