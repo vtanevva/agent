@@ -1,26 +1,24 @@
 """
-CalendarAgent - handles calendar-related requests.
+CalendarAgent - handles calendar-related requests using LLM function calling.
 
 This agent:
-1. Detects calendar operations (list, create, update events)
-2. Calls calendar tools (which use services internally)
+1. Uses LLM with function calling to understand user intent
+2. LLM automatically calls calendar tools based on user request
 3. Returns formatted responses
 
-Follows the same pattern as GmailAgent: Agent → Tool → Service
+Uses OpenAI function calling pattern: LLM → Tools → Services
 """
 
 import json
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Use calendar tools (which wrap services)
 from app.tools.calendar import (
     list_calendar_events,
     create_calendar_event,
-    detect_calendar_requests,
-    parse_datetime_from_text,
 )
-
+from app.api.calendar_routes import _detect_calendar_intent, _extract_event_details
 from app.utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
@@ -30,7 +28,8 @@ class CalendarAgent:
     """
     Agent for handling calendar operations.
     
-    Directly calls calendar tools based on user intent.
+    Uses routing to detect intent, then calls tools directly (like GmailAgent pattern).
+    LLM is only used for parsing natural language dates when needed.
     """
     
     def __init__(self, llm_service, memory_service):
@@ -40,12 +39,13 @@ class CalendarAgent:
         Parameters
         ----------
         llm_service : LLMService
-            LLM service for text generation
+            LLM service for text generation (used for parsing dates)
         memory_service : MemoryService
             Memory service for conversation history
         """
         self.llm_service = llm_service
         self.memory_service = memory_service
+    
     
     def handle_chat(
         self,
@@ -54,7 +54,10 @@ class CalendarAgent:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
-        Handle a calendar-related chat message.
+        Handle a calendar-related chat message using routing.
+        
+        Uses routing to detect intent, then calls tools directly.
+        LLM is only used for parsing natural language dates when creating events.
         
         Parameters
         ----------
@@ -70,21 +73,17 @@ class CalendarAgent:
         str
             Response (may be JSON for UI to parse)
         """
-        lower = message.lower()
+        intent = _detect_calendar_intent(message)
+        logger.info(f"CalendarAgent detected intent: {intent} for message: {message[:50]}")
         
-        # Check if user wants to list events
-        if any(phrase in lower for phrase in [
-            "show my calendar", "list events", "what's on my calendar",
-            "my schedule", "upcoming events", "calendar events"
-        ]):
+        if intent == "list":
+            # List calendar events
             try:
-                # Call calendar tool (which uses services internally)
-                logger.info(f"Fetching calendar events for user_id: {user_id}")
+                logger.info(f"Listing calendar events for user_id: {user_id}")
                 
-                # Tool returns JSON string, parse it
                 result_json = list_calendar_events(
                     user_id=user_id,
-                    unified=True,  # ⭐ Auto-fetches from all connected calendars
+                    unified=True,  # Fetch from all connected calendars
                     max_results=50,
                     days_ahead=30
                 )
@@ -109,7 +108,6 @@ class CalendarAgent:
                     else:
                         user_message = f"Failed to retrieve calendar events: {error_msg}"
                     
-                    # Return JSON for UI to handle
                     return json.dumps({
                         "success": False,
                         "error": error_msg,
@@ -130,62 +128,88 @@ class CalendarAgent:
                     "message": "Failed to retrieve calendar events. Please try again later."
                 })
         
-        # Try to detect and create calendar events
-        try:
-            calendar_requests = detect_calendar_requests(message) or []
-        except Exception as e:
-            logger.error(f"Error detecting calendar requests: {e}", exc_info=True)
-            calendar_requests = []
-        
-        if calendar_requests:
-            # Create events
-            created_events = []
-            for calendar_request in calendar_requests:
-                try:
-                    start_time, end_time = parse_datetime_from_text(calendar_request["full_match"])
-                except Exception:
-                    start_time, end_time = None, None
+        elif intent == "create":
+            # Create calendar event
+            try:
+                logger.info(f"Creating calendar event for user_id: {user_id}")
                 
-                if start_time and end_time:
+                # Extract event details using LLM
+                event_details = _extract_event_details(message, self.llm_service)
+                
+                if not event_details.get("summary") or not event_details.get("start_time"):
+                    # Fallback: try to parse using detect_requests
+                    from app.tools.calendar.detect_requests import detect_calendar_requests, parse_datetime_from_text
+                    
+                    calendar_requests = detect_calendar_requests(message) or []
+                    if calendar_requests:
+                        calendar_request = calendar_requests[0]
+                        start_time, end_time = parse_datetime_from_text(calendar_request["full_match"])
+                        
+                        if start_time and end_time:
+                            # Ensure timezone-aware
+                            if start_time.tzinfo is None:
+                                start_time = start_time.replace(tzinfo=timezone.utc)
+                            if end_time.tzinfo is None:
+                                end_time = end_time.replace(tzinfo=timezone.utc)
+                            
+                            event_details = {
+                                "summary": calendar_request["description"],
+                                "start_time": start_time.isoformat(),
+                                "end_time": end_time.isoformat(),
+                                "natural_language": message
+                            }
+                        else:
+                            return "❌ I couldn't parse the date/time from your message. Try: 'tomorrow at 2pm' or 'next Monday at 9am'"
+                    else:
+                        return "❌ I couldn't understand what event you want to create. Please specify the event title and time."
+                
+                # Call create_calendar_event tool
+                result_json = create_calendar_event(
+                    user_id=user_id,
+                    summary=event_details.get("summary", ""),
+                    start_time=event_details.get("start_time", ""),
+                    end_time=event_details.get("end_time"),
+                    description=event_details.get("description", ""),
+                    location=event_details.get("location", ""),
+                    attendees=event_details.get("attendees", []),
+                    provider=event_details.get("provider"),
+                    natural_language=message,  # Always pass original message
+                )
+                
+                result = json.loads(result_json)
+                
+                if result.get("success"):
+                    provider = result.get("provider", "google")
+                    provider_icon = "🔵" if provider == "google" else "🟠"
+                    
+                    # Parse start_time for display
                     try:
-                        # Call calendar tool (which uses services internally)
-                        result_json = create_calendar_event(
-                            user_id=user_id,
-                            summary=calendar_request["description"],
-                            start_time=start_time.isoformat(),
-                            end_time=end_time.isoformat(),
-                            description=f"Event created from chat: {message}",
-                            # Provider is auto-selected based on user's default
-                        )
-                        
-                        result = json.loads(result_json)
-                        
-                        if result.get("success"):
-                            provider = result.get("provider", "google")
-                            provider_icon = "🔵" if provider == "google" else "🟠"
-                            created_events.append({
-                                "description": calendar_request["description"],
-                                "start": start_time.strftime('%B %d at %I:%M %p'),
-                                "provider": provider,
-                                "provider_icon": provider_icon
-                            })
-                    except Exception as e:
-                        logger.error(f"Error creating calendar event: {e}", exc_info=True)
-            
-            if created_events:
-                # Format success message with provider info
-                if len(created_events) == 1:
-                    evt = created_events[0]
-                    return f"✅ {evt['provider_icon']} I've scheduled '{evt['description']}' for {evt['start']} on your {evt['provider'].title()} Calendar!"
+                        from datetime import datetime
+                        if isinstance(event_details.get("start_time"), str):
+                            if "T" in event_details["start_time"]:
+                                start_dt = datetime.fromisoformat(event_details["start_time"].replace("Z", "+00:00"))
+                            else:
+                                # Natural language, try parsing
+                                from app.tools.calendar.detect_requests import parse_datetime_from_text
+                                start_dt, _ = parse_datetime_from_text(event_details["start_time"])
+                                if not start_dt:
+                                    start_dt = datetime.now()
+                            display_time = start_dt.strftime('%B %d at %I:%M %p')
+                        else:
+                            display_time = "the scheduled time"
+                    except:
+                        display_time = "the scheduled time"
+                    
+                    return f"✅ {provider_icon} I've scheduled '{event_details.get('summary')}' for {display_time} on your {provider.title()} Calendar!"
                 else:
-                    event_list = "\n".join([
-                        f"{evt['provider_icon']} {evt['description']} on {evt['start']} ({evt['provider'].title()})"
-                        for evt in created_events
-                    ])
-                    return f"✅ I've scheduled {len(created_events)} events:\n{event_list}"
-            else:
-                return "❌ Sorry, I couldn't schedule the event. Please make sure you have at least one calendar connected."
+                    error_msg = result.get("error", "Unknown error")
+                    return f"❌ Failed to create calendar event: {error_msg}"
+                    
+            except Exception as e:
+                logger.error(f"Error creating calendar event: {e}", exc_info=True)
+                return f"❌ I encountered an error creating the event: {str(e)}. Please try again."
         
-        # No calendar events detected - provide helpful response
-        return "I can help you with your calendar. Try asking me to:\n- Show my calendar\n- Schedule a meeting tomorrow at 2pm\n- Create an event for next Monday"
+        else:
+            # Unknown intent
+            return "I can help you with your calendar. Try asking me to:\n- Show my calendar\n- Schedule a meeting tomorrow at 2pm\n- Create an event for next Monday"
 

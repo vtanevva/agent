@@ -61,12 +61,7 @@ from app.tools.contacts import (
     get_contact_detail,
     get_contact_conversations,
 )
-from app.tools.calendar import (
-    detect_calendar_requests,
-    parse_datetime_from_text,
-    create_calendar_event,
-    list_calendar_events,
-)
+# Calendar tools moved to app/api/calendar_routes.py
 from app.db.collections import get_conversations_collection, get_tokens_collection, get_contacts_collection
 from app.utils.oauth_utils import (
     load_google_credentials, save_google_credentials, get_gmail_profile,
@@ -93,6 +88,7 @@ from email.utils import getaddresses
 from app.api.chat_routes import chat_bp
 from app.api.gmail_routes import gmail_bp
 from app.api.contacts_routes import contacts_bp
+from app.api.calendar_routes import calendar_bp
 
 # Environment setup
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -127,8 +123,9 @@ def create_app():
     app.register_blueprint(chat_bp)
     app.register_blueprint(gmail_bp)
     app.register_blueprint(contacts_bp)
+    app.register_blueprint(calendar_bp)
     
-    print("[INIT] ✅ Registered API blueprints: chat, gmail, contacts")
+    print("[INIT] ✅ Registered API blueprints: chat, gmail, contacts, calendar")
     
     return app
 
@@ -1311,62 +1308,7 @@ def session_chat():
     return jsonify({"chat": entry.get("messages", []) if entry else []})
 
 
-@app.route("/api/calendar/events", methods=["POST"])
-def calendar_events():
-    """Get calendar events for a user."""
-    data = request.get_json(force=True, silent=True) or {}
-    user_id = data.get("user_id")
-    max_results = data.get("max_results", 10)
-    time_min = data.get("time_min")
-    time_max = data.get("time_max")
-
-    if not user_id:
-        return jsonify({"error": "Missing user_id"}), 400
-
-    try:
-        # New tools return JSON string, parse it
-        result_json = list_calendar_events(
-            user_id=user_id,
-            max_results=max_results,
-            days_ahead=30,  # Use days_ahead instead of time_min/time_max
-            unified=True
-        )
-        result = json.loads(result_json)
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/calendar/create", methods=["POST"])
-def create_calendar_event_endpoint():
-    """Create a calendar event."""
-    data = request.get_json(force=True, silent=True) or {}
-    user_id = data.get("user_id")
-    summary = data.get("summary")
-    start_time = data.get("start_time")
-    end_time = data.get("end_time")
-    description = data.get("description", "")
-    location = data.get("location", "")
-    attendees = data.get("attendees", [])
-
-    if not all([user_id, summary, start_time, end_time]):
-        return jsonify({"error": "Missing required fields"}), 400
-
-    try:
-        # New tools return JSON string, parse it
-        result_json = create_calendar_event(
-            user_id=user_id,
-            summary=summary,
-            start_time=start_time,
-            end_time=end_time,
-            description=description,
-            location=location,
-            attendees=attendees
-        )
-        result = json.loads(result_json)
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+# Calendar routes moved to app/api/calendar_routes.py
 
 
 @app.route("/api/save-session-name", methods=["POST"])
