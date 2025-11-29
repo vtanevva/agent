@@ -15,7 +15,7 @@ if (Platform.OS !== 'web') {
   }
 }
 
-export default function InputBar({input, setInput, loading, onSend, showConnectButton, onConnect, onImageSelect}) {
+export default function InputBar({input, setInput, loading, onSend, showConnectButton, onConnect, onImageSelect, userId}) {
   const [selectedImages, setSelectedImages] = useState([]);
   // Request image picker permissions
   useEffect(() => {
@@ -168,7 +168,7 @@ export default function InputBar({input, setInput, loading, onSend, showConnectB
     try {
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('user_id', 'anonymous'); // Will be set by parent
+      formData.append('user_id', userId || 'anonymous'); // Use provided userId or fallback
 
       const response = await fetch(`${API_BASE_URL}/api/files/upload`, {
         method: 'POST',

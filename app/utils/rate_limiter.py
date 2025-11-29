@@ -90,6 +90,63 @@ def check_rate_limit(key: str, max_requests: int = 10, window_seconds: int = 60)
         return wrapper
     return decorator
 
+
+def enforce_rate_limit(
+    key: str,
+    max_requests: int = 30,
+    window_seconds: int = 60,
+    endpoint_name: str = "endpoint"
+) -> None:
+    """
+    Enforce rate limit and raise exception if exceeded.
+    Use this inside Flask route handlers.
+    
+    Args:
+        key: Rate limit key (user_id or IP address)
+        max_requests: Maximum requests allowed in window
+        window_seconds: Time window in seconds
+        endpoint_name: Name of endpoint for logging
+        
+    Raises:
+        RateLimitExceeded: If rate limit is exceeded
+    """
+    if not rate_limiter.is_allowed(key, max_requests, window_seconds):
+        remaining = rate_limiter.get_remaining(key, max_requests, window_seconds)
+        logger.warning(
+            f"Rate limit exceeded for {endpoint_name}: key={key}, "
+            f"limit={max_requests}/{window_seconds}s, remaining={remaining}"
+        )
+        raise RateLimitExceeded(
+            f"Rate limit exceeded. Maximum {max_requests} requests per {window_seconds} seconds. "
+            f"Please wait before trying again."
+        )
+
+
+def get_rate_limit_key(request, user_id: Optional[str] = None) -> str:
+    """
+    Get rate limit key from request (user_id or IP address).
+    
+    Args:
+        request: Flask request object
+        user_id: Optional user_id from request data
+        
+    Returns:
+        Rate limit key (user_id if available, otherwise IP address)
+    """
+    # Prefer user_id if provided
+    if user_id and user_id != "anonymous":
+        return f"user:{user_id}"
+    
+    # Fall back to IP address
+    # Check for forwarded IP (from proxy/load balancer)
+    ip = (
+        request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or
+        request.headers.get("X-Real-IP", "") or
+        request.remote_addr or
+        "unknown"
+    )
+    return f"ip:{ip}"
+
 def get_rate_limit_headers(key: str, max_requests: int, window_seconds: int) -> Dict[str, str]:
     """Get rate limit headers for API response"""
     remaining = rate_limiter.get_remaining(key, max_requests, window_seconds)

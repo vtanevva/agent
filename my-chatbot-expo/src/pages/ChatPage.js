@@ -707,6 +707,7 @@ export default function ChatPage() {
             onSend={handleSend}
             showConnectButton={false}
             onConnect={() => {}}
+            userId={userId}
             onImageSelect={setSelectedImages}
           />
         </View>

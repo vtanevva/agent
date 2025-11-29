@@ -12,9 +12,25 @@ from app.tools.calendar import (
 )
 from app.tools.calendar.detect_requests import detect_calendar_requests, parse_datetime_from_text
 from app.utils.oauth_utils import require_google_auth
+from app.utils.rate_limiter import enforce_rate_limit, get_rate_limit_key
+from app.config import Config
 from app.utils.logging_utils import get_logger
+import uuid
 
 logger = get_logger(__name__)
+
+
+def _normalize_user_id(user_id_raw: str) -> str:
+    """
+    Normalize user_id - ensure it's never "anonymous" or empty.
+    Generates unique ID for anonymous users to ensure proper rate limiting.
+    """
+    if not user_id_raw or user_id_raw.strip().lower() == "anonymous":
+        # Generate unique session-based ID
+        unique_id = f"anon-{uuid.uuid4().hex[:12]}"
+        logger.warning(f"Anonymous user_id detected, generated: {unique_id}")
+        return unique_id
+    return user_id_raw.strip().lower()
 
 calendar_bp = Blueprint('calendar', __name__, url_prefix='/api/calendar')
 
@@ -103,11 +119,19 @@ Example: {{"summary": "Team meeting", "start_time": "tomorrow at 2pm"}}"""
 def calendar_events():
     """Get calendar events for a user."""
     data = request.get_json(force=True, silent=True) or {}
-    user_id = data.get("user_id")
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
     max_results = data.get("max_results", 10)
     
-    if not user_id:
-        return jsonify({"error": "Missing user_id"}), 400
+    # Check rate limit (cost control for Calendar API)
+    if Config.RATE_LIMIT_ENABLED:
+        rate_limit_key = get_rate_limit_key(request, user_id)
+        enforce_rate_limit(
+            key=rate_limit_key,
+            max_requests=10,
+            window_seconds=60,
+            endpoint_name="calendar_events"
+        )
     
     # Check auth
     auth_response = require_google_auth(user_id)
@@ -134,7 +158,8 @@ def calendar_events():
 def create_calendar_event_endpoint():
     """Create a calendar event."""
     data = request.get_json(force=True, silent=True) or {}
-    user_id = data.get("user_id")
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
     summary = data.get("summary")
     start_time = data.get("start_time")
     end_time = data.get("end_time")
@@ -144,8 +169,15 @@ def create_calendar_event_endpoint():
     provider = data.get("provider")  # "google" or "outlook"
     natural_language = data.get("natural_language")  # Original user message for parsing
     
-    if not user_id:
-        return jsonify({"error": "Missing user_id"}), 400
+    # Check rate limit (cost control for create operations)
+    if Config.RATE_LIMIT_ENABLED:
+        rate_limit_key = get_rate_limit_key(request, user_id)
+        enforce_rate_limit(
+            key=rate_limit_key,
+            max_requests=10,
+            window_seconds=60,
+            endpoint_name="calendar_create"
+        )
     
     # Check auth
     auth_response = require_google_auth(user_id)

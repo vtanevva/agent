@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify
 from app.services.gmail_service import (
     get_thread_detail,
     reply_to_thread,
+    forward_thread,
     archive_thread,
     mark_thread_handled,
     list_threads,
@@ -16,11 +17,46 @@ from app.services.gmail_service import (
     send_new_email,
     rewrite_email_text,
 )
-from app.tools.email import analyze_email_style, generate_reply_draft
+from app.tools.email import analyze_email_style, generate_reply_draft, generate_forward_draft
 from app.utils.oauth_utils import require_google_auth
+from app.utils.rate_limiter import enforce_rate_limit, get_rate_limit_key
+from app.utils.logging_utils import get_logger
+from app.config import Config
 from app.db.collections import get_contacts_collection
 
+logger = get_logger(__name__)
+
 gmail_bp = Blueprint('gmail', __name__, url_prefix='/api/gmail')
+
+
+def _normalize_user_id(user_id_raw: str) -> str:
+    """
+    Normalize user_id - ensure it's never "anonymous" or empty.
+    Generates unique ID for anonymous users to ensure proper rate limiting.
+    """
+    if not user_id_raw or user_id_raw.strip().lower() == "anonymous":
+        import uuid
+        # Generate unique session-based ID
+        unique_id = f"anon-{uuid.uuid4().hex[:12]}"
+        logger.warning(f"Anonymous user_id detected, generated: {unique_id}")
+        return unique_id
+    return user_id_raw.strip().lower()
+
+
+def _check_gmail_rate_limit(user_id: str):
+    """Helper to check rate limit for Gmail endpoints."""
+    if Config.RATE_LIMIT_ENABLED:
+        from flask import request
+        # Normalize user_id first
+        normalized_user_id = _normalize_user_id(user_id)
+        rate_limit_key = get_rate_limit_key(request, normalized_user_id)
+        # Gmail endpoints: 10 requests per minute (cost control for Gmail API)
+        enforce_rate_limit(
+            key=rate_limit_key,
+            max_requests=10,
+            window_seconds=60,
+            endpoint_name="gmail"
+        )
 
 
 def _lookup_contact_email(user_id: str, name_or_email: str) -> str:
@@ -69,9 +105,13 @@ def _lookup_contact_email(user_id: str, name_or_email: str) -> str:
 def gmail_list_threads():
     """List Gmail threads for a given label (default INBOX)."""
     data = request.get_json(force=True, silent=True) or {}
-    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
     label = (data.get("label") or "INBOX").strip()
     max_results = int(data.get("max_results", 50))
+
+    # Check rate limit
+    _check_gmail_rate_limit(user_id)
 
     auth_response = require_google_auth(user_id)
     if auth_response:
@@ -90,12 +130,16 @@ def gmail_list_threads():
 def gmail_search_threads():
     """Search Gmail messages and return unique threads for a query."""
     data = request.get_json(force=True, silent=True) or {}
-    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
     query = (data.get("query") or "").strip()
     max_results = int(data.get("max_results", 20))
 
     if not query:
         return jsonify({"success": False, "error": "Missing query"}), 400
+
+    # Check rate limit
+    _check_gmail_rate_limit(user_id)
 
     auth_response = require_google_auth(user_id)
     if auth_response:
@@ -114,7 +158,8 @@ def gmail_search_threads():
 def gmail_thread_detail():
     """Return full plain-text content and headers for the selected email/thread."""
     data = request.get_json(force=True, silent=True) or {}
-    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
     thread_id = data.get("thread_id")
     if not thread_id:
         return jsonify({"success": False, "error": "Missing thread_id"}), 400
@@ -135,13 +180,26 @@ def gmail_thread_detail():
 def gmail_send_new():
     """Send a new email (compose)."""
     data = request.get_json(force=True, silent=True) or {}
-    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
     to = data.get("to")
     subject = data.get("subject") or "(No subject)"
     body = data.get("body") or ""
 
     if not to or not body:
         return jsonify({"success": False, "error": "Missing 'to' or 'body'"}), 400
+
+    # Check rate limit (cost control for send operations)
+    if Config.RATE_LIMIT_ENABLED:
+        from flask import request
+        rate_limit_key = get_rate_limit_key(request, user_id)
+        # Send operations: 10 per minute (cost control)
+        enforce_rate_limit(
+            key=rate_limit_key,
+            max_requests=10,
+            window_seconds=60,
+            endpoint_name="gmail_send"
+        )
 
     # Look up contact if needed
     to = _lookup_contact_email(user_id, to)
@@ -164,7 +222,8 @@ def gmail_send_new():
 def gmail_reply_send():
     """Send a reply inside a Gmail thread with a provided body."""
     data = request.get_json(force=True, silent=True) or {}
-    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
     thread_id = data.get("thread_id")
     to = data.get("to")
     body = data.get("body") or ""
@@ -188,11 +247,51 @@ def gmail_reply_send():
     return jsonify(result), status
 
 
+@gmail_bp.route("/forward", methods=["POST"])
+def gmail_forward_send():
+    """Forward a Gmail thread to another recipient."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
+    thread_id = data.get("thread_id")
+    to = data.get("to")
+    body = data.get("body") or ""
+    subj_prefix = data.get("subj_prefix", "Fwd:")
+
+    if not all([thread_id, to]):
+        return jsonify({"success": False, "error": "Missing thread_id or to"}), 400
+
+    # Check rate limit (stricter for forward operations)
+    if Config.RATE_LIMIT_ENABLED:
+        rate_limit_key = get_rate_limit_key(request, user_id)
+        enforce_rate_limit(
+            key=rate_limit_key,
+            max_requests=10,
+            window_seconds=60,
+            endpoint_name="gmail_forward"
+        )
+
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    result = forward_thread(
+        user_id=user_id,
+        thread_id=thread_id,
+        to=to,
+        body=body,
+        subj_prefix=subj_prefix
+    )
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
+
+
 @gmail_bp.route("/archive", methods=["POST"])
 def gmail_archive_thread():
     """Archive a Gmail thread by removing it from the INBOX."""
     data = request.get_json(force=True, silent=True) or {}
-    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
     thread_id = data.get("thread_id")
     if not thread_id:
         return jsonify({"success": False, "error": "Missing thread_id"}), 400
@@ -213,7 +312,8 @@ def gmail_archive_thread():
 def gmail_mark_handled():
     """Apply a 'Handled' label to a thread and mark it as read."""
     data = request.get_json(force=True, silent=True) or {}
-    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
     thread_id = data.get("thread_id")
     if not thread_id:
         return jsonify({"success": False, "error": "Missing thread_id"}), 400
@@ -234,7 +334,8 @@ def gmail_mark_handled():
 def gmail_classify_email():
     """Classify a single email using the Smart Inbox Triage system."""
     data = request.get_json(force=True, silent=True) or {}
-    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
     
     # Email data can come from request or be fetched by thread_id
     thread_id = data.get("thread_id")
@@ -261,7 +362,8 @@ def gmail_classify_email():
 def gmail_triaged_inbox():
     """Get triaged inbox with emails categorized by priority."""
     data = request.get_json(force=True, silent=True) or {}
-    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
     max_results = int(data.get("max_results", 50))
     category_filter = data.get("category")  # Optional: filter by specific category
 
@@ -282,7 +384,8 @@ def gmail_triaged_inbox():
 def gmail_classify_background():
     """Trigger background classification for unclassified emails. Returns immediately."""
     data = request.get_json(force=True, silent=True) or {}
-    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
     max_emails = int(data.get("max_emails", 20))
 
     auth_response = require_google_auth(user_id)
@@ -301,7 +404,8 @@ def gmail_classify_background():
 def gmail_analyze_style():
     """Analyze user's email writing style from Sent messages."""
     data = request.get_json(force=True, silent=True) or {}
-    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
     max_samples = int(data.get("max_samples", 10))
 
     auth_response = require_google_auth(user_id)
@@ -324,7 +428,8 @@ def gmail_analyze_style():
 def gmail_draft_reply():
     """Generate a reply draft for a given thread, emulating user's style."""
     data = request.get_json(force=True, silent=True) or {}
-    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
     thread_id = data.get("thread_id")
     to = data.get("to")
     user_points = data.get("user_points") or ""
@@ -359,11 +464,45 @@ def gmail_draft_reply():
         return jsonify({"success": False, "error": f"Failed to generate draft: {str(e)}"}), 500
 
 
+@gmail_bp.route("/draft-forward", methods=["POST"])
+def gmail_draft_forward():
+    """Generate a forward draft for a given thread, emulating user's style."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
+    thread_id = data.get("thread_id")
+    to = data.get("to") or ""
+    user_points = data.get("user_points") or ""
+    max_samples = int(data.get("max_samples", 10))
+
+    if not thread_id:
+        return jsonify({"success": False, "error": "Missing thread_id"}), 400
+
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    try:
+        result = generate_forward_draft(
+            user_id=user_id,
+            thread_id=thread_id,
+            to=to,
+            user_points=user_points,
+            max_samples=max_samples
+        )
+        result_dict = json.loads(result) if isinstance(result, str) else result
+        return jsonify(result_dict)
+    except Exception as e:
+        print(f"[ERROR] Forward draft generation failed: {e}", flush=True)
+        return jsonify({"success": False, "error": f"Failed to generate forward draft: {str(e)}"}), 500
+
+
 @gmail_bp.route("/rewrite", methods=["POST"])
 def gmail_rewrite_text():
     """Rewrite a user-provided text more politely/clearly."""
     data = request.get_json(force=True, silent=True) or {}
-    user_id = (data.get("user_id") or "anonymous").strip().lower()
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
     text = (data.get("text") or "").strip()
     tone = (data.get("tone") or "polite and professional").strip()
     include_signature = bool(data.get("include_signature", False))

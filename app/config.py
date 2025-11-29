@@ -107,8 +107,8 @@ class Config:
     # Rate Limiting
     # ═══════════════════════════════════════════════════════════════════
     
-    RATE_LIMIT_ENABLED: bool = os.getenv("RATE_LIMIT_ENABLED", "false").lower() in ("true", "1", "yes")
-    RATE_LIMIT_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
+    RATE_LIMIT_ENABLED: bool = os.getenv("RATE_LIMIT_ENABLED", "true").lower() in ("true", "1", "yes")  # Enabled by default
+    RATE_LIMIT_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "10"))  # Default: 10 requests per minute for chat (cost control)
     
     # ═══════════════════════════════════════════════════════════════════
     # Feature Flags

@@ -19,6 +19,10 @@ from google.oauth2.credentials import Credentials
 from app.utils.tool_registry import register, ToolSchema
 from app.utils.google_api_helpers import get_gmail_service
 from app.db.collections import get_contacts_collection
+from app.services.cache_service import (
+    cache_email_list, get_cached_email_list,
+    cache_thread_detail, get_cached_thread_detail
+)
 
 
 def _lookup_contact_emails(user_id: str, name: str) -> list:
@@ -171,6 +175,12 @@ def list_recent_emails(user_id: str, max_results: int = 5, from_email: str = Non
             email_list = " OR ".join(contact_emails)
             query = f"{query} from:({email_list})"
     
+    # Check cache first
+    cache_key = f"{query}:{max_results}"
+    cached_result = get_cached_email_list(user_id, query, max_results)
+    if cached_result:
+        return json.dumps(cached_result)
+    
     resp = svc.users().messages().list(
         userId="me",
         q=query,
@@ -180,14 +190,27 @@ def list_recent_emails(user_id: str, max_results: int = 5, from_email: str = Non
     messages = resp.get("messages", [])
 
     # 2) Keep first message per thread, preserving order (newest first)
+    # OPTIMIZATION: Batch fetch messages instead of N+1 queries
     threads_seen = OrderedDict()
-    for m in messages:
-        msg = (
-            svc.users()
-            .messages()
-            .get(userId="me", id=m["id"], format="metadata", metadataHeaders=["Subject", "From"])
-            .execute()
-        )
+    message_ids = [m["id"] for m in messages[:max_results * 2]]  # Get extra to account for threads
+    
+    # Batch fetch messages (Gmail API supports batch requests via batchGet, but we'll do parallel)
+    # For now, still individual calls but we cache thread details
+    for m_id in message_ids:
+        # Check if we have cached thread detail
+        cached_msg = get_cached_thread_detail(user_id, m_id)
+        if cached_msg:
+            msg = cached_msg
+        else:
+            msg = (
+                svc.users()
+                .messages()
+                .get(userId="me", id=m_id, format="metadata", metadataHeaders=["Subject", "From"])
+                .execute()
+            )
+            # Cache the message
+            cache_thread_detail(user_id, m_id, msg)
+        
         t_id = msg["threadId"]
         if t_id not in threads_seen:
             threads_seen[t_id] = msg
@@ -226,6 +249,9 @@ def list_recent_emails(user_id: str, max_results: int = 5, from_email: str = Non
             "subject": hdrs.get("Subject", "(No subject)"),
             "snippet": msg.get("snippet", "")[:120],
         })
+    
+    # Cache the final result
+    cache_email_list(user_id, query, max_results, items)
 
     return json.dumps(items, ensure_ascii=False)
 

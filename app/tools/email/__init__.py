@@ -8,7 +8,7 @@ from .list import list_recent_emails
 from .detail import get_thread_detail, _extract_plain_text
 from .reply import reply_email
 from .send import send_email
-from .style import analyze_email_style, generate_reply_draft
+from .style import analyze_email_style, generate_reply_draft, generate_forward_draft
 from .classifier import classify_email, CLASSIFICATION_VERSION
 
 __all__ = [
@@ -19,6 +19,7 @@ __all__ = [
     "send_email",
     "analyze_email_style",
     "generate_reply_draft",
+    "generate_forward_draft",
     "classify_email",
     "CLASSIFICATION_VERSION",
 ]

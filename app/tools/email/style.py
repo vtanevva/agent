@@ -13,6 +13,7 @@ from googleapiclient.discovery import build
 from app.utils.tool_registry import register, ToolSchema
 from app.utils import oauth_utils
 from app.utils.google_api_helpers import get_gmail_service
+from app.services.cache_service import cache_email_style, get_cached_email_style
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -142,15 +143,22 @@ def analyze_email_style(user_id: str, max_samples: int = 10, force_refresh: bool
     str
         JSON string with success status and profile data
     """
-    # Check cache first (unless force_refresh is True)
-    if not force_refresh and user_id in _STYLE_CACHE:
-        cached = _STYLE_CACHE[user_id]
-        cache_time = cached.get("timestamp")
-        if cache_time:
-            age = datetime.now() - cache_time
-            if age < timedelta(hours=CACHE_EXPIRY_HOURS):
-                print(f"[CACHE HIT] Using cached style for {user_id} (age: {age.seconds // 3600}h)")
-                return json.dumps({"success": True, "profile": cached.get("profile", {}), "cached": True})
+    # Check MongoDB cache first (persists across restarts)
+    if not force_refresh:
+        cached_profile = get_cached_email_style(user_id)
+        if cached_profile:
+            print(f"[CACHE HIT] Using MongoDB cached style for {user_id}")
+            return json.dumps({"success": True, "profile": cached_profile, "cached": True})
+        
+        # Fallback to in-memory cache
+        if user_id in _STYLE_CACHE:
+            cached = _STYLE_CACHE[user_id]
+            cache_time = cached.get("timestamp")
+            if cache_time:
+                age = datetime.now() - cache_time
+                if age < timedelta(hours=CACHE_EXPIRY_HOURS):
+                    print(f"[CACHE HIT] Using in-memory cached style for {user_id} (age: {age.seconds // 3600}h)")
+                    return json.dumps({"success": True, "profile": cached.get("profile", {}), "cached": True})
     
     print(f"[CACHE MISS] Fetching fresh style analysis for {user_id}")
     
@@ -198,7 +206,8 @@ def analyze_email_style(user_id: str, max_samples: int = 10, force_refresh: bool
         # Validate JSON
         profile = json.loads(content)
         
-        # Cache the result
+        # Cache the result in both MongoDB (persistent) and in-memory (fast)
+        cache_email_style(user_id, profile)  # MongoDB cache
         _STYLE_CACHE[user_id] = {
             "profile": profile,
             "timestamp": datetime.now(),
@@ -424,6 +433,91 @@ def generate_reply_draft(
             model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
             messages=[{"role": "system", "content": sys}, {"role": "user", "content": prompt}],
             temperature=0.2,
+        )
+        body = resp.choices[0].message.content or ""
+        return json.dumps({"success": True, "to": to, "thread_id": thread_id, "body": body})
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)})
+
+
+def generate_forward_draft(
+    user_id: str,
+    thread_id: str,
+    to: str = "",
+    user_points: Optional[str] = None,
+    max_samples: int = 10,
+) -> str:
+    """Generate a forward draft for a given thread, emulating the user's style."""
+    # Style
+    style_raw = analyze_email_style(user_id=user_id, max_samples=max_samples)
+    try:
+        style_data = json.loads(style_raw)
+        style_profile = style_data.get("profile", {})
+    except Exception:
+        style_profile = {}
+    
+    # Context
+    try:
+        ctx = _fetch_thread_context(user_id, thread_id)
+    except Exception as e:
+        return json.dumps({"success": False, "error": f"Failed to load thread: {e}"})
+
+    sys = "You are an assistant that drafts Gmail forward messages in the user's personal style."
+    style_desc = json.dumps(style_profile, ensure_ascii=False)
+    user_points = user_points or ""
+    
+    # Extract first name from user's Gmail email for signature
+    user_first_name = ""
+    try:
+        svc = get_gmail_service(user_id)
+        profile = svc.users().getProfile(userId="me").execute()
+        user_email = profile.get("emailAddress", "")
+        
+        if user_email and "@" in user_email:
+            email_local = user_email.split("@")[0]
+            user_first_name = email_local.split(".")[0].split("_")[0].capitalize()
+    except Exception:
+        pass
+    
+    # Extract specific style elements
+    closing_phrase = style_profile.get("closing_phrase", "")
+    greeting_style = style_profile.get("greeting_style", "")
+    
+    # Build style instruction
+    style_instruction = "\n\nSTYLE REQUIREMENTS (MUST FOLLOW EXACTLY):\n"
+    
+    if greeting_style and greeting_style.lower() != "none":
+        style_instruction += f"- Start with greeting: '{greeting_style}'\n"
+    
+    # Closing and signature
+    if closing_phrase and closing_phrase.lower() != "none" and user_first_name:
+        closing_with_comma = closing_phrase if closing_phrase.endswith(',') else f"{closing_phrase},"
+        style_instruction += f"- CRITICAL: End with EXACTLY this closing phrase WITH A COMMA: '{closing_with_comma}'\n"
+        style_instruction += f"- Then on a new line, sign with ONLY: '{user_first_name}'\n"
+    elif user_first_name:
+        style_instruction += f"- End with the first name '{user_first_name}' on its own line.\n"
+    
+    prompt = (
+        f"Subject: {ctx.get('subject','(No subject)')}\n"
+        f"Original message snippet: {ctx.get('context','')[:500]}\n\n"
+        f"User style profile (JSON): {style_desc}\n\n"
+        f"User's points to include (optional): {user_points}\n\n"
+        "Write a very brief, generic introductory message for forwarding this email.\n"
+        "- Keep it short (1-2 sentences max, ideally just 1 sentence).\n"
+        "- Use simple, generic phrases like 'Thought you'd find this useful' or 'Sharing this with you'.\n"
+        "- DO NOT explain why you're forwarding or add detailed context - keep it generic.\n"
+        "- DO NOT include the original message content (it will be attached automatically).\n"
+        "- No subject line; body only.\n"
+        "- Be brief, casual, and professional."
+        + style_instruction
+    )
+    
+    try:
+        resp = openai.chat.completions.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+            messages=[{"role": "system", "content": sys}, {"role": "user", "content": prompt}],
+            temperature=0.2,
+            max_tokens=80,  # Very short for forward messages
         )
         body = resp.choices[0].message.content or ""
         return json.dumps({"success": True, "to": to, "thread_id": thread_id, "body": body})

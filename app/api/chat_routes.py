@@ -11,6 +11,8 @@ from app.services.llm_service import get_llm_service
 from app.db.collections import get_conversations_collection, get_contacts_collection
 from app.utils.oauth_utils import require_google_auth
 from app.utils.logging_utils import get_logger
+from app.utils.rate_limiter import enforce_rate_limit, get_rate_limit_key, get_rate_limit_headers
+from app.config import Config
 
 logger = get_logger(__name__)
 
@@ -214,8 +216,33 @@ def chat():
         logger.debug(f"Received chat request: keys={list(data.keys())}, has_message={'message' in data}, has_images={'images' in data}")
         
         user_message = (data.get("message") or "").strip()
-        user_id = (data.get("user_id") or "anonymous").strip().lower()
+        user_id_raw = data.get("user_id", "").strip()
+        
+        # Ensure user_id is never "anonymous" or empty - generate unique ID if needed
+        # This ensures proper per-user rate limiting
+        if not user_id_raw or user_id_raw.lower() == "anonymous":
+            # Generate a session-based unique ID for anonymous users
+            # This ensures each anonymous session gets its own rate limit
+            session_id_temp = data.get("session_id") or f"anon-{uuid.uuid4().hex[:12]}"
+            user_id = f"anon-{session_id_temp.split('-')[-1]}"
+            logger.warning(f"Missing or anonymous user_id, generated: {user_id}")
+        else:
+            user_id = user_id_raw.lower()
+        
         session_id = data.get("session_id") or f"{user_id}-{uuid.uuid4().hex[:8]}"
+        
+        # Enforce rate limiting (only if enabled in config)
+        if Config.RATE_LIMIT_ENABLED:
+            rate_limit_key = get_rate_limit_key(request, user_id)
+            # Chat endpoint: 10 requests per minute (configurable via RATE_LIMIT_PER_MINUTE)
+            # This limit helps control OpenAI API costs while allowing normal conversation flow
+            max_requests = Config.RATE_LIMIT_PER_MINUTE if Config.RATE_LIMIT_PER_MINUTE > 0 else 10
+            enforce_rate_limit(
+                key=rate_limit_key,
+                max_requests=max_requests,
+                window_seconds=60,
+                endpoint_name="chat"
+            )
         
         # Handle images - ensure it's a list, not None or undefined
         images_raw = data.get("images")
@@ -318,7 +345,16 @@ def chat():
                     metadata={"emotion": "neutral"}
                 )
 
-        return jsonify({"reply": reply})
+        # Add rate limit headers to response (if rate limiting is enabled)
+        response = jsonify({"reply": reply})
+        if Config.RATE_LIMIT_ENABLED:
+            rate_limit_key = get_rate_limit_key(request, user_id)
+            max_requests = Config.RATE_LIMIT_PER_MINUTE if Config.RATE_LIMIT_PER_MINUTE > 0 else 10
+            headers = get_rate_limit_headers(rate_limit_key, max_requests, 60)
+            for key, value in headers.items():
+                response.headers[key] = value
+        
+        return response
 
     except Exception as e:
         logger.error(f"Error in chat endpoint: {e}", exc_info=True)

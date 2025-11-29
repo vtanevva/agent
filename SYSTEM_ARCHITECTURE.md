@@ -63,7 +63,7 @@
 │  │                               │                                        │  │
 │  │                   detect_intent(message)                              │  │
 │  │                               │                                        │  │
-│  │          ┌────────────────────┼────────────────────┐                  │  │
+│  │          ┌────────────────────┼─────────────────────────                  │  │
 │  │          │                    │                    │                  │  │
 │  │     "calendar"           "email"            "general"                 │  │
 │  │    (keywords: schedule, (keywords: email,   (default)                │  │

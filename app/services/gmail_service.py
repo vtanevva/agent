@@ -18,6 +18,7 @@ from app.tools.email import (
     analyze_email_style,
     generate_reply_draft,
 )
+from app.tools.email.forward import forward_email as tool_forward_email
 from app.utils.oauth_utils import load_google_credentials
 
 
@@ -45,6 +46,27 @@ def reply_to_thread(
     """Send a reply inside a Gmail thread with a provided body."""
     try:
         msg = tool_reply_email(
+            user_id=user_id,
+            thread_id=thread_id,
+            to=to,
+            body=body,
+            subj_prefix=subj_prefix,
+        )
+        return {"success": True, "message": msg}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def forward_thread(
+    user_id: str,
+    thread_id: str,
+    to: str,
+    body: str = "",
+    subj_prefix: str = "Fwd:",
+) -> Dict[str, Any]:
+    """Forward a Gmail thread to another recipient."""
+    try:
+        msg = tool_forward_email(
             user_id=user_id,
             thread_id=thread_id,
             to=to,

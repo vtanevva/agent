@@ -12,6 +12,8 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
   const [error, setError] = useState(null);
   const [original, setOriginal] = useState({ subject: '', from: '', date: '', body: '' });
   const [draft, setDraft] = useState('');
+  const [mode, setMode] = useState('reply'); // 'reply' or 'forward'
+  const [forwardTo, setForwardTo] = useState(''); // For forward mode
   const inputRef = useRef(null);
   const [showFullOriginal, setShowFullOriginal] = useState(false);
   const displayFrom = (() => {
@@ -56,9 +58,13 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
 
   useEffect(() => {
     async function loadData() {
-      if (!visible || !userId || !threadId || !to) return;
+      if (!visible || !userId || !threadId) return;
       setLoadingDraft(true);
       setError(null);
+      // Reset mode when modal opens (only if not already set)
+      if (mode === 'reply') {
+        setForwardTo('');
+      }
       try {
         // 1) fetch original message
         const d = await fetch(`${API_BASE_URL}/api/gmail/thread-detail`, {
@@ -75,19 +81,24 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
             body: detail.body || '',
           });
         }
-        // 2) fetch draft
-        const r = await fetch(`${API_BASE_URL}/api/gmail/draft-reply`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: userId, thread_id: threadId, to }),
-        });
-        const data = await r.json();
-        if (data?.success && data.body) {
-          setDraft(data.body);
-        } else if (data?.action === 'connect_google') {
-          setError('Google not connected. Please connect and retry.');
-        } else {
-          setError(data?.error || 'Failed to generate draft.');
+        // 2) fetch draft based on mode
+        if (mode === 'reply' && to) {
+          const r = await fetch(`${API_BASE_URL}/api/gmail/draft-reply`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, thread_id: threadId, to }),
+          });
+          const data = await r.json();
+          if (data?.success && data.body) {
+            setDraft(data.body);
+          } else if (data?.action === 'connect_google') {
+            setError('Google not connected. Please connect and retry.');
+          } else {
+            setError(data?.error || 'Failed to generate draft.');
+          }
+        } else if (mode === 'forward') {
+          // In forward mode, start with empty draft (will be generated when 'to' is entered)
+          setDraft('');
         }
       } catch (e) {
         setError(e?.message || 'Network error.');
@@ -97,6 +108,42 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
     }
     loadData();
   }, [visible, userId, threadId, to]);
+  
+  // Separate effect to handle mode changes and generate drafts
+  useEffect(() => {
+    if (!visible || !userId || !threadId) return;
+    
+    if (mode === 'forward') {
+      // Generate forward draft immediately when forward mode is opened
+      setLoadingDraft(true);
+      fetch(`${API_BASE_URL}/api/gmail/draft-forward`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          user_id: userId, 
+          thread_id: threadId,
+          to: forwardTo.trim() || '' // Optional, can be empty
+        }),
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (data?.success && data.body) {
+            setDraft(data.body);
+          } else {
+            // If draft generation fails, just leave draft empty
+            setDraft('');
+          }
+          setLoadingDraft(false);
+        })
+        .catch(e => {
+          console.error('Failed to generate forward draft:', e);
+          setDraft('');
+          setLoadingDraft(false);
+        });
+    } else if (mode === 'reply') {
+      setForwardTo('');
+    }
+  }, [mode, visible, userId, threadId]); // Removed forwardTo from dependencies
 
   // Focus draft input when visible and draft is ready
   useEffect(() => {
@@ -114,15 +161,47 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
     setSending(true);
     setError(null);
     try {
-      const r = await fetch(`${API_BASE_URL}/api/gmail/reply`, {
+      let endpoint, body;
+      
+      if (mode === 'forward') {
+        if (!forwardTo.trim()) {
+          setError('Please enter a recipient email address.');
+          setSending(false);
+          return;
+        }
+        endpoint = `${API_BASE_URL}/api/gmail/forward`;
+        body = JSON.stringify({ 
+          user_id: userId, 
+          thread_id: threadId, 
+          to: forwardTo.trim(), 
+          body: draft 
+        });
+      } else {
+        // Reply mode
+        if (!to) {
+          setError('Recipient email is required.');
+          setSending(false);
+          return;
+        }
+        endpoint = `${API_BASE_URL}/api/gmail/reply`;
+        body = JSON.stringify({ 
+          user_id: userId, 
+          thread_id: threadId, 
+          to, 
+          body: draft 
+        });
+      }
+      
+      const r = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, thread_id: threadId, to, body: draft }),
+        body: body,
       });
       const data = await r.json();
       if (data?.success) {
         setSentJustNow(true);
         setDraft('');
+        setForwardTo('');
         setTimeout(() => {
           setSentJustNow(false);
           onClose(true);
@@ -130,7 +209,7 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
       } else if (data?.action === 'connect_google') {
         setError('Google not connected. Please connect and retry.');
       } else {
-        setError(data?.error || 'Failed to send reply.');
+        setError(data?.error || `Failed to ${mode === 'forward' ? 'forward' : 'send reply'}.`);
       }
     } catch (e) {
       setError(e?.message || 'Network error.');
@@ -168,70 +247,110 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
           </View>
           {/* Toolbar */}
           <View style={styles.toolbar}>
-            <TouchableOpacity style={styles.toolbarBtn}>
-              <Text style={styles.toolbarBtnText}>Reply</Text>
+            <TouchableOpacity 
+              style={[styles.toolbarBtn, mode === 'reply' && styles.toolbarBtnActive]}
+              onPress={() => {
+                setMode('reply');
+                setForwardTo('');
+                // Focus draft input
+                setTimeout(() => inputRef.current?.focus(), 100);
+              }}>
+              <Text style={[styles.toolbarBtnText, mode === 'reply' && styles.toolbarBtnTextActive]}>Reply</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.toolbarBtn}>
-              <Text style={styles.toolbarBtnText}>Forward</Text>
+            <TouchableOpacity 
+              style={[styles.toolbarBtn, mode === 'forward' && styles.toolbarBtnActive]}
+              onPress={() => {
+                console.log('Forward button clicked, setting mode to forward');
+                setMode('forward');
+                setDraft(''); // Clear draft when switching to forward
+                setForwardTo(''); // Reset forwardTo when switching
+              }}>
+              <Text style={[styles.toolbarBtnText, mode === 'forward' && styles.toolbarBtnTextActive]}>Forward</Text>
             </TouchableOpacity>
             <View style={{flex: 1}} />
             <Text style={styles.threadMeta}>Thread: {String(threadId || '').slice(-8)}</Text>
           </View>
 
-          {/* Smart suggestions */}
-          <View style={styles.suggestionRow}>
-            <TouchableOpacity
-              style={styles.suggestionBtn}
-              disabled={sending || loadingDraft}
-              onPress={async () => {
-                try {
-                  setDraft(''); // clear before loading
-                  const r = await fetch(`${API_BASE_URL}/api/gmail/draft-reply`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_id: userId, thread_id: threadId, to, user_points: 'Agree politely, short and warm.' }),
-                  });
-                  const data = await r.json();
-                  if (data?.success && data.body) setDraft(data.body);
-                } catch {}
-              }}>
-              <Text style={styles.suggestionText}>Sounds good 👍</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.suggestionBtn}
-              disabled={sending || loadingDraft}
-              onPress={async () => {
-                try {
-                  setDraft('');
-                  const r = await fetch(`${API_BASE_URL}/api/gmail/draft-reply`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_id: userId, thread_id: threadId, to, user_points: 'Propose scheduling a short call. Provide 2 time windows.' }),
-                  });
-                  const data = await r.json();
-                  if (data?.success && data.body) setDraft(data.body);
-                } catch {}
-              }}>
-              <Text style={styles.suggestionText}>Let’s schedule a call</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.suggestionBtn}
-              disabled={sending || loadingDraft}
-              onPress={async () => {
-                try {
-                  setDraft('');
-                  const r = await fetch(`${API_BASE_URL}/api/gmail/draft-reply`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_id: userId, thread_id: threadId, to, user_points: 'Write a brief summary of the key points before replying.' }),
-                  });
-                  const data = await r.json();
-                  if (data?.success && data.body) setDraft(data.body);
-                } catch {}
-              }}>
-              <Text style={styles.suggestionText}>Quick summary</Text>
-            </TouchableOpacity>
-          </View>
+          {/* Forward To field - only show in forward mode */}
+          {mode === 'forward' && (
+            <View style={styles.forwardToContainer}>
+              <Text style={styles.forwardToTitle}>Forward Email</Text>
+              <View style={styles.forwardToRow}>
+                <Text style={styles.forwardToLabel}>To:</Text>
+                <TextInput
+                  style={styles.forwardToInput}
+                  placeholder="Enter recipient email address"
+                  placeholderTextColor={colors.primary[900] + '60'}
+                  value={forwardTo}
+                  onChangeText={(text) => {
+                    console.log('ForwardTo changed:', text);
+                    setForwardTo(text);
+                  }}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoFocus={true}
+                />
+              </View>
+            </View>
+          )}
+
+          {/* Smart suggestions - only show in reply mode */}
+          {mode === 'reply' && (
+            <View style={styles.suggestionRow}>
+              <TouchableOpacity
+                style={styles.suggestionBtn}
+                disabled={sending || loadingDraft}
+                onPress={async () => {
+                  try {
+                    setDraft(''); // clear before loading
+                    const r = await fetch(`${API_BASE_URL}/api/gmail/draft-reply`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ user_id: userId, thread_id: threadId, to, user_points: 'Agree politely, short and warm.' }),
+                    });
+                    const data = await r.json();
+                    if (data?.success && data.body) setDraft(data.body);
+                  } catch {}
+                }}>
+                <Text style={styles.suggestionText}>Sounds good 👍</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.suggestionBtn}
+                disabled={sending || loadingDraft}
+                onPress={async () => {
+                  try {
+                    setDraft('');
+                    const r = await fetch(`${API_BASE_URL}/api/gmail/draft-reply`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ user_id: userId, thread_id: threadId, to, user_points: 'Propose scheduling a meeting. Provide 2 time windows.' }),
+                    });
+                    const data = await r.json();
+                    if (data?.success && data.body) setDraft(data.body);
+                  } catch {}
+                }}>
+                <Text style={styles.suggestionText}>Schedule a meeting</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.suggestionBtn}
+                disabled={sending || loadingDraft}
+                onPress={async () => {
+                  try {
+                    setDraft('');
+                    const r = await fetch(`${API_BASE_URL}/api/gmail/draft-reply`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ user_id: userId, thread_id: threadId, to, user_points: 'Write a brief summary of the key points before replying.' }),
+                    });
+                    const data = await r.json();
+                    if (data?.success && data.body) setDraft(data.body);
+                  } catch {}
+                }}>
+                <Text style={styles.suggestionText}>Quick summary</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* Original message */}
           <View style={styles.originalWrapper}>
@@ -277,7 +396,7 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
               </View>
               <Text style={styles.replyLabel}>Me</Text>
             </View>
-            {loadingDraft ? (
+            {loadingDraft && mode === 'reply' ? (
               <View style={styles.loadingBox}>
                 <ActivityIndicator color={colors.secondary[600]} />
                 <Text style={styles.loadingText}>Preparing draft...</Text>
@@ -288,7 +407,7 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
                 multiline
                 value={draft}
                 onChangeText={setDraft}
-                placeholder="Draft will appear here..."
+                placeholder={mode === 'forward' ? "Add a message (optional)..." : "Draft will appear here..."}
                 style={styles.textarea}
                 placeholderTextColor={colors.primary[900] + '60'}
                 autoFocus
@@ -302,10 +421,13 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
             <TouchableOpacity onPress={() => onClose(false)} style={styles.cancelButton}>
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
-            <TouchableOpacity disabled={sending || !draft.trim()} onPress={handleSend} style={styles.sendWrapper}>
+            <TouchableOpacity 
+              disabled={sending || !draft.trim() || (mode === 'forward' && !forwardTo.trim())} 
+              onPress={handleSend} 
+              style={styles.sendWrapper}>
               <LinearGradient colors={[colors.accent[500], colors.accent[600]]} style={styles.sendButton}>
                 <Text style={styles.sendText}>
-                  {sentJustNow ? 'Sent ✓' : sending ? 'Sending...' : 'Send'}
+                  {sentJustNow ? 'Sent ✓' : sending ? (mode === 'forward' ? 'Forwarding...' : 'Sending...') : (mode === 'forward' ? 'Forward' : 'Send')}
                 </Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -416,6 +538,54 @@ const styles = StyleSheet.create({
   threadMeta: {
     fontSize: 10,
     color: colors.primary[900] + '60',
+  },
+  toolbarBtnActive: {
+    backgroundColor: colors.accent[500] + '30',
+    borderColor: colors.accent[500] + '50',
+  },
+  toolbarBtnTextActive: {
+    color: colors.accent[700],
+    fontWeight: '600',
+  },
+  forwardToContainer: {
+    marginBottom: 12,
+    marginTop: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    backgroundColor: colors.accent[500] + '15',
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: colors.accent[500] + '40',
+    ...commonStyles.shadowMd,
+  },
+  forwardToTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.accent[700],
+    marginBottom: 10,
+  },
+  forwardToRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  forwardToLabel: {
+    fontSize: 14,
+    color: colors.primary[900],
+    fontWeight: '700',
+    minWidth: 35,
+  },
+  forwardToInput: {
+    flex: 1,
+    borderWidth: 1.5,
+    borderColor: colors.accent[500] + '50',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: colors.primary[900],
+    backgroundColor: '#fff',
+    minHeight: 44,
   },
   suggestionRow: {
     flexDirection: 'row',
