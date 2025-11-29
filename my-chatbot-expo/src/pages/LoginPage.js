@@ -118,43 +118,67 @@ export default function LoginPage() {
 
   // Check for OAuth completion (from URL params or sessionStorage)
   useEffect(() => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      // First check URL params (legacy support)
-      const urlParams = new URLSearchParams(window.location.search);
-      let username = urlParams.get('username');
-      let email = urlParams.get('email');
-      
-      // If no URL params, check sessionStorage (clean redirect)
-      if (!username && typeof window.sessionStorage !== 'undefined') {
-        const oauthUsername = sessionStorage.getItem('oauth_username');
-        const oauthEmail = sessionStorage.getItem('oauth_email');
-        const oauthTimestamp = sessionStorage.getItem('oauth_timestamp');
+    const checkOAuthCompletion = () => {
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        // First check URL params (legacy support)
+        const urlParams = new URLSearchParams(window.location.search);
+        let username = urlParams.get('username');
+        let email = urlParams.get('email');
         
-        // Only use sessionStorage if it's recent (within last 5 minutes)
-        if (oauthUsername && oauthTimestamp) {
-          const timestamp = parseInt(oauthTimestamp, 10);
-          const now = new Date().getTime();
-          if (now - timestamp < 5 * 60 * 1000) { // 5 minutes
-            username = oauthUsername;
-            email = oauthEmail;
-            // Clear sessionStorage after reading
-            sessionStorage.removeItem('oauth_username');
-            sessionStorage.removeItem('oauth_email');
-            sessionStorage.removeItem('oauth_timestamp');
+        // If no URL params, check sessionStorage (clean redirect)
+        if (!username && typeof window.sessionStorage !== 'undefined') {
+          const oauthUsername = sessionStorage.getItem('oauth_username');
+          const oauthEmail = sessionStorage.getItem('oauth_email');
+          const oauthTimestamp = sessionStorage.getItem('oauth_timestamp');
+          
+          // Only use sessionStorage if it's recent (within last 5 minutes)
+          if (oauthUsername && oauthTimestamp) {
+            const timestamp = parseInt(oauthTimestamp, 10);
+            const now = new Date().getTime();
+            if (now - timestamp < 5 * 60 * 1000) { // 5 minutes
+              username = oauthUsername;
+              email = oauthEmail;
+              // Clear sessionStorage after reading
+              sessionStorage.removeItem('oauth_username');
+              sessionStorage.removeItem('oauth_email');
+              sessionStorage.removeItem('oauth_timestamp');
+            }
           }
         }
-      }
-      
-      if (username) {
-        console.log('OAuth redirect detected, navigating to chat...', {username, email});
-        const sessionId = genSession(username);
-        navigation.navigate('Chat', {userId: username, sessionId});
-        // Clear URL params if they exist
-        if (urlParams.get('username')) {
-          window.history.replaceState({}, '', window.location.pathname);
+        
+        if (username) {
+          console.log('OAuth redirect detected, navigating to chat...', {username, email});
+          const sessionId = genSession(username);
+          navigation.navigate('Chat', {userId: username, sessionId});
+          // Clear URL params if they exist
+          if (urlParams.get('username')) {
+            window.history.replaceState({}, '', window.location.pathname);
+          }
+          return true; // OAuth detected
         }
       }
-    }
+      return false; // No OAuth detected
+    };
+
+    // Check immediately
+    checkOAuthCompletion();
+
+    // Also check periodically in case sessionStorage is set after initial load
+    const interval = setInterval(() => {
+      if (checkOAuthCompletion()) {
+        clearInterval(interval); // Stop checking once OAuth is detected
+      }
+    }, 500); // Check every 500ms
+
+    // Cleanup after 10 seconds (no need to check forever)
+    const timeout = setTimeout(() => {
+      clearInterval(interval);
+    }, 10000);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
   }, [navigation]);
 
   // Also check when screen comes into focus (in case OAuth completed while app was backgrounded)
