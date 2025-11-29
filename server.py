@@ -1548,17 +1548,36 @@ def google_callback():
         clean_host = parsed.netloc.replace('www.', '') if parsed.netloc.startswith('www.') else parsed.netloc
         frontend_url = f"https://{clean_host}"  # Always https in production
     
-    redirect_url = f"{frontend_url}/?username={state}&email={user_email}"
-    
     if expo_app:
         # Check if expo_redirect is a mobile app (exp://)
         if expo_redirect and not (expo_redirect.startswith('http://') or expo_redirect.startswith('https://')):
             # Mobile Expo app - show success page
             display_email = str(user_email) if user_email else str(state)
             return render_template_string(_get_success_page_template(display_email))
-
-    # Web app redirect - use frontend URL
-    return redirect(redirect_url)
+    
+    # Web app redirect - redirect to clean URL with OAuth info in sessionStorage
+    # This way the URL stays clean: https://aivis.pw/
+    redirect_html = f"""<!doctype html>
+<html>
+  <head>
+    <title>Redirecting...</title>
+    <script>
+      // Store OAuth completion info in sessionStorage
+      sessionStorage.setItem('oauth_username', {json.dumps(state)});
+      sessionStorage.setItem('oauth_email', {json.dumps(user_email)});
+      sessionStorage.setItem('oauth_timestamp', new Date().getTime().toString());
+      
+      // Redirect to clean URL (no parameters)
+      window.location.replace('{frontend_url}/');
+    </script>
+    <meta http-equiv="refresh" content="0;url={frontend_url}/">
+  </head>
+  <body>
+    <p>Redirecting...</p>
+    <p>If you are not redirected, <a href="{frontend_url}/">click here</a>.</p>
+  </body>
+</html>"""
+    return redirect_html
 
 
 @app.route("/instagram/auth")
