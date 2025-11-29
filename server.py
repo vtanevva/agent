@@ -295,8 +295,25 @@ def _get_redirect_uri():
     railway_url = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
     production_url = os.getenv("PRODUCTION_URL")
     
+    # Check for custom redirect URI from environment (highest priority)
+    custom_redirect_uri = os.getenv("OAUTH_REDIRECT_URI")
+    if custom_redirect_uri:
+        return custom_redirect_uri
+    
+    # Use request host if available (for dynamic detection)
     if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https':
-        # Use Railway domain if available, otherwise check production URL, else fallback
+        # Try to use the current request host (works with custom domains)
+        try:
+            scheme = 'https' if (request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https') else 'http'
+            host = request.host  # Gets the domain from request
+            if host and host not in ['localhost', '127.0.0.1']:
+                # Clean host (remove www if present)
+                clean_host = host.replace('www.', '') if host.startswith('www.') else host
+                return f"{scheme}://{clean_host}/google/oauth2callback"
+        except:
+            pass
+        
+        # Fallback to environment variables
         if railway_url:
             # Railway provides domain without protocol, add it
             base_url = railway_url if railway_url.startswith('http') else f"https://{railway_url}"
@@ -1478,46 +1495,29 @@ def google_callback():
 
     user_email = real_email if real_email else state
 
+    # Get base domain from request
+    scheme = 'https' if (request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https') else 'http'
+    host = request.host  # Gets the domain (e.g., aivis.pw)
+    base_url = f"{scheme}://{host}"
+    
+    # Clean redirect URL - remove www if present, use clean domain
+    clean_host = host.replace('www.', '') if host.startswith('www.') else host
+    clean_base_url = f"{scheme}://{clean_host}"
+    
     if expo_app:
-        display_email = str(user_email) if user_email else str(state)
-        return render_template_string(_get_success_page_template(display_email))
+        # Check if expo_redirect is a web URL (starts with http)
+        if expo_redirect and (expo_redirect.startswith('http://') or expo_redirect.startswith('https://')):
+            # Web app accessing via Expo - redirect to clean domain
+            redirect_url = f"{clean_base_url}/?username={state}&email={user_email}"
+            return redirect(redirect_url)
+        else:
+            # Mobile Expo app - show success page
+            display_email = str(user_email) if user_email else str(state)
+            return render_template_string(_get_success_page_template(display_email))
 
-    # Web app redirect
-    frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-    redirect_url = f"{frontend_url}/?username={state}&email={user_email}"
-    return render_template_string("""
-      <!doctype html>
-      <html>
-        <head>
-          <title>Google Connected</title>
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <script>
-            if (window.opener) {
-              try {
-                window.opener.postMessage({
-                  type: 'GOOGLE_AUTH_SUCCESS',
-                  userEmail: "{{ user_email }}"
-                }, '*');
-              } catch (e) {
-                console.log('Could not notify parent window:', e);
-              }
-              window.close();
-            } else {
-              const redirectUrl = "{{ redirect_url }}";
-              window.location.href = redirectUrl;
-            }
-          </script>
-        </head>
-        <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; min-height: 100vh; display: flex; flex-direction: column; justify-content: center;">
-          <div style="background: rgba(255,255,255,0.1); padding: 40px; border-radius: 20px; backdrop-filter: blur(10px);">
-            <h1 style="font-size: 2.5em; margin-bottom: 20px;">✅ Connected to Google!</h1>
-            <p style="font-size: 1.2em; margin-bottom: 30px;">You can now use Gmail and Calendar features.</p>
-            <p style="font-size: 1em; margin-bottom: 20px;">Redirecting...</p>
-            <p><a href="{{ redirect_url }}" style="color: white; text-decoration: none; background: rgba(255,255,255,0.2); padding: 12px 24px; border-radius: 25px; display: inline-block;">Continue to Chat</a></p>
-          </div>
-        </body>
-      </html>
-    """, user_email=user_email, username=state, redirect_url=redirect_url)
+    # Web app redirect - clean URL
+    redirect_url = f"{clean_base_url}/?username={state}&email={user_email}"
+    return redirect(redirect_url)
 
 
 @app.route("/instagram/auth")
