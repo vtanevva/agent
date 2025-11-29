@@ -1624,7 +1624,7 @@ def instagram_callback():
                 f
             )
 
-    return "✅ Instagram connected! You can close this tab."
+    return "✅ Instagram onnected! You can close this tab."
 
 
 # ──────────────────────────────────────────────────────────────────
