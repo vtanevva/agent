@@ -1499,20 +1499,26 @@ def google_callback():
     # Priority: 1) FRONTEND_URL env var, 2) expo_redirect param, 3) Request headers
     from urllib.parse import urlparse
     
-    # Default to aivis.pw
-    frontend_url = os.getenv("FRONTEND_URL", "https://aivis.pw")  # e.g., https://aivis.pw
+    # Default to www.aivis.pw
+    frontend_url = os.getenv("FRONTEND_URL", "https://www.aivis.pw")  # e.g., https://www.aivis.pw
     
     # If no FRONTEND_URL, check expo_redirect parameter (most reliable for web apps)
     if not frontend_url and expo_redirect:
         if expo_redirect.startswith('http://') or expo_redirect.startswith('https://'):
             # Extract domain from expo_redirect - this is where user started OAuth
             parsed = urlparse(expo_redirect)
-            clean_host = parsed.netloc.replace('www.', '') if parsed.netloc.startswith('www.') else parsed.netloc
-            if clean_host:
-                frontend_url = f"https://{clean_host}"  # Always use https in production
+            host = parsed.netloc or ''
+            # For aivis.pw, ensure it has www
+            if 'aivis.pw' in host and 'www.' not in host:
+                host = f"www.{host}"
+            if host:
+                frontend_url = f"https://{host}"  # Always use https in production
         elif 'aivis.pw' in expo_redirect:
             # Handle case where expo_redirect is just the domain
-            clean_host = expo_redirect.replace('www.', '').replace('https://', '').replace('http://', '').split('/')[0]
+            clean_host = expo_redirect.replace('https://', '').replace('http://', '').split('/')[0]
+            # Ensure www for aivis.pw
+            if 'aivis.pw' in clean_host and 'www.' not in clean_host:
+                clean_host = f"www.{clean_host}"
             if clean_host:
                 frontend_url = f"https://{clean_host}"
     
@@ -1526,8 +1532,11 @@ def google_callback():
             if header_value:
                 parsed = urlparse(header_value)
                 if parsed.netloc and 'aivis.pw' in parsed.netloc:
-                    clean_host = parsed.netloc.replace('www.', '') if parsed.netloc.startswith('www.') else parsed.netloc
-                    frontend_url = f"https://{clean_host}"
+                    host = parsed.netloc
+                    # Ensure www for aivis.pw
+                    if 'aivis.pw' in host and 'www.' not in host:
+                        host = f"www.{host}"
+                    frontend_url = f"https://{host}"
                     break
     
     # Final fallback: use request host (but prefer aivis.pw if detected)
@@ -1540,36 +1549,57 @@ def google_callback():
             # Check if we can find aivis.pw anywhere
             referer = request.headers.get('Referer', '')
             if 'aivis.pw' in referer:
-                frontend_url = "https://aivis.pw"
+                frontend_url = "https://www.aivis.pw"
             else:
                 # Default fallback - but you should set FRONTEND_URL env var
                 frontend_url = f"{scheme}://{host}"
         else:
             # Not Railway domain, use it
-            clean_host = host.replace('www.', '') if host.startswith('www.') else host
-            frontend_url = f"https://{clean_host}" if scheme == 'https' else f"{scheme}://{clean_host}"
+            # For aivis.pw, ensure it has www
+            if 'aivis.pw' in host and 'www.' not in host:
+                host = f"www.{host}"
+            frontend_url = f"https://{host}" if scheme == 'https' else f"{scheme}://{host}"
     
     # Ensure clean URL (no www, https) and proper formatting
     if frontend_url:
         # If it's just a domain (no protocol), add https://
         if not frontend_url.startswith('http://') and not frontend_url.startswith('https://'):
             # It's probably just a domain name
-            clean_host = frontend_url.replace('www.', '').split('/')[0]
+            clean_host = frontend_url.split('/')[0]
+            # For aivis.pw, ensure it has www
+            if 'aivis.pw' in clean_host and 'www.' not in clean_host:
+                clean_host = f"www.{clean_host}"
             frontend_url = f"https://{clean_host}"
         else:
             # Parse properly formatted URL
             parsed = urlparse(frontend_url)
-            clean_host = parsed.netloc.replace('www.', '') if parsed.netloc and parsed.netloc.startswith('www.') else (parsed.netloc or frontend_url)
-            if clean_host and clean_host != frontend_url:
-                frontend_url = f"https://{clean_host}"
+            host = parsed.netloc or frontend_url
+            # For aivis.pw, ensure it has www
+            if 'aivis.pw' in host and 'www.' not in host:
+                host = f"www.{host}"
+            if host and host != frontend_url:
+                frontend_url = f"https://{host}"
     else:
-        # Fallback: use aivis.pw if nothing else is set
-        frontend_url = "https://aivis.pw"
+        # Fallback: use www.aivis.pw if nothing else is set
+        frontend_url = "https://www.aivis.pw"
     
     # Final validation: ensure URL has protocol
     if not frontend_url.startswith('http://') and not frontend_url.startswith('https://'):
         # Extract just the domain
-        domain = frontend_url.replace('www.', '').split('/')[0]
+        domain = frontend_url.split('/')[0]
+        # For aivis.pw, ensure it has www
+        if 'aivis.pw' in domain and 'www.' not in domain:
+            domain = f"www.{domain}"
+        frontend_url = f"https://{domain}"
+    
+    # Final cleanup: ensure domain has www. prefix for aivis.pw
+    parsed = urlparse(frontend_url)
+    if parsed.netloc:
+        domain = parsed.netloc
+        # If it's aivis.pw without www, add www
+        if domain == 'aivis.pw':
+            domain = 'www.aivis.pw'
+        # Keep www if it's already there
         frontend_url = f"https://{domain}"
     
     # Ensure trailing slash - final redirect URL
