@@ -520,5 +520,21 @@ def gmail_rewrite_text():
         signature_text=signature_text,
         generate_subject=generate_subject
     )
-    return jsonify(result)
+    
+    # Transform service response to match frontend expectations
+    if result.get("success") and result.get("result"):
+        result_data = result["result"]
+        return jsonify({
+            "success": True,
+            "rewritten": result_data.get("body", ""),
+            "subject": result_data.get("subject", "")
+        })
+    else:
+        # Return error if rewrite failed - include error message for debugging
+        error_msg = result.get("error", "Unknown error occurred")
+        logger.error(f"Rewrite failed for user {user_id}: {error_msg}")
+        return jsonify({
+            "success": False,
+            "error": error_msg
+        }), 500
 

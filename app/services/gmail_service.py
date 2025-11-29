@@ -730,9 +730,14 @@ def rewrite_email_text(
     and appending a signature. Also optionally generate a concise subject line.
     """
     import json
-    import openai
+    from openai import OpenAI
+    from app.config import Config
 
     try:
+        # Initialize OpenAI client
+        client = OpenAI(api_key=Config.OPENAI_API_KEY) if Config.OPENAI_API_KEY else None
+        if not client:
+            return {"success": False, "error": "OpenAI API key not configured"}
         # Try to leverage user's style profile if available
         try:
             style_json = analyze_email_style(user_id=user_id, max_samples=5)
@@ -761,10 +766,15 @@ def rewrite_email_text(
             "No markdown, no extra commentary."
         )
 
-        user_prompt = "\n".join(instructions) + f"\n\nSTYLE_PROFILE_JSON:\n{style_json}\n\nEMAIL_BODY:\n{text}"
+        # Build the prompt with signature if needed
+        signature_section = ""
+        if include_signature and signature_text:
+            signature_section = f"\n\nSignature to append:\n{signature_text}\n"
+        
+        user_prompt = "\n".join(instructions) + f"\n\nUser style profile (JSON, optional):\n{style_json}{signature_section}\nEmail body to rewrite:\n{text}"
 
-        resp = openai.chat.completions.create(
-            model="gpt-4o-mini",
+        resp = client.chat.completions.create(
+            model=Config.OPENAI_MODEL or "gpt-4o-mini",
             messages=[
                 {
                     "role": "system",
@@ -776,13 +786,29 @@ def rewrite_email_text(
             max_tokens=600,
         )
         raw = resp.choices[0].message.content or ""
+        
+        # Clean up markdown code fences if present
+        import re
+        clean = raw.strip().strip("`")
+        clean = re.sub(r"^```json\s*|\s*```$", "", clean, flags=re.IGNORECASE | re.MULTILINE).strip()
+        
         try:
-            data = json.loads(raw)
+            data = json.loads(clean)
+            # Ensure we have both subject and body keys
+            if not isinstance(data, dict):
+                data = {"subject": "", "body": clean}
+            if "body" not in data:
+                data["body"] = clean
+            if "subject" not in data:
+                data["subject"] = ""
         except Exception:
             # If the model didn't respect JSON, wrap the raw response
-            data = {"subject": "", "body": raw}
+            data = {"subject": "", "body": clean if clean else raw}
         return {"success": True, "result": data}
     except Exception as e:
+        from app.utils.logging_utils import get_logger
+        logger = get_logger(__name__)
+        logger.error(f"Error in rewrite_email_text: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
 
 
