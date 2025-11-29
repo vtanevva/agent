@@ -128,7 +128,7 @@ def compute_sender_score(email: Dict, user_id: str) -> Dict[str, int]:
         try:
             from app.db.collections import get_contacts_collection
             contacts_col = get_contacts_collection()
-            if contacts_col:
+            if contacts_col is not None:
                 # Load all contacts for this user once and cache
                 all_contacts = list(contacts_col.find(
                     {"user_id": user_id},

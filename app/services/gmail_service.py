@@ -260,7 +260,7 @@ def classify_single_email(
         if thread_id:
             try:
                 emails_col = get_db().db.get_collection("emails") if get_db().is_connected else None
-                if emails_col:
+                if emails_col is not None:
                     emails_col.update_one(
                         {"user_id": user_id, "thread_id": thread_id},
                         {
@@ -405,7 +405,7 @@ def triaged_inbox(
                         )
                     else:
                         # Even if cached, ensure it's in database with metadata
-                        if emails_col:
+                        if emails_col is not None:
                             emails_col.update_one(
                                 {"user_id": user_id, "thread_id": thread_id},
                                 {
@@ -422,7 +422,7 @@ def triaged_inbox(
                     continue
 
             # Classify new emails (process enough to reach max_results)
-            if unclassified_threads and emails_col:
+            if unclassified_threads and emails_col is not None:
                 current_count = len(classified_emails)
                 needed = max_results - current_count
                 limit = min(max(needed, 50), 200)
@@ -489,7 +489,7 @@ def triaged_inbox(
                         classified_emails.extend(newly_classified[:remaining_slots])
 
             # Re-classify emails that need version update (in background, don't block)
-            if needs_reclassification and emails_col:
+            if needs_reclassification and emails_col is not None:
 
                 def reclassify_old_emails() -> None:
                     try:
