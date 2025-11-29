@@ -12,7 +12,7 @@ import psutil
 import requests
 from dotenv import load_dotenv
 from flask import (
-    Flask, request, jsonify, send_from_directory, 
+    Flask, request, jsonify, 
     redirect, session, render_template_string
 )
 from flask_cors import CORS
@@ -105,7 +105,7 @@ def create_app():
     This creates and configures the Flask application with all necessary
     blueprints, extensions, and middleware.
     """
-    app = Flask(__name__, static_folder="my-chatbot/build", static_url_path="")
+    app = Flask(__name__)
     CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
     app.secret_key = Config.FLASK_SECRET_KEY or "change-me-in-prod"
 
@@ -1628,30 +1628,37 @@ def instagram_callback():
 
 
 # ──────────────────────────────────────────────────────────────────
-# Frontend Serving
+# Health Check & Root Route
 # ──────────────────────────────────────────────────────────────────
 
-@app.route("/chat/<path:chat_path>")
-def serve_chat(chat_path):
-    """Serve React app for chat routes."""
-    return send_from_directory(app.static_folder, "index.html")
+@app.route("/health", methods=["GET"])
+def health_check():
+    """Health check endpoint for Railway and monitoring."""
+    return jsonify({
+        "status": "healthy",
+        "service": "mental-health-ai-assistant",
+        "version": "1.0.0"
+    }), 200
 
 
-@app.route("/", defaults={"path": ""})
-@app.route("/<path:path>")
-def serve_frontend(path):
-    """Serve React frontend or static files."""
-    # Handle API routes
-    if path.startswith("api/"):
-        return jsonify({"error": "API endpoint not found"}), 404
-    
-    # Handle static files
-    full_path = os.path.join(app.static_folder, path)
-    if path and os.path.exists(full_path):
-        return send_from_directory(app.static_folder, path)
-    
-    # Serve React app for all other routes
-    return send_from_directory(app.static_folder, "index.html")
+@app.route("/", methods=["GET"])
+def root():
+    """Root endpoint - API information."""
+    return jsonify({
+        "service": "Mental Health AI Assistant API",
+        "version": "1.0.0",
+        "status": "running",
+        "endpoints": {
+            "health": "/health",
+            "api": "/api",
+            "chat": "/api/chat",
+            "gmail": "/api/gmail/*",
+            "contacts": "/api/contacts/*",
+            "calendar": "/api/calendar/*",
+            "files": "/api/files/*"
+        },
+        "documentation": "See API endpoints for usage"
+    }), 200
 
 
 # ──────────────────────────────────────────────────────────────────

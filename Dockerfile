@@ -11,7 +11,7 @@ WORKDIR /app
 # ----------------------------
 # System deps incl. Node.js
 # ----------------------------
-RUN apt-get update && apt-get install -y curl git build-essential && \
+RUN apt-get update && apt-get install -y curl git build-essential bash && \
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y nodejs && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -23,15 +23,14 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
 # ----------------------------
-# Copy application code
+# Copy application code (including start.sh from root)
 # ----------------------------
-COPY . /app
+COPY . .
 
 # ----------------------------
-# Setup startup script
+# Make startup script executable (start.sh is now in /app/)
 # ----------------------------
-COPY start.sh /app/start.sh
-RUN chmod +x /app/start.sh
+RUN chmod +x start.sh
 
 # ----------------------------
 # Final runtime - use dynamic PORT from Railway
@@ -40,4 +39,4 @@ WORKDIR /app
 
 # Railway sets PORT environment variable automatically
 # The start.sh script will handle the PORT variable properly
-CMD ["/app/start.sh"]
+CMD ["./start.sh"]
