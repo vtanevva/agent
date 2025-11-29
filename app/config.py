@@ -82,6 +82,20 @@ class Config:
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
     
     # ═══════════════════════════════════════════════════════════════════
+    # Microsoft/Outlook OAuth
+    # ═══════════════════════════════════════════════════════════════════
+    
+    MICROSOFT_CLIENT_ID: Optional[str] = os.getenv("MICROSOFT_CLIENT_ID")
+    MICROSOFT_CLIENT_SECRET: Optional[str] = os.getenv("MICROSOFT_CLIENT_SECRET")
+    MICROSOFT_TENANT_ID: str = os.getenv("MICROSOFT_TENANT_ID", "common")  # common, organizations, consumers, or tenant ID
+    MICROSOFT_SCOPES = [
+        "Calendars.ReadWrite",
+        "Calendars.ReadWrite.Shared",
+        "User.Read",
+        "offline_access",  # For refresh tokens
+    ]
+    
+    # ═══════════════════════════════════════════════════════════════════
     # Instagram/Facebook OAuth
     # ═══════════════════════════════════════════════════════════════════
     
