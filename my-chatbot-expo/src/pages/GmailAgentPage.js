@@ -7,7 +7,7 @@ import {commonStyles} from '../styles/commonStyles';
 import EmailList from '../components/EmailList';
 import EmailReplyModal from '../components/EmailReplyModal';
 import {API_BASE_URL} from '../config/api';
-import {useRoute} from '@react-navigation/native';
+import {useRoute, useNavigation} from '@react-navigation/native';
 import {Svg, Path} from 'react-native-svg';
 
 const CATEGORIES = [
@@ -22,6 +22,7 @@ const CATEGORIES = [
 
 export default function GmailAgentPage() {
   const route = useRoute();
+  const navigation = useNavigation();
   const {userId} = route.params || {};
   const [selectedCategory, setSelectedCategory] = useState(null); // null = show all
   const [triagedData, setTriagedData] = useState(null);
@@ -194,8 +195,18 @@ export default function GmailAgentPage() {
       >
         <View style={styles.content}>
           <View style={styles.header}>
-            <Text style={styles.title}>Smart Inbox</Text>
-            <Text style={styles.subtitle}>AI-powered email triage</Text>
+            <TouchableOpacity
+              onPress={() => navigation.goBack()}
+              style={styles.backButton}>
+              <Svg width="24" height="24" viewBox="0 0 24 24" fill={colors.primary[900]}>
+                <Path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+              </Svg>
+            </TouchableOpacity>
+            <View style={styles.headerTextContainer}>
+              <Text style={styles.title}>Smart Inbox</Text>
+              <Text style={styles.subtitle}>AI-powered email triage</Text>
+            </View>
+            <View style={{width: 40}} />
           </View>
 
           {/* Category Filter */}

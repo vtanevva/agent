@@ -207,8 +207,18 @@ export default function ContactsPage() {
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <Text style={styles.title}>Contacts</Text>
-        <Text style={styles.subtitle}>Last {fetchLimit} Sent recipients</Text>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}>
+          <Svg width="24" height="24" viewBox="0 0 24 24" fill={colors.primary[900]}>
+            <Path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+          </Svg>
+        </TouchableOpacity>
+        <View style={styles.headerTextContainer}>
+          <Text style={styles.title}>Contacts</Text>
+          <Text style={styles.subtitle}>Last {fetchLimit} Sent recipients</Text>
+        </View>
+        <View style={{width: 40}} />
       </View>
       <View style={styles.controlsContainer}>
         <View style={styles.controls}>
@@ -346,7 +356,19 @@ export default function ContactsPage() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.primary[50], padding: 12 },
-  header: { marginBottom: 8 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  backButton: {
+    padding: 4,
+  },
+  headerTextContainer: {
+    flex: 1,
+    alignItems: 'center',
+  },
   title: { fontSize: 20, fontWeight: '700', color: colors.primary[900] },
   subtitle: { fontSize: 12, color: colors.primary[900] + '80' },
   controlsContainer: {
