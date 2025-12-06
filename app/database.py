@@ -40,9 +40,25 @@ class DatabaseManager:
             self.conversations = self.db["conversations"]
             self.tokens = self.db["tokens"]
             
+            # Create indexes for performance (idempotent - safe to call multiple times)
+            self._ensure_indexes()
+            
             self._connected = True
             logger.info(f"✅ MongoDB connected successfully. DB={self.db.name}")
             return True
+    
+    def _ensure_indexes(self):
+        """Create indexes for optimal query performance"""
+        try:
+            # Indexes for emails collection (critical for fast triaged inbox loading)
+            emails_col = self.db.get_collection("emails")
+            # Compound index: user_id + classified_at (descending) for fast sorted queries
+            emails_col.create_index([("user_id", 1), ("classified_at", -1)])
+            # Index on thread_id for lookups
+            emails_col.create_index("thread_id")
+            logger.info("✅ Created indexes on emails collection")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to create indexes (may already exist): {e}")
             
         except Exception as e:
             logger.error(f"❌ MongoDB connection failed: {e}")

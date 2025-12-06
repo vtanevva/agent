@@ -2,13 +2,18 @@
 Orchestrator agent that routes requests to appropriate domain agents.
 
 This is the main entry point for all chat requests. It:
-1. Detects intent (calendar, email, general)
+1. Routes based on explicit message_type parameter (preferred) OR detects intent from message content (fallback)
 2. Checks auth requirements
 3. Routes to appropriate domain agent
 4. Returns the response
 
 Architecture:
     /api/chat → Orchestrator → Domain Agents → Services → External APIs
+
+Design:
+    - The orchestrator should receive an explicit message_type parameter from the caller
+    - This allows the frontend/API to control routing based on context (which page the user is on)
+    - If message_type is not provided, it falls back to keyword-based detection for backward compatibility
 """
 
 from typing import Tuple, Optional, Dict, Any, Literal, List
@@ -19,7 +24,7 @@ from app.utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
-IntentType = Literal["calendar", "email", "general"]
+IntentType = Literal["calendar", "email", "contacts", "general"]
 
 # Intent detection keywords
 CALENDAR_KEYWORDS = ["calendar", "events", "schedule", "appointments", "meetings"]
@@ -101,6 +106,7 @@ class Orchestrator:
         session_id: str,
         user_message: str,
         metadata: Optional[Dict[str, Any]] = None,
+        message_type: Optional[IntentType] = None,
     ) -> Tuple[str, str]:
         """
         Handle a chat message and route to appropriate agent.
@@ -115,14 +121,24 @@ class Orchestrator:
             User's message
         metadata : dict, optional
             Additional metadata (emotion, flags, etc.)
+        message_type : str, optional
+            Explicit message type ("calendar", "email", "contacts", "general").
+            If provided, this will be used directly for routing.
+            If None, intent will be detected from message content (backward compatibility).
             
         Returns
         -------
         Tuple[str, str]
-            (intent, reply) where intent is "calendar", "email", or "general"
+            (intent, reply) where intent is "calendar", "email", "contacts", or "general"
         """
-        # Detect intent
-        intent = detect_intent(user_message)
+        # Use explicit message_type if provided, otherwise detect intent
+        if message_type:
+            intent = message_type
+            logger.info(f"Using explicit message_type: {intent} for user {user_id}")
+        else:
+            # Fallback to keyword-based detection for backward compatibility
+            intent = detect_intent(user_message)
+            logger.info(f"Detected intent from message: {intent} for user {user_id}")
         
         # Check auth requirements
         if intent in ("calendar", "email"):
@@ -139,7 +155,21 @@ class Orchestrator:
         )
         
         # Route to appropriate agent based on intent
-        if intent == "calendar":
+        if intent == "contacts":
+            # Contacts intent - use ContactsAgent
+            logger.info(f"Routing to ContactsAgent for user {user_id}")
+            if self.contacts_agent:
+                reply = self.contacts_agent.handle_chat(
+                    user_id=user_id,
+                    message=user_message,
+                    metadata=metadata,
+                )
+            else:
+                logger.warning("ContactsAgent not available")
+                reply = "Contacts features are not available right now. Please try again later."
+            return intent, reply
+        
+        elif intent == "calendar":
             # Calendar intent - use CalendarAgent
             logger.info(f"Routing to CalendarAgent for user {user_id}")
             if self.calendar_agent:

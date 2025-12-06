@@ -217,6 +217,7 @@ def chat():
         
         user_message = (data.get("message") or "").strip()
         user_id_raw = data.get("user_id", "").strip()
+        message_type = data.get("message_type")  # Optional: "calendar", "email", "contacts", "general"
         
         # Ensure user_id is never "anonymous" or empty - generate unique ID if needed
         # This ensures proper per-user rate limiting
@@ -288,6 +289,7 @@ def chat():
             user_id=user_id,
             session_id=session_id,
             user_message=user_message_with_images,
+            message_type=message_type,  # Pass explicit message_type if provided
         )
 
         # Preserve compose-modal behaviour for email-style replies
