@@ -44,8 +44,13 @@ class DatabaseManager:
             self._ensure_indexes()
             
             self._connected = True
-            logger.info(f"✅ MongoDB connected successfully. DB={self.db.name}")
+            logger.info(f"MongoDB connected successfully. DB={self.db.name}")
             return True
+            
+        except Exception as e:
+            logger.error(f"MongoDB connection failed: {e}")
+            self._connected = False
+            return False
     
     def _ensure_indexes(self):
         """Create indexes for optimal query performance"""
@@ -56,14 +61,9 @@ class DatabaseManager:
             emails_col.create_index([("user_id", 1), ("classified_at", -1)])
             # Index on thread_id for lookups
             emails_col.create_index("thread_id")
-            logger.info("✅ Created indexes on emails collection")
+            logger.info("Created indexes on emails collection")
         except Exception as e:
-            logger.warning(f"⚠️ Failed to create indexes (may already exist): {e}")
-            
-        except Exception as e:
-            logger.error(f"❌ MongoDB connection failed: {e}")
-            self._connected = False
-            return False
+            logger.warning(f"Failed to create indexes (may already exist): {e}")
     
     def disconnect(self):
         """Safely close database connection"""

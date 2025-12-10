@@ -1,9 +1,10 @@
-"""Tool: send_email — send a fresh Gmail message."""
+﻿"""Tool: send_email â€” send a fresh Gmail message."""
 
 import json
 import base64
 from email.mime.text import MIMEText
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from google.oauth2.credentials import Credentials
 
 # Tool registry removed - agents call functions directly now
@@ -19,15 +20,25 @@ def send_email(user_id: str, to: str, subject: str | None = None, body: str | No
     except Exception as e:
         return f"Error: Gmail service unavailable - {e}"
 
-    mime = MIMEText(body)
-    mime["to"] = to
-    mime["subject"] = subject
+    try:
+        mime = MIMEText(body)
+        mime["to"] = to
+        mime["subject"] = subject
 
-    raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
-    message = {"raw": raw}
-    svc.users().messages().send(userId="me", body=message).execute()
+        raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
+        message = {"raw": raw}
+        svc.users().messages().send(userId="me", body=message).execute()
 
-    return f"Email sent to {to}."
+        return f"Email sent to {to}."
+    except HttpError as e:
+        error_msg = f"Gmail API error: {e}"
+        if e.resp.status == 403:
+            return f"Error: Permission denied. Please check Gmail API permissions. {error_msg}"
+        elif e.resp.status == 400:
+            return f"Error: Invalid request. Please check recipient email address. {error_msg}"
+        return f"Error: {error_msg}"
+    except Exception as e:
+        return f"Error: Failed to send email - {str(e)}"
 
 
 # Register the tool

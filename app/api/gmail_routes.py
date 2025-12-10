@@ -1,6 +1,7 @@
 """Gmail-related API routes."""
 
 import json
+import re
 from flask import Blueprint, request, jsonify
 
 from app.services.gmail_service import (
@@ -19,7 +20,7 @@ from app.services.gmail_service import (
 )
 from app.tools.email import analyze_email_style, generate_reply_draft, generate_forward_draft
 from app.utils.oauth_utils import require_google_auth
-from app.utils.rate_limiter import enforce_rate_limit, get_rate_limit_key
+from app.utils.rate_limiter import enforce_rate_limit, get_rate_limit_key, RateLimitExceeded
 from app.utils.logging_utils import get_logger
 from app.config import Config
 from app.db.collections import get_contacts_collection
@@ -224,44 +225,73 @@ def gmail_thread_detail():
 @gmail_bp.route("/send", methods=["POST"])
 def gmail_send_new():
     """Send a new email (compose)."""
-    data = request.get_json(force=True, silent=True) or {}
-    user_id_raw = data.get("user_id", "")
-    user_id = _normalize_user_id(user_id_raw)
-    to = data.get("to")
-    subject = data.get("subject") or "(No subject)"
-    body = data.get("body") or ""
+    print("[DEBUG] /api/gmail/send endpoint hit!", flush=True)
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        print(f"[DEBUG] Received data: to={data.get('to')}, subject={data.get('subject')}", flush=True)
+        user_id_raw = data.get("user_id", "")
+        user_id = _normalize_user_id(user_id_raw)
+        to = data.get("to")
+        subject = data.get("subject") or "(No subject)"
+        body = data.get("body") or ""
 
-    if not to or not body:
-        return jsonify({"success": False, "error": "Missing 'to' or 'body'"}), 400
+        if not to or not body:
+            return jsonify({"success": False, "error": "Missing 'to' or 'body'"}), 400
 
-    # Check rate limit (cost control for send operations)
-    if Config.RATE_LIMIT_ENABLED:
-        from flask import request
-        rate_limit_key = get_rate_limit_key(request, user_id)
-        # Send operations: 10 per minute (cost control)
-        enforce_rate_limit(
-            key=rate_limit_key,
-            max_requests=10,
-            window_seconds=60,
-            endpoint_name="gmail_send"
-        )
+        # Look up contact if needed
+        try:
+            to = _lookup_contact_email(user_id, to)
+        except Exception as e:
+            logger.warning(f"Contact lookup failed for '{to}': {e}")
+        
+        # Validate email address format
+        if "@" not in to or len(to.split("@")) != 2:
+            return jsonify({"success": False, "error": f"Invalid email address: '{to}'. Please enter a valid email address."}), 400
 
-    # Look up contact if needed
-    to = _lookup_contact_email(user_id, to)
+        # Check rate limit
+        if Config.RATE_LIMIT_ENABLED:
+            try:
+                rate_limit_key = get_rate_limit_key(request, user_id)
+                enforce_rate_limit(
+                    key=rate_limit_key,
+                    max_requests=10,
+                    window_seconds=60,
+                    endpoint_name="gmail_send"
+                )
+            except RateLimitExceeded as e:
+                return jsonify({"success": False, "error": str(e)}), 429
 
-    auth_response = require_google_auth(user_id)
-    if auth_response:
-        return auth_response
+        # Check authentication
+        try:
+            auth_response = require_google_auth(user_id)
+            if auth_response:
+                return auth_response
+        except Exception as e:
+            logger.error(f"Auth check failed: {e}", exc_info=True)
+            return jsonify({"success": False, "error": f"Authentication error: {str(e)}"}), 401
 
-    result = send_new_email(
-        user_id=user_id,
-        to=to,
-        subject=subject,
-        body=body
-    )
-    status = 200 if result.get("success", True) else 500
-    return jsonify(result), status
-
+        # Send email
+        try:
+            result = send_new_email(
+                user_id=user_id,
+                to=to,
+                subject=subject,
+                body=body
+            )
+            if not isinstance(result, dict):
+                logger.error(f"send_new_email returned non-dict: {result}")
+                return jsonify({"success": False, "error": "Unexpected error occurred"}), 500
+            
+            status = 200 if result.get("success", True) else 500
+            return jsonify(result), status
+        except Exception as e:
+            logger.error(f"Error in send_new_email: {e}", exc_info=True)
+            return jsonify({"success": False, "error": f"Failed to send email: {str(e)}"}), 500
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        logger.error(f"Unexpected error in gmail_send_new: {e}\n{error_trace}", exc_info=True)
+        return jsonify({"success": False, "error": f"Server error: {str(e)}"}), 500
 
 @gmail_bp.route("/reply", methods=["POST"])
 def gmail_reply_send():

@@ -77,9 +77,21 @@ export default function ComposeEmailModal({visible, onClose, userId, initialTo, 
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({user_id: userId, to, subject, body}),
       });
+      
+      // Check if response is JSON
+      const contentType = r.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await r.text();
+        setError(`Server error: Received ${r.status} response. Please check server logs.`);
+        console.error('Non-JSON response:', text.substring(0, 200));
+        return;
+      }
+      
       const data = await r.json();
       if (data?.success) {
         onClose(true);
+      } else if (data?.action === 'connect_google') {
+        setError('Google not connected. Please connect Gmail and retry.');
       } else {
         setError(data?.error || 'Failed to send.');
       }

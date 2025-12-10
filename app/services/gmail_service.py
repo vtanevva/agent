@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -275,18 +275,8 @@ def search_threads(user_id: str, query: str, max_results: int = 20) -> Dict[str,
         results = list(cached_results)  # Start with cached results
         
         def fetch_message_metadata(msg_id: str) -> Optional[Dict[str, Any]]:
-            """Fetch message metadata, check cache first."""
+            """Fetch message metadata from Gmail API."""
             try:
-                # Check if we have this thread in cache
-                thread_id = None
-                if emails_col:
-                    # Try to find thread_id by message_id or check cache
-                    cached_msg = emails_col.find_one(
-                        {"user_id": user_id, "thread_id": {"$exists": True}},
-                        {"thread_id": 1}
-                    )
-                    # We'll need to fetch from API to get thread_id, but can enrich with cache
-                
                 meta = service.users().messages().get(
                     userId="me", id=msg_id, format="metadata", metadataHeaders=["Subject", "From"]
                 ).execute()
@@ -511,7 +501,7 @@ def triaged_inbox(
 
             messages = resp.get("messages", []) or []
             seen_threads = set(stored_classifications.keys())
-            
+
             # OPTIMIZATION: Fetch metadata in parallel using ThreadPoolExecutor
             # This dramatically speeds up fetching 1000 emails (from ~2-5 minutes to ~10-30 seconds)
             def fetch_message_metadata(msg_id: str) -> Optional[Dict[str, Any]]:
@@ -545,7 +535,7 @@ def triaged_inbox(
                         meta = future.result()
                         if meta is None:
                             continue
-                            
+
                         thread_id = meta.get("threadId")
                         if thread_id in seen_threads:
                             continue
@@ -578,17 +568,17 @@ def triaged_inbox(
             if processed_emails and emails_col is not None:
                 try:
                     for email_data in processed_emails:
-                        emails_col.update_one(
+                            emails_col.update_one(
                             {"user_id": user_id, "thread_id": email_data["thread_id"]},
-                            {
-                                "$set": {
+                                {
+                                    "$set": {
                                     "from": email_data["headers"].get("From", ""),
                                     "subject": email_data["headers"].get("Subject", "(No subject)"),
                                     "snippet": email_data["snippet"],
-                                }
-                            },
-                            upsert=True,
-                        )
+                                    }
+                                },
+                                upsert=True,
+                            )
                 except Exception as e:
                     print(f"[WARNING] Failed to update cached emails: {e}", flush=True)
 
@@ -598,7 +588,7 @@ def triaged_inbox(
                 needed = max_results - current_count
                 limit = min(max(needed, 50), 200)
                 newly_classified: List[Dict[str, Any]] = []
-                
+
                 # OPTIMIZATION: Parallelize email body fetching and classification
                 def fetch_and_classify_email(unclass: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                     """Fetch full email body and classify it. Returns classification result or None on error."""
@@ -620,7 +610,7 @@ def triaged_inbox(
                         }
 
                         classification = classify_email(email_data, user_id)
-                        
+
                         # Store in database with version
                         emails_col.update_one(
                             {"user_id": user_id, "thread_id": thread_id},
@@ -641,13 +631,13 @@ def triaged_inbox(
                         )
 
                         return {
-                            "threadId": thread_id,
-                            "from": unclass["headers"].get("From", ""),
-                            "subject": unclass["headers"].get("Subject", "(No subject)"),
-                            "snippet": unclass["snippet"],
-                            "category": classification["category"],
-                            "scores": classification["scores"],
-                        }
+                                "threadId": thread_id,
+                                "from": unclass["headers"].get("From", ""),
+                                "subject": unclass["headers"].get("Subject", "(No subject)"),
+                                "snippet": unclass["snippet"],
+                                "category": classification["category"],
+                                "scores": classification["scores"],
+                            }
                     except Exception as e:
                         print(f"[WARNING] Background classification failed for {unclass.get('thread_id')}: {e}", flush=True)
                         return None
@@ -670,7 +660,7 @@ def triaged_inbox(
                         except Exception as e:
                             unclass = future_to_unclass[future]
                             print(f"[WARNING] Failed to classify email {unclass.get('thread_id')}: {e}", flush=True)
-                            continue
+                        continue
 
                 # If we need more emails, add newly classified emails to the response
                 if needs_more_emails and newly_classified:
@@ -755,7 +745,7 @@ def triaged_inbox(
     # OPTIMIZATION: Always return cached emails immediately, fetch new ones in background
     # This way UI shows results instantly instead of blocking for Gmail API calls
     # Background thread will update database, and next request will have more emails
-    threading.Thread(target=fetch_and_classify_new, daemon=True).start()
+        threading.Thread(target=fetch_and_classify_new, daemon=True).start()
     
     # Note: For even faster UX, you could implement WebSocket/SSE to push new emails
     # to frontend as they're classified, but for now this gives instant response
@@ -927,6 +917,9 @@ def send_new_email(user_id: str, to: str, subject: str, body: str) -> Dict[str, 
     """Send a new email (compose)."""
     try:
         msg = tool_send_email(user_id=user_id, to=to, subject=subject, body=body)
+        # send_email can return an error string instead of raising an exception
+        if isinstance(msg, str) and msg.startswith("Error:"):
+            return {"success": False, "error": msg}
         return {"success": True, "message": msg}
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -1025,5 +1018,6 @@ def rewrite_email_text(
         logger = get_logger(__name__)
         logger.error(f"Error in rewrite_email_text: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
+
 
 

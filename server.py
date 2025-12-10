@@ -112,9 +112,9 @@ def create_app():
     # Initialize database
     db_connected = init_database()
     if db_connected:
-        print("[INIT] ✅ MongoDB connected successfully")
+        print("[INIT] MongoDB connected successfully")
     else:
-        print("[INIT] ⚠️ MongoDB not connected - running in offline mode")
+        print("[INIT] MongoDB not connected - running in offline mode")
 
     # Tool registry removed - agents call functions directly now
     # available_tools = [tool['function']['name'] for tool in all_openai_schemas()]
@@ -127,7 +127,14 @@ def create_app():
     app.register_blueprint(calendar_bp)
     app.register_blueprint(files_bp)
     
-    print("[INIT] ✅ Registered API blueprints: chat, gmail, contacts, calendar, files")
+    print("[INIT] Registered API blueprints: chat, gmail, contacts, calendar, files")
+    
+    # Add request logging to debug issues
+    @app.before_request
+    def log_request():
+        print(f"[REQUEST] {request.method} {request.path}", flush=True)
+        if request.path == "/api/gmail/send":
+            print(f"[REQUEST] Sending email endpoint hit!", flush=True)
     
     return app
 
@@ -1170,30 +1177,8 @@ def _lookup_contact_emails(user_id: str, name: str) -> list:
         return emails
 
 
-@app.route("/api/gmail/send", methods=["POST"])
-def gmail_send_new():
-    """Send a new email (compose)."""
-    data = request.get_json(force=True, silent=True) or {}
-    user_id = (data.get("user_id") or "anonymous").strip().lower()
-    to = data.get("to")
-    subject = data.get("subject") or "(No subject)"
-    body = data.get("body") or ""
-
-    if not to or not body:
-        return jsonify({"success": False, "error": "Missing 'to' or 'body'"}), 400
-
-    # Look up contact if needed
-    to = _lookup_contact_email(user_id, to)
-
-    auth_response = require_google_auth(user_id)
-    if auth_response:
-        return auth_response
-
-    try:
-        msg = tool_send_email(user_id=user_id, to=to, subject=subject, body=body)
-        return jsonify({"success": True, "message": msg})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+# NOTE: Route removed - handled by gmail_bp blueprint (app/api/gmail_routes.py)
+# The blueprint route has better error handling and should be used instead
 
 
 @app.route("/api/google-profile", methods=["POST"])

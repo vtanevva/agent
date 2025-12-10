@@ -20,7 +20,7 @@ const getApiBaseUrl = () => {
   const RAILWAY_URL = 'https://web-production-0b6ce.up.railway.app'; // ⬅️ UPDATE THIS!
   
   // For development, you can still use localhost by setting USE_LOCAL=true
-  const USE_LOCAL = process.env.USE_LOCAL === 'true' || false;
+  const USE_LOCAL = process.env.USE_LOCAL === 'true' || true; // Temporarily force local for testing
   
   if (USE_LOCAL) {
     // For web platform, use localhost

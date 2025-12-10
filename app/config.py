@@ -190,6 +190,6 @@ class Config:
 
 missing_config = Config.validate()
 if missing_config:
-    print(f"⚠️  Missing required environment variables: {', '.join(missing_config)}")
+    print(f"WARNING: Missing required environment variables: {', '.join(missing_config)}")
     if Config.is_production():
         raise ValueError(f"Missing required configuration in production: {missing_config}")
