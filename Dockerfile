@@ -33,12 +33,28 @@ RUN npm ci || npm install
 COPY my-chatbot-expo/ /app/my-chatbot-expo/
 
 # Build Expo web app
-# For Expo SDK 54, use npx expo export:web
+# For Expo SDK 54, use: npx expo export --platform web
+# Default output is 'dist' directory, we'll move it to web-build
 RUN echo "Building Expo web app..." && \
-    npx expo export:web --output-dir /app/web-build || \
-    (npx expo export --platform web --output-dir /app/web-build) || \
-    (npx expo export --platform web && [ -d "dist" ] && mv dist /app/web-build && echo "Moved dist to web-build") || \
-    (echo "ERROR: Expo web build failed!" && exit 1)
+    cd /app/my-chatbot-expo && \
+    echo "Running Expo export for web platform..." && \
+    npx expo export --platform web && \
+    echo "Checking export output..." && \
+    (if [ -d "dist" ]; then \
+        echo "Found 'dist' directory, moving to web-build..." && \
+        mv dist /app/web-build && \
+        echo "✓ Moved dist to /app/web-build"; \
+    elif [ -d "/app/my-chatbot-expo/dist" ]; then \
+        echo "Found dist in my-chatbot-expo, moving..." && \
+        mv /app/my-chatbot-expo/dist /app/web-build && \
+        echo "✓ Moved to /app/web-build"; \
+    else \
+        echo "ERROR: dist directory not found after export!" && \
+        echo "Listing current directory:" && ls -la && \
+        exit 1; \
+    fi) && \
+    echo "Verifying web-build contents..." && \
+    ls -la /app/web-build/ | head -20
 
 # Verify build was successful
 RUN if [ ! -f "/app/web-build/index.html" ]; then \

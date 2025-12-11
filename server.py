@@ -2299,24 +2299,65 @@ def serve_frontend(path):
     if path.startswith("google/") or path.startswith("instagram/"):
         return jsonify({"error": "Endpoint not found"}), 404
     
-    # Serve static files if they exist
-    if path and os.path.exists(os.path.join(app.static_folder, path)):
-        return send_from_directory(app.static_folder, path)
+    # Don't interfere with waitlist admin route (handled by Flask)
+    if path == "waitlist/admin":
+        return jsonify({"error": "Endpoint not found"}), 404
+    
+    # Check if web-build exists
+    static_folder = app.static_folder
+    if not static_folder:
+        print(f"[FRONTEND] Static folder not configured", flush=True)
+        return jsonify({
+            "service": "Mental Health AI Assistant API",
+            "version": "1.0.0",
+            "status": "running",
+            "note": "Frontend web build not configured.",
+            "health": "/health",
+            "api_info": "/api/info"
+        }), 200
+    
+    if not os.path.exists(static_folder):
+        print(f"[FRONTEND] Static folder does not exist: {static_folder}", flush=True)
+        return jsonify({
+            "service": "Mental Health AI Assistant API",
+            "version": "1.0.0",
+            "status": "running",
+            "note": f"Frontend web build not found at {static_folder}. Expo app build may have failed.",
+            "health": "/health",
+            "api_info": "/api/info"
+        }), 200
+    
+    # Serve static files if they exist (JS, CSS, images, etc.)
+    if path:
+        file_path = os.path.join(static_folder, path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return send_from_directory(static_folder, path)
     
     # Serve index.html for all other routes (SPA routing)
     # This includes /waitlist which is handled by the Expo app's React Navigation
-    if os.path.exists(os.path.join(app.static_folder, "index.html")):
-        return send_from_directory(app.static_folder, "index.html")
+    index_path = os.path.join(static_folder, "index.html")
+    if os.path.exists(index_path):
+        print(f"[FRONTEND] Serving index.html for path: {path}", flush=True)
+        return send_from_directory(static_folder, "index.html")
     
-    # Fallback: API info if web build doesn't exist
+    # Fallback: API info if index.html doesn't exist
+    print(f"[FRONTEND] index.html not found at {index_path}", flush=True)
+    # List what files exist in the static folder for debugging
+    try:
+        files = os.listdir(static_folder) if os.path.exists(static_folder) else []
+    except:
+        files = []
+    
     return jsonify({
         "service": "Mental Health AI Assistant API",
         "version": "1.0.0",
         "status": "running",
-        "note": "Frontend web build not found. Please access the Expo app at http://localhost:8081/waitlist",
+        "note": "Frontend index.html not found in web-build. Check Expo build logs.",
         "health": "/health",
         "api_info": "/api/info",
-        "expo_app_url": "http://localhost:8081/waitlist"
+        "static_folder": static_folder,
+        "static_folder_exists": os.path.exists(static_folder),
+        "files_in_static_folder": files[:20]  # First 20 files for debugging
     }), 200
 
 
