@@ -2287,6 +2287,44 @@ def _get_waitlist_admin_template():
 # Frontend Serving - Expo Web App
 # ──────────────────────────────────────────────────────────────────
 
+# Serve Expo static assets from root (these are referenced with absolute paths in the HTML)
+# These routes must come BEFORE the catch-all route to be matched first
+@app.route("/_expo/<path:asset_path>")
+def serve_expo_assets(asset_path):
+    """Serve Expo's _expo static assets."""
+    static_folder = app.static_folder
+    if static_folder and os.path.exists(static_folder):
+        expo_dir = os.path.join(static_folder, "_expo")
+        file_path = os.path.join(expo_dir, asset_path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return send_from_directory(expo_dir, asset_path)
+    print(f"[ASSETS] _expo asset not found: {asset_path}", flush=True)
+    return jsonify({"error": "Asset not found"}), 404
+
+@app.route("/assets/<path:asset_path>")
+def serve_assets(asset_path):
+    """Serve assets directory files."""
+    static_folder = app.static_folder
+    if static_folder and os.path.exists(static_folder):
+        assets_dir = os.path.join(static_folder, "assets")
+        file_path = os.path.join(assets_dir, asset_path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return send_from_directory(assets_dir, asset_path)
+    print(f"[ASSETS] assets file not found: {asset_path}", flush=True)
+    return jsonify({"error": "Asset not found"}), 404
+
+@app.route("/static/<path:asset_path>")
+def serve_static_assets(asset_path):
+    """Serve static directory files."""
+    static_folder = app.static_folder
+    if static_folder and os.path.exists(static_folder):
+        static_dir = os.path.join(static_folder, "static")
+        file_path = os.path.join(static_dir, asset_path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return send_from_directory(static_dir, asset_path)
+    print(f"[ASSETS] static file not found: {asset_path}", flush=True)
+    return jsonify({"error": "Asset not found"}), 404
+
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
 def serve_frontend(path):
@@ -2328,17 +2366,31 @@ def serve_frontend(path):
         }), 200
     
     # Serve static files if they exist (JS, CSS, images, etc.)
+    # Handle both root-level assets and assets in subdirectories
     if path:
         file_path = os.path.join(static_folder, path)
         if os.path.exists(file_path) and os.path.isfile(file_path):
             return send_from_directory(static_folder, path)
+        
+        # Also check for common asset paths that Expo uses
+        # Expo web export creates assets in _expo/static/ and assets/ directories
+        # These should be accessible from root, not from /waitlist
+        if path.startswith("_expo/") or path.startswith("assets/") or path.startswith("static/"):
+            # These are root-level assets, serve them from root
+            root_path = path
+            root_file_path = os.path.join(static_folder, root_path)
+            if os.path.exists(root_file_path) and os.path.isfile(root_file_path):
+                return send_from_directory(static_folder, root_path)
     
     # Serve index.html for all other routes (SPA routing)
     # This includes /waitlist which is handled by the Expo app's React Navigation
     index_path = os.path.join(static_folder, "index.html")
     if os.path.exists(index_path):
         print(f"[FRONTEND] Serving index.html for path: {path}", flush=True)
-        return send_from_directory(static_folder, "index.html")
+        response = send_from_directory(static_folder, "index.html")
+        # Ensure correct content type
+        response.headers['Content-Type'] = 'text/html; charset=utf-8'
+        return response
     
     # Fallback: API info if index.html doesn't exist
     print(f"[FRONTEND] index.html not found at {index_path}", flush=True)
