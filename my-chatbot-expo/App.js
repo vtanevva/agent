@@ -26,7 +26,12 @@ export default function App() {
       
       // Navigate to Waitlist if URL is /waitlist
       if (path === '/waitlist' && navigationRef.current) {
-        navigationRef.current.navigate('Waitlist');
+        // Use setTimeout to ensure navigation is ready
+        setTimeout(() => {
+          if (navigationRef.current) {
+            navigationRef.current.navigate('Waitlist');
+          }
+        }, 100);
       }
     }
   }, []);
@@ -66,7 +71,7 @@ export default function App() {
           },
         }}>
         <Stack.Navigator
-          initialRouteName="Login"
+          initialRouteName={Platform.OS === 'web' && typeof window !== 'undefined' && window.location.pathname === '/waitlist' ? 'Waitlist' : 'Login'}
           screenOptions={{
             headerShown: false,
             contentStyle: {backgroundColor: 'transparent'},

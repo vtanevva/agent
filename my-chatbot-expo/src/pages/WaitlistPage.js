@@ -344,6 +344,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     backgroundColor: colors.primary[100],
     color: colors.primary[900],
+    ...(Platform.OS === 'web' && {
+      outline: 'none',
+      boxShadow: 'none',
+    }),
   },
   dropdown: {
     width: '100%',
