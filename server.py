@@ -1735,6 +1735,24 @@ def waitlist_list():
         }), 500
 
 
+@app.route("/waitlist", methods=["GET"])
+def waitlist_page():
+    """Serve the waitlist page (handled by Expo frontend)."""
+    # Serve index.html for SPA routing - the frontend will handle the /waitlist route
+    static_folder = app.static_folder
+    if static_folder and os.path.exists(static_folder):
+        index_path = os.path.join(static_folder, "index.html")
+        if os.path.exists(index_path):
+            response = send_from_directory(static_folder, "index.html")
+            response.headers['Content-Type'] = 'text/html; charset=utf-8'
+            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            response.headers['X-Content-Type-Options'] = 'nosniff'
+            return response
+    return jsonify({"error": "Frontend not found"}), 404
+
+
 @app.route("/waitlist/admin", methods=["GET"])
 def waitlist_admin():
     """Admin page to view all waitlist signups."""
