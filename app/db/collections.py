@@ -32,3 +32,10 @@ def get_contacts_collection() -> Optional[Collection]:
         return db_manager.db["contacts"]
     return None
 
+def get_waitlist_collection() -> Optional[Collection]:
+    """Get the waitlist collection"""
+    db_manager = get_db()
+    if db_manager.is_connected and db_manager.db is not None:
+        return db_manager.db["waitlist"]
+    return None
+

@@ -13,8 +13,9 @@ import requests
 from dotenv import load_dotenv
 from flask import (
     Flask, request, jsonify, send_from_directory,
-    redirect, session, render_template_string
+    redirect, session, render_template_string, abort
 )
+from functools import wraps
 from flask_cors import CORS
 from requests_oauthlib import OAuth2Session
 from google_auth_oauthlib.flow import Flow
@@ -62,7 +63,7 @@ from app.tools.contacts import (
     get_contact_conversations,
 )
 # Calendar tools moved to app/api/calendar_routes.py
-from app.db.collections import get_conversations_collection, get_tokens_collection, get_contacts_collection
+from app.db.collections import get_conversations_collection, get_tokens_collection, get_contacts_collection, get_waitlist_collection
 from app.utils.oauth_utils import (
     load_google_credentials, save_google_credentials, get_gmail_profile,
     require_google_auth, build_google_flow, parse_expo_state,
@@ -1563,6 +1564,1047 @@ def api_info():
         },
         "documentation": "See API endpoints for usage"
     }), 200
+
+
+# ──────────────────────────────────────────────────────────────────
+# Waitlist Routes
+# ──────────────────────────────────────────────────────────────────
+
+def _get_waitlist_page_template():
+    """Return the waitlist page HTML template."""
+    return """
+    <!doctype html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Aivis Beta - Join the Waitlist</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+                color: #333;
+            }
+            
+            .container {
+                background: rgba(255, 255, 255, 0.95);
+                backdrop-filter: blur(10px);
+                border-radius: 25px;
+                padding: 50px 40px;
+                max-width: 500px;
+                width: 100%;
+                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+                animation: fadeIn 0.6s ease-in-out;
+            }
+            
+            @keyframes fadeIn {
+                from {
+                    opacity: 0;
+                    transform: translateY(20px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+            
+            .logo {
+                text-align: center;
+                margin-bottom: 30px;
+            }
+            
+            .logo h1 {
+                font-size: 2.5em;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
+                margin-bottom: 10px;
+                font-weight: 700;
+            }
+            
+            .logo .beta-badge {
+                display: inline-block;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 5px 15px;
+                border-radius: 20px;
+                font-size: 0.85em;
+                font-weight: 600;
+                margin-top: 5px;
+            }
+            
+            .subtitle {
+                text-align: center;
+                color: #666;
+                font-size: 1.1em;
+                margin-bottom: 40px;
+                line-height: 1.6;
+            }
+            
+            .form-group {
+                margin-bottom: 25px;
+            }
+            
+            .form-group label {
+                display: block;
+                margin-bottom: 8px;
+                color: #333;
+                font-weight: 600;
+                font-size: 0.95em;
+            }
+            
+            .form-group input {
+                width: 100%;
+                padding: 15px;
+                border: 2px solid #e0e0e0;
+                border-radius: 12px;
+                font-size: 1em;
+                transition: all 0.3s ease;
+                font-family: inherit;
+            }
+            
+            .form-group input:focus {
+                outline: none;
+                border-color: #667eea;
+                box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            }
+            
+            .submit-btn {
+                width: 100%;
+                padding: 15px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border: none;
+                border-radius: 12px;
+                font-size: 1.1em;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                font-family: inherit;
+                margin-top: 10px;
+            }
+            
+            .submit-btn:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
+            }
+            
+            .submit-btn:active {
+                transform: translateY(0);
+            }
+            
+            .submit-btn:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+                transform: none;
+            }
+            
+            .message {
+                padding: 15px;
+                border-radius: 12px;
+                margin-bottom: 20px;
+                text-align: center;
+                font-weight: 500;
+                animation: slideIn 0.3s ease-out;
+            }
+            
+            @keyframes slideIn {
+                from {
+                    opacity: 0;
+                    transform: translateY(-10px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+            
+            .message.success {
+                background: #d4edda;
+                color: #155724;
+                border: 1px solid #c3e6cb;
+            }
+            
+            .message.error {
+                background: #f8d7da;
+                color: #721c24;
+                border: 1px solid #f5c6cb;
+            }
+            
+            .features {
+                margin-top: 40px;
+                padding-top: 30px;
+                border-top: 2px solid #f0f0f0;
+            }
+            
+            .features h3 {
+                text-align: center;
+                color: #333;
+                margin-bottom: 20px;
+                font-size: 1.2em;
+            }
+            
+            .features ul {
+                list-style: none;
+                padding: 0;
+            }
+            
+            .features li {
+                padding: 10px 0;
+                color: #666;
+                display: flex;
+                align-items: center;
+            }
+            
+            .features li:before {
+                content: "✨";
+                margin-right: 10px;
+                font-size: 1.2em;
+            }
+            
+            .loading {
+                display: inline-block;
+                width: 20px;
+                height: 20px;
+                border: 3px solid rgba(255, 255, 255, 0.3);
+                border-radius: 50%;
+                border-top-color: white;
+                animation: spin 0.8s linear infinite;
+                margin-right: 10px;
+            }
+            
+            @keyframes spin {
+                to { transform: rotate(360deg); }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="logo">
+                <h1>Aivis</h1>
+                <span class="beta-badge">BETA</span>
+            </div>
+            
+            <p class="subtitle">
+                Join the waitlist to be among the first to experience the future of AI-powered productivity.
+            </p>
+            
+            <div id="message"></div>
+            
+            <form id="waitlistForm">
+                <div class="form-group">
+                    <label for="name">Full Name</label>
+                    <input type="text" id="name" name="name" required placeholder="Enter your full name">
+                </div>
+                
+                <div class="form-group">
+                    <label for="email">Email Address</label>
+                    <input type="email" id="email" name="email" required placeholder="Enter your email">
+                </div>
+                
+                <button type="submit" class="submit-btn" id="submitBtn">
+                    Join Waitlist
+                </button>
+            </form>
+            
+            <div class="features">
+                <h3>What to Expect</h3>
+                <ul>
+                    <li>Early access to Aivis Beta</li>
+                    <li>AI-powered email management</li>
+                    <li>Smart calendar integration</li>
+                    <li>Personalized productivity assistant</li>
+                </ul>
+            </div>
+        </div>
+        
+        <script>
+            const form = document.getElementById('waitlistForm');
+            const submitBtn = document.getElementById('submitBtn');
+            const messageDiv = document.getElementById('message');
+            
+            function showMessage(text, type) {
+                messageDiv.innerHTML = `<div class="message ${type}">${text}</div>`;
+                messageDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+            
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                const name = document.getElementById('name').value.trim();
+                const email = document.getElementById('email').value.trim();
+                
+                if (!name || !email) {
+                    showMessage('Please fill in all fields.', 'error');
+                    return;
+                }
+                
+                // Validate email format
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!emailRegex.test(email)) {
+                    showMessage('Please enter a valid email address.', 'error');
+                    return;
+                }
+                
+                // Disable button and show loading
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<span class="loading"></span>Joining...';
+                
+                try {
+                    const response = await fetch('/api/waitlist/signup', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ name, email }),
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (response.ok && data.success) {
+                        showMessage('🎉 Successfully joined the waitlist! We\'ll be in touch soon.', 'success');
+                        form.reset();
+                    } else {
+                        showMessage(data.error || 'Something went wrong. Please try again.', 'error');
+                    }
+                } catch (error) {
+                    showMessage('Network error. Please check your connection and try again.', 'error');
+                } finally {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = 'Join Waitlist';
+                }
+            });
+        </script>
+    </body>
+    </html>
+    """
+
+
+@app.route("/waitlist", methods=["GET"])
+def waitlist_page():
+    """Serve the waitlist signup page."""
+    return render_template_string(_get_waitlist_page_template())
+
+
+@app.route("/api/waitlist/signup", methods=["POST"])
+def waitlist_signup():
+    """Handle waitlist signup submissions."""
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        name = (data.get("name") or "").strip()
+        email = (data.get("email") or "").strip().lower()
+        referral_source = (data.get("referral_source") or "").strip()
+        
+        # Validation
+        if not name or not email:
+            return jsonify({
+                "success": False,
+                "error": "Name and email are required."
+            }), 400
+        
+        # Basic email validation
+        if "@" not in email or "." not in email.split("@")[1]:
+            return jsonify({
+                "success": False,
+                "error": "Please enter a valid email address."
+            }), 400
+        
+        # Get waitlist collection
+        waitlist_col = get_waitlist_collection()
+        if waitlist_col is None:
+            # Database not connected - still accept but log warning
+            print(f"[WAITLIST] Database not connected, but received signup: {email}", flush=True)
+            return jsonify({
+                "success": True,
+                "message": "Signup received (database offline, will be saved when connected)."
+            }), 200
+        
+        # Check if email already exists
+        existing = waitlist_col.find_one({"email": email})
+        if existing:
+            return jsonify({
+                "success": True,
+                "message": "You're already on the waitlist!"
+            }), 200
+        
+        # Add to waitlist
+        waitlist_entry = {
+            "name": name,
+            "email": email,
+            "created_at": datetime.utcnow(),
+            "status": "pending"
+        }
+        
+        if referral_source:
+            waitlist_entry["referral_source"] = referral_source
+        
+        waitlist_col.insert_one(waitlist_entry)
+        
+        print(f"[WAITLIST] New signup: {name} ({email}) - Referral: {referral_source or 'N/A'}", flush=True)
+        
+        return jsonify({
+            "success": True,
+            "message": "Successfully joined the waitlist!"
+        }), 200
+        
+    except Exception as e:
+        print(f"[ERROR] Waitlist signup error: {e}", flush=True)
+        return jsonify({
+            "success": False,
+            "error": "An error occurred. Please try again later."
+        }), 500
+
+
+def require_admin_auth(f):
+    """Decorator to require admin authentication."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Check if user is authenticated
+        if not session.get('admin_authenticated'):
+            return jsonify({
+                "success": False,
+                "error": "Authentication required"
+            }), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+@app.route("/api/waitlist/auth", methods=["POST"])
+def waitlist_admin_auth():
+    """Authenticate admin access."""
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        password = data.get("password", "").strip()
+        
+        # Get admin password from environment or use default
+        admin_password = os.getenv("WAITLIST_ADMIN_PASSWORD", "admin123")
+        
+        if password == admin_password:
+            session['admin_authenticated'] = True
+            return jsonify({
+                "success": True,
+                "message": "Authenticated"
+            }), 200
+        else:
+            return jsonify({
+                "success": False,
+                "error": "Invalid password"
+            }), 401
+            
+    except Exception as e:
+        print(f"[ERROR] Admin auth error: {e}", flush=True)
+        return jsonify({
+            "success": False,
+            "error": "Authentication error"
+        }), 500
+
+
+@app.route("/api/waitlist/logout", methods=["POST"])
+def waitlist_admin_logout():
+    """Logout admin."""
+    session.pop('admin_authenticated', None)
+    return jsonify({
+        "success": True,
+        "message": "Logged out"
+    }), 200
+
+
+@app.route("/api/waitlist/list", methods=["GET"])
+@require_admin_auth
+def waitlist_list():
+    """Get all waitlist signups (admin view)."""
+    try:
+        # Get waitlist collection
+        waitlist_col = get_waitlist_collection()
+        if waitlist_col is None:
+            return jsonify({
+                "success": False,
+                "error": "Database not connected."
+            }), 500
+        
+        # Get all entries, sorted by creation date (newest first)
+        entries = list(waitlist_col.find(
+            {},
+            {"_id": 0}  # Exclude MongoDB _id field
+        ).sort("created_at", -1))
+        
+        # Convert datetime objects to strings for JSON serialization
+        for entry in entries:
+            if "created_at" in entry and isinstance(entry["created_at"], datetime):
+                entry["created_at"] = entry["created_at"].isoformat()
+        
+        return jsonify({
+            "success": True,
+            "count": len(entries),
+            "entries": entries
+        }), 200
+        
+    except Exception as e:
+        print(f"[ERROR] Waitlist list error: {e}", flush=True)
+        return jsonify({
+            "success": False,
+            "error": "An error occurred while fetching waitlist entries."
+        }), 500
+
+
+@app.route("/waitlist/admin", methods=["GET"])
+def waitlist_admin():
+    """Admin page to view all waitlist signups."""
+    # Check if authenticated
+    if not session.get('admin_authenticated'):
+        return render_template_string(_get_waitlist_admin_login_template())
+    return render_template_string(_get_waitlist_admin_template())
+
+
+def _get_waitlist_admin_login_template():
+    """Return the admin login page HTML template."""
+    return """
+    <!doctype html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Aivis Beta - Admin Login</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                background: linear-gradient(135deg, #FDFFFC 0%, #F8FAF7 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+            }
+            
+            .container {
+                background: rgba(255, 255, 255, 0.95);
+                border-radius: 25px;
+                padding: 40px;
+                max-width: 400px;
+                width: 100%;
+                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+                border: 1px solid rgba(50, 22, 31, 0.2);
+            }
+            
+            h1 {
+                font-size: 28px;
+                font-weight: 700;
+                color: #012622;
+                margin-bottom: 10px;
+                text-align: center;
+            }
+            
+            .subtitle {
+                color: #012622;
+                opacity: 0.7;
+                margin-bottom: 30px;
+                text-align: center;
+                font-size: 14px;
+            }
+            
+            .form-group {
+                margin-bottom: 20px;
+            }
+            
+            label {
+                display: block;
+                font-size: 14px;
+                font-weight: 600;
+                color: #012622;
+                margin-bottom: 8px;
+            }
+            
+            input {
+                width: 100%;
+                padding: 12px;
+                border: 1px solid rgba(50, 22, 31, 0.2);
+                border-radius: 8px;
+                font-size: 16;
+                background: #F8FAF7;
+                color: #012622;
+            }
+            
+            input:focus {
+                outline: none;
+                border-color: #012622;
+            }
+            
+            .btn {
+                width: 100%;
+                padding: 12px;
+                background: #012622;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 16px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.3s ease;
+            }
+            
+            .btn:hover {
+                background: #011A1C;
+            }
+            
+            .btn:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+            }
+            
+            .error {
+                background: #F8FAF7;
+                border: 1px solid rgba(118, 91, 89, 0.4);
+                color: #6A4E4C;
+                padding: 12px;
+                border-radius: 8px;
+                margin-bottom: 20px;
+                font-size: 14px;
+            }
+            
+            .loading {
+                text-align: center;
+                color: #012622;
+                opacity: 0.6;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Admin Login</h1>
+            <p class="subtitle">Enter password to access waitlist admin</p>
+            
+            <div id="error"></div>
+            <div id="loading" class="loading" style="display: none;">Logging in...</div>
+            
+            <form id="loginForm" onsubmit="handleLogin(event)">
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required autofocus>
+                </div>
+                <button type="submit" class="btn" id="submitBtn">Login</button>
+            </form>
+        </div>
+        
+        <script>
+            async function handleLogin(e) {
+                e.preventDefault();
+                const password = document.getElementById('password').value;
+                const errorDiv = document.getElementById('error');
+                const loadingDiv = document.getElementById('loading');
+                const submitBtn = document.getElementById('submitBtn');
+                
+                errorDiv.innerHTML = '';
+                loadingDiv.style.display = 'block';
+                submitBtn.disabled = true;
+                
+                try {
+                    const response = await fetch('/api/waitlist/auth', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ password }),
+                        credentials: 'same-origin'
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        window.location.reload();
+                    } else {
+                        errorDiv.innerHTML = '<div class="error">' + (data.error || 'Invalid password') + '</div>';
+                    }
+                } catch (err) {
+                    errorDiv.innerHTML = '<div class="error">Network error: ' + err.message + '</div>';
+                } finally {
+                    loadingDiv.style.display = 'none';
+                    submitBtn.disabled = false;
+                }
+            }
+        </script>
+    </body>
+    </html>
+    """
+
+
+def _get_waitlist_admin_template():
+    """Return the waitlist admin page HTML template."""
+    return """
+    <!doctype html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Aivis Beta - Waitlist Admin</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                background: linear-gradient(135deg, #FDFFFC 0%, #F8FAF7 100%);
+                min-height: 100vh;
+                padding: 20px;
+                color: #012622;
+            }
+            
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+                background: rgba(255, 255, 255, 0.95);
+                border-radius: 25px;
+                padding: 40px;
+                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+                border: 1px solid rgba(50, 22, 31, 0.2);
+            }
+            
+            h1 {
+                font-size: 32px;
+                font-weight: 700;
+                color: #012622;
+                margin-bottom: 10px;
+            }
+            
+            .subtitle {
+                color: #012622;
+                opacity: 0.7;
+                margin-bottom: 30px;
+            }
+            
+            .stats {
+                display: flex;
+                gap: 20px;
+                margin-bottom: 30px;
+                flex-wrap: wrap;
+            }
+            
+            .stat-card {
+                background: #F8FAF7;
+                padding: 20px;
+                border-radius: 12px;
+                border: 1px solid rgba(50, 22, 31, 0.1);
+                flex: 1;
+                min-width: 150px;
+            }
+            
+            .stat-value {
+                font-size: 32px;
+                font-weight: 700;
+                color: #012622;
+            }
+            
+            .stat-label {
+                font-size: 14px;
+                color: #012622;
+                opacity: 0.6;
+                margin-top: 5px;
+            }
+            
+            .controls {
+                display: flex;
+                gap: 10px;
+                margin-bottom: 20px;
+                flex-wrap: wrap;
+            }
+            
+            .btn {
+                padding: 10px 20px;
+                border-radius: 8px;
+                border: none;
+                cursor: pointer;
+                font-size: 14px;
+                font-weight: 600;
+                transition: all 0.3s ease;
+            }
+            
+            .btn-primary {
+                background: #012622;
+                color: white;
+            }
+            
+            .btn-primary:hover {
+                background: #011A1C;
+                transform: translateY(-2px);
+            }
+            
+            .btn-secondary {
+                background: #F8FAF7;
+                color: #012622;
+                border: 1px solid rgba(50, 22, 31, 0.2);
+            }
+            
+            .btn-secondary:hover {
+                background: #F0F4EF;
+            }
+            
+            .loading {
+                text-align: center;
+                padding: 40px;
+                color: #012622;
+                opacity: 0.6;
+            }
+            
+            .error {
+                background: #F8FAF7;
+                border: 1px solid rgba(118, 91, 89, 0.4);
+                color: #6A4E4C;
+                padding: 15px;
+                border-radius: 12px;
+                margin-bottom: 20px;
+            }
+            
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 20px;
+            }
+            
+            th {
+                background: #F8FAF7;
+                padding: 12px;
+                text-align: left;
+                font-weight: 600;
+                color: #012622;
+                border-bottom: 2px solid rgba(50, 22, 31, 0.2);
+                font-size: 14px;
+            }
+            
+            td {
+                padding: 12px;
+                border-bottom: 1px solid rgba(50, 22, 31, 0.1);
+                font-size: 14px;
+            }
+            
+            tr:hover {
+                background: #F8FAF7;
+            }
+            
+            .email {
+                color: #012622;
+                font-weight: 500;
+            }
+            
+            .date {
+                color: #012622;
+                opacity: 0.6;
+                font-size: 13px;
+            }
+            
+            .referral {
+                color: #012622;
+                opacity: 0.8;
+            }
+            
+            .no-data {
+                text-align: center;
+                padding: 40px;
+                color: #012622;
+                opacity: 0.6;
+            }
+            
+            @media (max-width: 768px) {
+                .container {
+                    padding: 20px;
+                }
+                
+                table {
+                    font-size: 12px;
+                }
+                
+                th, td {
+                    padding: 8px;
+                }
+                
+                .stats {
+                    flex-direction: column;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>Aivis Beta Waitlist</h1>
+            <p class="subtitle">View all signups</p>
+            
+            <div class="stats" id="stats">
+                <div class="stat-card">
+                    <div class="stat-value" id="totalCount">-</div>
+                    <div class="stat-label">Total Signups</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="todayCount">-</div>
+                    <div class="stat-label">Today</div>
+                </div>
+            </div>
+            
+            <div class="controls">
+                <button class="btn btn-primary" onclick="loadWaitlist()">Refresh</button>
+                <button class="btn btn-secondary" onclick="exportCSV()">Export CSV</button>
+                <button class="btn btn-secondary" onclick="logout()">Logout</button>
+            </div>
+            
+            <div id="error"></div>
+            <div id="loading" class="loading">Loading waitlist entries...</div>
+            <div id="tableContainer" style="display: none;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th>Referral Source</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <script>
+            let waitlistData = [];
+            
+            async function loadWaitlist() {
+                const loading = document.getElementById('loading');
+                const error = document.getElementById('error');
+                const tableContainer = document.getElementById('tableContainer');
+                const tableBody = document.getElementById('tableBody');
+                
+                loading.style.display = 'block';
+                error.innerHTML = '';
+                tableContainer.style.display = 'none';
+                
+                try {
+                    const response = await fetch('/api/waitlist/list');
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        waitlistData = data.entries || [];
+                        displayWaitlist(waitlistData);
+                        updateStats(waitlistData);
+                    } else {
+                        error.innerHTML = '<div class="error">Error: ' + (data.error || 'Failed to load waitlist') + '</div>';
+                    }
+                } catch (err) {
+                    error.innerHTML = '<div class="error">Network error: ' + err.message + '</div>';
+                } finally {
+                    loading.style.display = 'none';
+                }
+            }
+            
+            function displayWaitlist(entries) {
+                const tableBody = document.getElementById('tableBody');
+                const tableContainer = document.getElementById('tableContainer');
+                
+                if (entries.length === 0) {
+                    tableBody.innerHTML = '<tr><td colspan="4" class="no-data">No signups yet</td></tr>';
+                } else {
+                    tableBody.innerHTML = entries.map(entry => {
+                        const date = entry.created_at ? new Date(entry.created_at).toLocaleString() : 'N/A';
+                        const referral = entry.referral_source || '-';
+                        return `
+                            <tr>
+                                <td>${escapeHtml(entry.name || '')}</td>
+                                <td class="email">${escapeHtml(entry.email || '')}</td>
+                                <td class="referral">${escapeHtml(referral)}</td>
+                                <td class="date">${date}</td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+                
+                tableContainer.style.display = 'block';
+            }
+            
+            function updateStats(entries) {
+                const total = entries.length;
+                const today = new Date().toDateString();
+                const todayCount = entries.filter(entry => {
+                    if (!entry.created_at) return false;
+                    const entryDate = new Date(entry.created_at).toDateString();
+                    return entryDate === today;
+                }).length;
+                
+                document.getElementById('totalCount').textContent = total;
+                document.getElementById('todayCount').textContent = todayCount;
+            }
+            
+            function exportCSV() {
+                if (waitlistData.length === 0) {
+                    alert('No data to export');
+                    return;
+                }
+                
+                const headers = ['Name', 'Email', 'Referral Source', 'Date'];
+                const rows = waitlistData.map(entry => {
+                    const date = entry.created_at ? new Date(entry.created_at).toLocaleString() : '';
+                    return [
+                        entry.name || '',
+                        entry.email || '',
+                        entry.referral_source || '',
+                        date
+                    ];
+                });
+                
+                const csv = [
+                    headers.join(','),
+                    ...rows.map(row => row.map(cell => '"' + String(cell).replace(/"/g, '""') + '"').join(','))
+                ].join('\\n');
+                
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'aivis-waitlist-' + new Date().toISOString().split('T')[0] + '.csv';
+                a.click();
+                window.URL.revokeObjectURL(url);
+            }
+            
+            function escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+            
+            async function logout() {
+                try {
+                    await fetch('/api/waitlist/logout', {
+                        method: 'POST',
+                        credentials: 'same-origin'
+                    });
+                    window.location.reload();
+                } catch (err) {
+                    console.error('Logout error:', err);
+                }
+            }
+            
+            // Load on page load
+            loadWaitlist();
+        </script>
+    </body>
+    </html>
+    """
 
 
 # ──────────────────────────────────────────────────────────────────
