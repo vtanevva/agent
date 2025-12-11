@@ -1570,7 +1570,12 @@ def api_info():
 # Waitlist Routes
 # ──────────────────────────────────────────────────────────────────
 
-def _get_waitlist_page_template():
+# Waitlist page is now handled by the Expo app frontend (my-chatbot-expo)
+# The old Flask HTML template has been removed to avoid conflicts
+# Only API endpoints remain here for backend functionality
+
+# Old template function removed - no longer needed
+# def _get_waitlist_page_template():
     """Return the waitlist page HTML template."""
     return """
     <!doctype html>
@@ -1892,10 +1897,12 @@ def _get_waitlist_page_template():
     """
 
 
-@app.route("/waitlist", methods=["GET"])
-def waitlist_page():
-    """Serve the waitlist signup page."""
-    return render_template_string(_get_waitlist_page_template())
+# Waitlist page is now handled by the Expo app frontend
+# Removed Flask route to avoid conflicts with React Native routing
+# @app.route("/waitlist", methods=["GET"])
+# def waitlist_page():
+#     """Serve the waitlist signup page."""
+#     return render_template_string(_get_waitlist_page_template())
 
 
 @app.route("/api/waitlist/signup", methods=["POST"])
