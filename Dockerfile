@@ -33,11 +33,21 @@ RUN npm ci || npm install
 COPY my-chatbot-expo/ /app/my-chatbot-expo/
 
 # Build Expo web app
-# Try different Expo export commands for compatibility
-RUN npx expo export --platform web --output-dir /app/web-build 2>/dev/null || \
-    npx expo export:web --output-dir /app/web-build 2>/dev/null || \
-    (npx expo export --platform web && [ -d "dist" ] && mv dist /app/web-build) || \
-    echo "Warning: Expo web build failed, API will still work"
+# For Expo SDK 54, use npx expo export:web
+RUN echo "Building Expo web app..." && \
+    npx expo export:web --output-dir /app/web-build || \
+    (npx expo export --platform web --output-dir /app/web-build) || \
+    (npx expo export --platform web && [ -d "dist" ] && mv dist /app/web-build && echo "Moved dist to web-build") || \
+    (echo "ERROR: Expo web build failed!" && exit 1)
+
+# Verify build was successful
+RUN if [ ! -f "/app/web-build/index.html" ]; then \
+    echo "ERROR: index.html not found in web-build!" && \
+    ls -la /app/web-build/ 2>/dev/null || echo "web-build directory does not exist" && \
+    exit 1; \
+    else \
+    echo "✓ Expo web build successful - index.html found"; \
+    fi
 
 # ----------------------------
 # Copy rest of application code

@@ -19,10 +19,17 @@ const getApiBaseUrl = () => {
   // Find it in Railway dashboard -> your project -> Settings -> Domains
   const RAILWAY_URL = 'https://web-production-0b6ce.up.railway.app'; // ⬅️ UPDATE THIS!
   
-  // For development, you can still use localhost by setting USE_LOCAL=true
-  const USE_LOCAL = process.env.USE_LOCAL === 'true' || true; // Temporarily force local for testing
+  // For development, use localhost if USE_LOCAL is explicitly set to 'true'
+  // In production (Railway), this will be undefined/false, so it uses Railway URL
+  const USE_LOCAL = process.env.USE_LOCAL === 'true';
   
-  if (USE_LOCAL) {
+  // Detect if we're in production (running on Railway domain or production build)
+  const isProduction = typeof window !== 'undefined' && 
+    (window.location.hostname.includes('railway.app') || 
+     window.location.hostname.includes('railway') ||
+     !window.location.hostname.includes('localhost'));
+  
+  if (USE_LOCAL && !isProduction) {
     // For web platform, use localhost
     if (Platform.OS === 'web') {
       const url = 'http://localhost:10000';
@@ -36,9 +43,12 @@ const getApiBaseUrl = () => {
     return url;
   }
   
-  // Production: Use Railway URL
-  console.log('Using Railway production API URL:', RAILWAY_URL);
-  return RAILWAY_URL;
+  // Production: Use Railway URL or current origin
+  const apiUrl = isProduction && typeof window !== 'undefined' 
+    ? window.location.origin  // Use same origin in production
+    : RAILWAY_URL;
+  console.log('Using production API URL:', apiUrl);
+  return apiUrl;
 };
 
 export const API_BASE_URL = getApiBaseUrl();
