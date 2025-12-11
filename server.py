@@ -2386,10 +2386,15 @@ def serve_frontend(path):
     # This includes /waitlist which is handled by the Expo app's React Navigation
     index_path = os.path.join(static_folder, "index.html")
     if os.path.exists(index_path):
-        print(f"[FRONTEND] Serving index.html for path: {path}", flush=True)
+        print(f"[FRONTEND] Serving index.html for path: {path} (static_folder: {static_folder})", flush=True)
         response = send_from_directory(static_folder, "index.html")
-        # Ensure correct content type
+        # Ensure correct content type and prevent caching of index.html
+        # This forces browsers to always fetch the latest version
         response.headers['Content-Type'] = 'text/html; charset=utf-8'
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
         return response
     
     # Fallback: API info if index.html doesn't exist
