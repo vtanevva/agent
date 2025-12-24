@@ -123,8 +123,7 @@ export default function WaitlistPage() {
 
             {/* Description */}
             <Text style={styles.description}>
-              Aivis is an AI-powered productivity assistant that helps you manage your email, calendar, and tasks. Join our beta to get early access and help shape the product.
-            </Text>
+            An AI layer designed to reduce unwanted phone usage by managing communication flow, priority decisions, and cross-app information search.                        </Text>
 
             {/* Message Display */}
             {message ? (
