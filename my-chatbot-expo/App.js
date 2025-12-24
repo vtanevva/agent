@@ -19,49 +19,60 @@ const Stack = createNativeStackNavigator();
 
 export default function App() {
   const navigationRef = useRef(null);
+  const isNavigationReady = useRef(false);
 
-  // Handle URL paths for web
-  useEffect(() => {
+  // Helper function to get initial route based on URL
+  const getInitialRoute = () => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const path = window.location.pathname;
+      if (path === '/waitlist') return 'Waitlist';
+      // Always start with Login for /chat, then navigate with params in onReady
+      // This ensures Chat always receives params when it mounts
+    }
+    return 'Login';
+  };
+
+  // Handle URL paths for web - navigate when navigation is ready
+  const handleInitialNavigation = () => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && navigationRef.current) {
       const path = window.location.pathname;
       const urlParams = new URLSearchParams(window.location.search);
       
       // Navigate to Waitlist if URL is /waitlist
-      if (path === '/waitlist' && navigationRef.current) {
-        // Use setTimeout to ensure navigation is ready
-        setTimeout(() => {
-          if (navigationRef.current) {
-            navigationRef.current.navigate('Waitlist');
-          }
-        }, 100);
+      if (path === '/waitlist') {
+        navigationRef.current.navigate('Waitlist');
+        return;
       }
       
       // Navigate to Chat if URL is /chat with userId and sessionId parameters
-      if (path === '/chat' && navigationRef.current) {
+      if (path === '/chat') {
         const userId = urlParams.get('userId');
         const sessionId = urlParams.get('sessionId');
         if (userId && sessionId) {
+          // Use reset to replace the Login screen with Chat, so back button works correctly
+          navigationRef.current.reset({
+            index: 0,
+            routes: [{ name: 'Chat', params: { userId, sessionId } }],
+          });
+          // Clear URL params after navigation
           setTimeout(() => {
-            if (navigationRef.current) {
-              navigationRef.current.navigate('Chat', {userId, sessionId});
-              // Clear URL params
-              window.history.replaceState({}, '', '/chat');
-            }
+            window.history.replaceState({}, '', '/chat');
           }, 100);
         } else if (userId) {
           // Fallback: if only userId is provided, generate sessionId (backward compatibility)
           const generatedSessionId = genSession(userId);
+          navigationRef.current.reset({
+            index: 0,
+            routes: [{ name: 'Chat', params: { userId, sessionId: generatedSessionId } }],
+          });
+          // Clear URL params after navigation
           setTimeout(() => {
-            if (navigationRef.current) {
-              navigationRef.current.navigate('Chat', {userId, sessionId: generatedSessionId});
-              // Clear URL params
-              window.history.replaceState({}, '', '/chat');
-            }
+            window.history.replaceState({}, '', '/chat');
           }, 100);
         }
       }
     }
-  }, []);
+  };
 
   // Handle deep linking
   useEffect(() => {
@@ -100,6 +111,10 @@ export default function App() {
     <SafeAreaProvider>
       <NavigationContainer
         ref={navigationRef}
+        onReady={() => {
+          isNavigationReady.current = true;
+          handleInitialNavigation();
+        }}
         linking={{
           prefixes: ['/'],
           config: {
@@ -111,7 +126,7 @@ export default function App() {
           },
         }}>
         <Stack.Navigator
-          initialRouteName={Platform.OS === 'web' && typeof window !== 'undefined' && window.location.pathname === '/waitlist' ? 'Waitlist' : 'Login'}
+          initialRouteName={getInitialRoute()}
           screenOptions={{
             headerShown: false,
             contentStyle: {backgroundColor: 'transparent'},
