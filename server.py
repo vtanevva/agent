@@ -69,6 +69,7 @@ from app.utils.oauth_utils import (
     require_google_auth, build_google_flow, parse_expo_state,
     GOOGLE_SCOPES, IG_SCOPES, OAUTH_BASE, TOKEN_URL
 )
+from app.utils.email_resend import send_waitlist_welcome_email
 from app.config import Config
 # Old AutoGen import removed - now using new GmailAgent via orchestrator
 # from app.agents.gmail_agent import run_gmail_autogen
@@ -1629,6 +1630,17 @@ def waitlist_signup():
         waitlist_col.insert_one(waitlist_entry)
         
         print(f"[WAITLIST] New signup: {name} ({email}) - Referral: {referral_source or 'N/A'}", flush=True)
+        
+        # Send welcome email (non-blocking - don't fail if email fails)
+        try:
+            email_sent = send_waitlist_welcome_email(to_email=email, name=name)
+            if email_sent:
+                print(f"[WAITLIST] Welcome email sent to {email}", flush=True)
+            else:
+                print(f"[WAITLIST] Failed to send welcome email to {email}", flush=True)
+        except Exception as email_error:
+            # Log but don't fail the request if email fails
+            print(f"[WAITLIST] Error sending welcome email to {email}: {email_error}", flush=True)
         
         return jsonify({
             "success": True,
