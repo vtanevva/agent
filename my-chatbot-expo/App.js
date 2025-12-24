@@ -26,10 +26,23 @@ export default function App() {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       const path = window.location.pathname;
       if (path === '/waitlist') return 'Waitlist';
-      // Always start with Login - React Navigation linking will handle /chat routes
-      // LoginPage will also handle /chat routes as a fallback
+      // Always start with Login for /chat, then navigate with params in onReady
+      // This ensures Chat always receives params when it mounts
     }
     return 'Login';
+  };
+
+  // Handle URL paths for web - navigate when navigation is ready
+  const handleInitialNavigation = () => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined' && navigationRef.current) {
+      const path = window.location.pathname;
+      
+      // Navigate to Waitlist if URL is /waitlist
+      // For /chat routes, let LoginPage handle navigation (works like guest login)
+      if (path === '/waitlist') {
+        navigationRef.current.navigate('Waitlist');
+      }
+    }
   };
 
   // Handle deep linking
@@ -69,8 +82,13 @@ export default function App() {
           config: {
             screens: {
               Waitlist: 'waitlist',
-              // Don't configure Chat in linking - let LoginPage handle /chat routes manually
-              // This ensures it works the same way as guest login
+              Chat: {
+                path: 'chat',
+                parse: {
+                  userId: (userId) => userId,
+                  sessionId: (sessionId) => sessionId,
+                },
+              },
               Login: '',
             },
           },
