@@ -13,6 +13,7 @@ import GmailAgentPage from './src/pages/GmailAgentPage';
 import ContactsPage from './src/pages/ContactsPage';
 import ContactDetailPage from './src/pages/ContactDetailPage';
 import WaitlistPage from './src/pages/WaitlistPage';
+import {genSession} from './src/config/api';
 
 const Stack = createNativeStackNavigator();
 
@@ -23,6 +24,7 @@ export default function App() {
   useEffect(() => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       const path = window.location.pathname;
+      const urlParams = new URLSearchParams(window.location.search);
       
       // Navigate to Waitlist if URL is /waitlist
       if (path === '/waitlist' && navigationRef.current) {
@@ -33,6 +35,21 @@ export default function App() {
           }
         }, 100);
       }
+      
+      // Navigate to Chat if URL is /chat with username parameter
+      if (path === '/chat' && navigationRef.current) {
+        const username = urlParams.get('username');
+        if (username) {
+          const sessionId = genSession(username);
+          setTimeout(() => {
+            if (navigationRef.current) {
+              navigationRef.current.navigate('Chat', {userId: username, sessionId});
+              // Clear URL params
+              window.history.replaceState({}, '', '/chat');
+            }
+          }, 100);
+        }
+      }
     }
   }, []);
 
@@ -42,8 +59,16 @@ export default function App() {
       const handleUrlChange = () => {
         if (typeof window !== 'undefined' && navigationRef.current) {
           const path = window.location.pathname;
+          const urlParams = new URLSearchParams(window.location.search);
+          
           if (path === '/waitlist') {
             navigationRef.current.navigate('Waitlist');
+          } else if (path === '/chat') {
+            const username = urlParams.get('username');
+            if (username) {
+              const sessionId = genSession(username);
+              navigationRef.current.navigate('Chat', {userId: username, sessionId});
+            }
           }
         }
       };
@@ -66,6 +91,7 @@ export default function App() {
           config: {
             screens: {
               Waitlist: 'waitlist',
+              Chat: 'chat',
               Login: '',
             },
           },

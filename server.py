@@ -5,6 +5,7 @@ import json
 import uuid
 import pickle
 from datetime import datetime
+from urllib.parse import urlparse
 
 import certifi
 import psutil
@@ -1411,28 +1412,55 @@ def google_callback():
 
     user_email = real_email if real_email else state
 
-    # Get base domain from request
+    # Get base domain for redirect - prioritize custom domain over Railway domain
     scheme = 'https' if (request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https') else 'http'
-    host = request.host  # Gets the domain (e.g., aivis.pw)
-    base_url = f"{scheme}://{host}"
     
-    # Clean redirect URL - remove www if present, use clean domain
-    clean_host = host.replace('www.', '') if host.startswith('www.') else host
-    clean_base_url = f"{scheme}://{clean_host}"
+    # Determine the base URL for redirect
+    clean_base_url = None
+    
+    # Priority 1: Check expo_redirect if it's a web URL (tells us where user originally was)
+    if expo_app and expo_redirect and (expo_redirect.startswith('http://') or expo_redirect.startswith('https://')):
+        parsed = urlparse(expo_redirect)
+        if parsed.netloc and 'railway.app' not in parsed.netloc.lower():
+            clean_base_url = f"{parsed.scheme}://{parsed.netloc.replace('www.', '')}"
+    
+    # Priority 2: Check PRODUCTION_URL if set to a custom domain (not Railway)
+    if not clean_base_url:
+        production_url = os.getenv("PRODUCTION_URL")
+        if production_url and 'railway.app' not in production_url.lower():
+            # Use custom domain from PRODUCTION_URL
+            if production_url.startswith('http'):
+                parsed = urlparse(production_url)
+                clean_base_url = f"{parsed.scheme}://{parsed.netloc.replace('www.', '')}"
+            else:
+                clean_base_url = f"{scheme}://{production_url.replace('www.', '')}"
+    
+    # Priority 3: Check X-Forwarded-Host header (Railway sets this for custom domains)
+    if not clean_base_url:
+        forwarded_host = request.headers.get('X-Forwarded-Host')
+        if forwarded_host and 'railway.app' not in forwarded_host.lower():
+            clean_host = forwarded_host.replace('www.', '')
+            clean_base_url = f"{scheme}://{clean_host}"
+    
+    # Priority 4: Fall back to request.host
+    if not clean_base_url:
+        host = request.host
+        clean_host = host.replace('www.', '') if host.startswith('www.') else host
+        clean_base_url = f"{scheme}://{clean_host}"
     
     if expo_app:
         # Check if expo_redirect is a web URL (starts with http)
         if expo_redirect and (expo_redirect.startswith('http://') or expo_redirect.startswith('https://')):
-            # Web app accessing via Expo - redirect to clean domain
-            redirect_url = f"{clean_base_url}/?username={state}&email={user_email}"
+            # Web app accessing via Expo - redirect to chat page
+            redirect_url = f"{clean_base_url}/chat?username={state}&email={user_email}"
             return redirect(redirect_url)
         else:
             # Mobile Expo app - show success page
             display_email = str(user_email) if user_email else str(state)
             return render_template_string(_get_success_page_template(display_email))
 
-    # Web app redirect - clean URL
-    redirect_url = f"{clean_base_url}/?username={state}&email={user_email}"
+    # Web app redirect - redirect to chat page
+    redirect_url = f"{clean_base_url}/chat?username={state}&email={user_email}"
     return redirect(redirect_url)
 
 
