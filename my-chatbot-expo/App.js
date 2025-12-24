@@ -36,40 +36,11 @@ export default function App() {
   const handleInitialNavigation = () => {
     if (Platform.OS === 'web' && typeof window !== 'undefined' && navigationRef.current) {
       const path = window.location.pathname;
-      const urlParams = new URLSearchParams(window.location.search);
       
       // Navigate to Waitlist if URL is /waitlist
+      // For /chat routes, let LoginPage handle navigation (works like guest login)
       if (path === '/waitlist') {
         navigationRef.current.navigate('Waitlist');
-        return;
-      }
-      
-      // Navigate to Chat if URL is /chat with userId and sessionId parameters
-      if (path === '/chat') {
-        const userId = urlParams.get('userId');
-        const sessionId = urlParams.get('sessionId');
-        if (userId && sessionId) {
-          // Use reset to replace the Login screen with Chat, so back button works correctly
-          navigationRef.current.reset({
-            index: 0,
-            routes: [{ name: 'Chat', params: { userId, sessionId } }],
-          });
-          // Clear URL params after navigation
-          setTimeout(() => {
-            window.history.replaceState({}, '', '/chat');
-          }, 100);
-        } else if (userId) {
-          // Fallback: if only userId is provided, generate sessionId (backward compatibility)
-          const generatedSessionId = genSession(userId);
-          navigationRef.current.reset({
-            index: 0,
-            routes: [{ name: 'Chat', params: { userId, sessionId: generatedSessionId } }],
-          });
-          // Clear URL params after navigation
-          setTimeout(() => {
-            window.history.replaceState({}, '', '/chat');
-          }, 100);
-        }
       }
     }
   };
@@ -84,17 +55,8 @@ export default function App() {
           
           if (path === '/waitlist') {
             navigationRef.current.navigate('Waitlist');
-          } else if (path === '/chat') {
-            const userId = urlParams.get('userId');
-            const sessionId = urlParams.get('sessionId');
-            if (userId && sessionId) {
-              navigationRef.current.navigate('Chat', {userId, sessionId});
-            } else if (userId) {
-              // Fallback: if only userId is provided, generate sessionId (backward compatibility)
-              const generatedSessionId = genSession(userId);
-              navigationRef.current.navigate('Chat', {userId, sessionId: generatedSessionId});
-            }
           }
+          // For /chat routes, LoginPage handles navigation (works like guest login)
         }
       };
 

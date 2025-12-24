@@ -117,24 +117,29 @@ export default function LoginPage() {
   }, [navigation, checkGoogleConnection]);
 
   // Check for OAuth redirect parameters (from URL query params)
+  // This works the same way as guest login - simple navigate() call
   useEffect(() => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const urlParams = new URLSearchParams(window.location.search);
-      const userId = urlParams.get('userId');
-      const sessionId = urlParams.get('sessionId');
-      
-      if (userId && sessionId) {
-        console.log('OAuth redirect detected, navigating to chat...', {userId, sessionId});
-        navigation.navigate('Chat', {userId, sessionId});
-        // Clear URL params
-        window.history.replaceState({}, '', window.location.pathname);
-      } else if (userId) {
-        // Fallback: if only userId is provided, generate sessionId (backward compatibility)
-        const generatedSessionId = genSession(userId);
-        console.log('OAuth redirect detected (fallback), navigating to chat...', {userId, sessionId: generatedSessionId});
-        navigation.navigate('Chat', {userId, sessionId: generatedSessionId});
-        // Clear URL params
-        window.history.replaceState({}, '', window.location.pathname);
+      const path = window.location.pathname;
+      // Only handle if we're on the /chat route
+      if (path === '/chat') {
+        const urlParams = new URLSearchParams(window.location.search);
+        const userId = urlParams.get('userId');
+        const sessionId = urlParams.get('sessionId');
+        
+        if (userId && sessionId) {
+          console.log('OAuth redirect detected, navigating to chat...', {userId, sessionId});
+          navigation.navigate('Chat', {userId, sessionId});
+          // Clear URL params
+          window.history.replaceState({}, '', '/chat');
+        } else if (userId) {
+          // Generate sessionId from userId (same as guest login)
+          const generatedSessionId = genSession(userId);
+          console.log('OAuth redirect detected, navigating to chat...', {userId, sessionId: generatedSessionId});
+          navigation.navigate('Chat', {userId, sessionId: generatedSessionId});
+          // Clear URL params
+          window.history.replaceState({}, '', '/chat');
+        }
       }
     }
   }, [navigation]);
