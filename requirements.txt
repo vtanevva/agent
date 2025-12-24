@@ -45,8 +45,9 @@ cryptography>=41.0.0
 certifi>=2023.7.22
 urllib3>=2.0.0
 
-# Email parsing
+# Email parsing and sending
 email-validator>=2.0.0
+resend>=2.0.0
 
 # Logging (optional but recommended)
 colorlog>=6.7.0

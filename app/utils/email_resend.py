@@ -62,7 +62,7 @@ def send_waitlist_welcome_email(to_email: str, name: str) -> bool:
                     <h1>Welcome to Aivis! 🎉</h1>
                 </div>
                 <div class="content">
-                    <p>Hi {name},</p>
+                    <p>Hi,</p>
                     <p>Thank you for joining the Aivis waitlist! We're excited to have you on board.</p>
                     <p>Aivis is an AI layer designed to reduce unwanted phone usage by managing communication flow, priority decisions, and cross-app information search.</p>
                     <p>We'll keep you updated as we move closer to launch. Stay tuned!</p>

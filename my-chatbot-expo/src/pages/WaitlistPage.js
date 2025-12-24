@@ -122,7 +122,7 @@ export default function WaitlistPage() {
             </View>
 
             {/* Description */}
-            <Text style={[styles.description, Platform.OS === 'web' && styles.descriptionDesktop]}>
+            <Text style={[styles.description, Platform.OS !== 'web' && styles.descriptionMobile]}>
             An AI layer designed to reduce unwanted phone usage by managing communication flow, priority decisions, and cross-app information search.                        </Text>
 
             {/* Message Display */}
@@ -287,14 +287,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   description: {
-    textAlign: 'center',
+    textAlign: 'left',
     color: colors.primary[900] + 'CC',
     fontSize: 16,
     marginBottom: 30,
     lineHeight: 24,
   },
-  descriptionDesktop: {
-    textAlign: 'left',
+  descriptionMobile: {
+    textAlign: 'center',
   },
   messageContainer: {
     padding: 15,
