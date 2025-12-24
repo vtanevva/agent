@@ -69,7 +69,7 @@ def send_waitlist_welcome_email(to_email: str, name: str) -> bool:
                     margin: 0 auto; 
                 }}
                 .header {{ 
-                    background: linear-gradient(135deg, #012622 0%, #775B59 50%, #32161F 100%); 
+                    background: linear-gradient(135deg, #3d6b5f 0%, #b89a97 50%, #7a4d5a 100%); 
                     color: #FDFFFC; 
                     padding: 40px 30px; 
                     text-align: center; 
