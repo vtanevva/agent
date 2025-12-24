@@ -39,7 +39,7 @@ export default function WelcomeMessage() {
         
         <Text style={styles.title}>Welcome to Aivis</Text>
         <Text style={styles.subtitle}>
-          Your compassionate AI companion for mental wellness.
+          A system that saves your time and helps you focus on what's important.
         </Text>
       </View>
 
