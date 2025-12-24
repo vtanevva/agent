@@ -4,6 +4,8 @@ import os
 import json
 import uuid
 import pickle
+import random
+import string
 from datetime import datetime
 from urllib.parse import urlparse
 
@@ -1412,6 +1414,13 @@ def google_callback():
 
     user_email = real_email if real_email else state
 
+    # Generate session ID (matching frontend genSession format: userId-randomstring)
+    # Frontend uses: `${id}-${Math.random().toString(36).substring(2, 8)}`
+    # This generates a 6-character alphanumeric string
+    random_str = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+    session_id = f"{state}-{random_str}"
+    user_id = state  # Use state as userId (this is the username)
+
     # Get base domain for redirect - prioritize custom domain over Railway domain
     scheme = 'https' if (request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https') else 'http'
     
@@ -1451,16 +1460,16 @@ def google_callback():
     if expo_app:
         # Check if expo_redirect is a web URL (starts with http)
         if expo_redirect and (expo_redirect.startswith('http://') or expo_redirect.startswith('https://')):
-            # Web app accessing via Expo - redirect to chat page
-            redirect_url = f"{clean_base_url}/chat?username={state}&email={user_email}"
+            # Web app accessing via Expo - redirect to chat page with userId and sessionId
+            redirect_url = f"{clean_base_url}/chat?userId={user_id}&sessionId={session_id}"
             return redirect(redirect_url)
         else:
             # Mobile Expo app - show success page
             display_email = str(user_email) if user_email else str(state)
             return render_template_string(_get_success_page_template(display_email))
 
-    # Web app redirect - redirect to chat page
-    redirect_url = f"{clean_base_url}/chat?username={state}&email={user_email}"
+    # Web app redirect - redirect to chat page with userId and sessionId
+    redirect_url = f"{clean_base_url}/chat?userId={user_id}&sessionId={session_id}"
     return redirect(redirect_url)
 
 

@@ -36,14 +36,24 @@ export default function App() {
         }, 100);
       }
       
-      // Navigate to Chat if URL is /chat with username parameter
+      // Navigate to Chat if URL is /chat with userId and sessionId parameters
       if (path === '/chat' && navigationRef.current) {
-        const username = urlParams.get('username');
-        if (username) {
-          const sessionId = genSession(username);
+        const userId = urlParams.get('userId');
+        const sessionId = urlParams.get('sessionId');
+        if (userId && sessionId) {
           setTimeout(() => {
             if (navigationRef.current) {
-              navigationRef.current.navigate('Chat', {userId: username, sessionId});
+              navigationRef.current.navigate('Chat', {userId, sessionId});
+              // Clear URL params
+              window.history.replaceState({}, '', '/chat');
+            }
+          }, 100);
+        } else if (userId) {
+          // Fallback: if only userId is provided, generate sessionId (backward compatibility)
+          const generatedSessionId = genSession(userId);
+          setTimeout(() => {
+            if (navigationRef.current) {
+              navigationRef.current.navigate('Chat', {userId, sessionId: generatedSessionId});
               // Clear URL params
               window.history.replaceState({}, '', '/chat');
             }
@@ -64,10 +74,14 @@ export default function App() {
           if (path === '/waitlist') {
             navigationRef.current.navigate('Waitlist');
           } else if (path === '/chat') {
-            const username = urlParams.get('username');
-            if (username) {
-              const sessionId = genSession(username);
-              navigationRef.current.navigate('Chat', {userId: username, sessionId});
+            const userId = urlParams.get('userId');
+            const sessionId = urlParams.get('sessionId');
+            if (userId && sessionId) {
+              navigationRef.current.navigate('Chat', {userId, sessionId});
+            } else if (userId) {
+              // Fallback: if only userId is provided, generate sessionId (backward compatibility)
+              const generatedSessionId = genSession(userId);
+              navigationRef.current.navigate('Chat', {userId, sessionId: generatedSessionId});
             }
           }
         }

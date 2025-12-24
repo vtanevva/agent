@@ -120,13 +120,19 @@ export default function LoginPage() {
   useEffect(() => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
-      const username = urlParams.get('username');
-      const email = urlParams.get('email');
+      const userId = urlParams.get('userId');
+      const sessionId = urlParams.get('sessionId');
       
-      if (username) {
-        console.log('OAuth redirect detected, navigating to chat...', {username, email});
-        const sessionId = genSession(username);
-        navigation.navigate('Chat', {userId: username, sessionId});
+      if (userId && sessionId) {
+        console.log('OAuth redirect detected, navigating to chat...', {userId, sessionId});
+        navigation.navigate('Chat', {userId, sessionId});
+        // Clear URL params
+        window.history.replaceState({}, '', window.location.pathname);
+      } else if (userId) {
+        // Fallback: if only userId is provided, generate sessionId (backward compatibility)
+        const generatedSessionId = genSession(userId);
+        console.log('OAuth redirect detected (fallback), navigating to chat...', {userId, sessionId: generatedSessionId});
+        navigation.navigate('Chat', {userId, sessionId: generatedSessionId});
         // Clear URL params
         window.history.replaceState({}, '', window.location.pathname);
       }
