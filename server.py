@@ -4,7 +4,6 @@ import os
 import json
 import uuid
 import pickle
-import logging
 from datetime import datetime
 
 import certifi
@@ -22,14 +21,8 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 import openai
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
-)
-
-# Local modules
+# Local modules - Import logging utils FIRST to configure logging
+from app.utils.logging_utils import get_logger
 # agent_core removed - calendar now uses CalendarAgent
 # from app.agent_core.agent import run_agent
 # from app.agent_core.tool_registry import all_openai_schemas
@@ -93,6 +86,9 @@ from app.api.contacts_routes import contacts_bp
 from app.api.calendar_routes import calendar_bp
 from app.api.files_routes import files_bp
 
+# Initialize logger after logging is configured
+logger = get_logger(__name__)
+
 # Environment setup
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
@@ -110,17 +106,23 @@ def create_app():
     app = Flask(__name__, static_folder="web-build", static_url_path="")
     CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
     app.secret_key = Config.FLASK_SECRET_KEY or "change-me-in-prod"
+    
+    # Configure Flask's logger to use our logging system
+    # Flask's logger should propagate to root logger (which has our handler)
+    app.logger.propagate = True
+    # Clear Flask's default handlers so messages propagate to root logger
+    app.logger.handlers.clear()
 
     # Initialize database
     db_connected = init_database()
     if db_connected:
-        print("[INIT] MongoDB connected successfully")
+        logger.info("MongoDB connected successfully")
     else:
-        print("[INIT] MongoDB not connected - running in offline mode")
+        logger.warning("MongoDB not connected - running in offline mode")
 
     # Tool registry removed - agents call functions directly now
     # available_tools = [tool['function']['name'] for tool in all_openai_schemas()]
-    # print(f"[INIT] Available tools: {available_tools}")
+    # logger.debug(f"Available tools: {available_tools}")
     
     # Register new blueprints (Phase 1)
     app.register_blueprint(chat_bp)
@@ -129,14 +131,22 @@ def create_app():
     app.register_blueprint(calendar_bp)
     app.register_blueprint(files_bp)
     
-    print("[INIT] Registered API blueprints: chat, gmail, contacts, calendar, files")
+    logger.info("Registered API blueprints: chat, gmail, contacts, calendar, files")
     
-    # Add request logging to debug issues
+    # Add request logging
     @app.before_request
     def log_request():
-        print(f"[REQUEST] {request.method} {request.path}", flush=True)
+        msg = f"{request.method} {request.path}"
+        # Force log to appear - use info level
+        logger.info(msg)
         if request.path == "/api/gmail/send":
-            print(f"[REQUEST] Sending email endpoint hit!", flush=True)
+            logger.info("Sending email endpoint hit!")
+    
+    @app.after_request
+    def log_response(response):
+        msg = f"{request.method} {request.path} -> {response.status_code}"
+        logger.info(msg)
+        return response
     
     return app
 
@@ -185,13 +195,13 @@ def save_message(user_id, session_id, user_message, bot_reply,
             upsert=True,
         )
     except Exception as e:
-        print(f"[ERROR] Failed to save message: {e}", flush=True)
+        logger.error(f"Failed to save message: {e}", exc_info=True)
     
     # Extract and store contact notes in background
     try:
         _extract_contact_notes(user_id, user_message, bot_reply)
     except Exception as e:
-        print(f"[ERROR] Failed to extract contact notes: {e}", flush=True)
+        logger.error(f"Failed to extract contact notes: {e}", exc_info=True)
 
 
 def _extract_contact_notes(user_id: str, user_message: str, bot_reply: str):
@@ -289,7 +299,7 @@ Summary:"""
             )
             
         except Exception as e:
-            print(f"[ERROR] Failed to extract notes for contact {contact.get('email')}: {e}", flush=True)
+            logger.error(f"Failed to extract notes for contact {contact.get('email')}: {e}", exc_info=True)
             continue
 
 
@@ -451,7 +461,7 @@ def autogen_gmail():
         )
         return jsonify({"reply": reply})
     except Exception as e:
-        print(f"[ERROR] Error in autogen_gmail: {e}", flush=True)
+        logger.error(f"Error in autogen_gmail: {e}", exc_info=True)
         return jsonify({"error": "Failed to process request", "message": str(e)}), 500
 
 @app.route("/api/gmail/analyze-style", methods=["POST"])
@@ -1306,7 +1316,7 @@ def google_auth(user_id):
 
         return redirect(auth_url)
     except Exception as e:
-        print(f"[ERROR] OAuth error: {e}", flush=True)
+        logger.error(f"OAuth error: {e}", exc_info=True)
         return render_template_string("""
         <!doctype html>
         <html>
@@ -1386,7 +1396,7 @@ def google_callback():
         save_google_credentials(state, creds, real_email)
 
     except Exception as e:
-        print(f"[ERROR] OAuth callback error: {e}", flush=True)
+        logger.error(f"OAuth callback error: {e}", exc_info=True)
         return render_template_string("""
         <!doctype html>
         <html>
@@ -1518,7 +1528,7 @@ def instagram_callback():
                 upsert=True
             )
         except Exception as e:
-            print(f"[ERROR] Failed to save Instagram credentials: {e}", flush=True)
+            logger.error(f"Failed to save Instagram credentials: {e}", exc_info=True)
             return f"❌ Error saving credentials: {e}", 500
     else:
         # Fallback to file-based storage
@@ -1576,6 +1586,42 @@ def api_info():
 # Only API endpoints remain here for backend functionality
 
 
+@app.route("/api/waitlist/test-email", methods=["POST"])
+def test_waitlist_email():
+    """Test endpoint to verify email sending works."""
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        test_email = (data.get("email") or "").strip().lower()
+        test_name = (data.get("name") or "Test User").strip()
+        
+        if not test_email:
+            return jsonify({
+                "success": False,
+                "error": "Email is required for testing."
+            }), 400
+        
+        logger.info(f"Testing email send to {test_email}")
+        email_sent = send_waitlist_welcome_email(to_email=test_email, name=test_name)
+        
+        if email_sent:
+            return jsonify({
+                "success": True,
+                "message": f"Test email sent successfully to {test_email}! Check your inbox."
+            }), 200
+        else:
+            return jsonify({
+                "success": False,
+                "error": "Failed to send test email. Check server logs for details."
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Test email error: {e}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": f"Error: {str(e)}"
+        }), 500
+
+
 @app.route("/api/waitlist/signup", methods=["POST"])
 def waitlist_signup():
     """Handle waitlist signup submissions."""
@@ -1601,46 +1647,47 @@ def waitlist_signup():
         
         # Get waitlist collection
         waitlist_col = get_waitlist_collection()
-        if waitlist_col is None:
-            print(f"[WAITLIST] Database not connected, but received signup: {email}", flush=True)
-            return jsonify({
-                "success": True,
-                "message": "Signup received (database offline, will be saved when connected)."
-            }), 200
         
-        # Check if email already exists
-        existing = waitlist_col.find_one({"email": email})
-        if existing:
-            return jsonify({
-                "success": True,
-                "message": "You're already on the waitlist!"
-            }), 200
+        # Track if we should save to database
+        save_to_db = waitlist_col is not None
         
-        # Add to waitlist
-        waitlist_entry = {
-            "name": name,
-            "email": email,
-            "created_at": datetime.utcnow(),
-            "status": "pending"
-        }
+        if not save_to_db:
+            logger.warning(f"Database not connected, but received signup: {email}")
+        else:
+            # Check if email already exists
+            existing = waitlist_col.find_one({"email": email})
+            if existing:
+                logger.info(f"Email {email} already exists in waitlist, skipping email send")
+                return jsonify({
+                    "success": True,
+                    "message": "You're already on the waitlist!"
+                }), 200
+            
+            # Add to waitlist
+            waitlist_entry = {
+                "name": name,
+                "email": email,
+                "created_at": datetime.utcnow(),
+                "status": "pending"
+            }
+            
+            if referral_source:
+                waitlist_entry["referral_source"] = referral_source
+            
+            waitlist_col.insert_one(waitlist_entry)
+            logger.info(f"New signup: {name} ({email}) - Referral: {referral_source or 'N/A'}")
         
-        if referral_source:
-            waitlist_entry["referral_source"] = referral_source
-        
-        waitlist_col.insert_one(waitlist_entry)
-        
-        print(f"[WAITLIST] New signup: {name} ({email}) - Referral: {referral_source or 'N/A'}", flush=True)
-        
-        # Send welcome email (non-blocking - don't fail if email fails)
+        # Send welcome email regardless of database status (non-blocking - don't fail if email fails)
+        logger.info(f"Attempting to send welcome email to {email}")
         try:
             email_sent = send_waitlist_welcome_email(to_email=email, name=name)
             if email_sent:
-                print(f"[WAITLIST] Welcome email sent to {email}", flush=True)
+                logger.info(f"Welcome email sent to {email}")
             else:
-                print(f"[WAITLIST] Failed to send welcome email to {email}", flush=True)
+                logger.warning(f"Failed to send welcome email to {email}")
         except Exception as email_error:
             # Log but don't fail the request if email fails
-            print(f"[WAITLIST] Error sending welcome email to {email}: {email_error}", flush=True)
+            logger.error(f"Error sending welcome email to {email}: {email_error}", exc_info=True)
         
         return jsonify({
             "success": True,
@@ -1648,7 +1695,7 @@ def waitlist_signup():
         }), 200
         
     except Exception as e:
-        print(f"[ERROR] Waitlist signup error: {e}", flush=True)
+        logger.error(f"Waitlist signup error: {e}", exc_info=True)
         return jsonify({
             "success": False,
             "error": "An error occurred. Please try again later."
@@ -1692,7 +1739,7 @@ def waitlist_admin_auth():
             }), 401
             
     except Exception as e:
-        print(f"[ERROR] Admin auth error: {e}", flush=True)
+        logger.error(f"Admin auth error: {e}", exc_info=True)
         return jsonify({
             "success": False,
             "error": "Authentication error"
@@ -1740,7 +1787,7 @@ def waitlist_list():
         }), 200
         
     except Exception as e:
-        print(f"[ERROR] Waitlist list error: {e}", flush=True)
+        logger.error(f"Waitlist list error: {e}", exc_info=True)
         return jsonify({
             "success": False,
             "error": "An error occurred while fetching waitlist entries."
@@ -2328,7 +2375,7 @@ def serve_expo_assets(asset_path):
         file_path = os.path.join(expo_dir, asset_path)
         if os.path.exists(file_path) and os.path.isfile(file_path):
             return send_from_directory(expo_dir, asset_path)
-    print(f"[ASSETS] _expo asset not found: {asset_path}", flush=True)
+    logger.debug(f"_expo asset not found: {asset_path}")
     return jsonify({"error": "Asset not found"}), 404
 
 @app.route("/assets/<path:asset_path>")
@@ -2340,7 +2387,7 @@ def serve_assets(asset_path):
         file_path = os.path.join(assets_dir, asset_path)
         if os.path.exists(file_path) and os.path.isfile(file_path):
             return send_from_directory(assets_dir, asset_path)
-    print(f"[ASSETS] assets file not found: {asset_path}", flush=True)
+    logger.debug(f"assets file not found: {asset_path}")
     return jsonify({"error": "Asset not found"}), 404
 
 @app.route("/static/<path:asset_path>")
@@ -2352,7 +2399,7 @@ def serve_static_assets(asset_path):
         file_path = os.path.join(static_dir, asset_path)
         if os.path.exists(file_path) and os.path.isfile(file_path):
             return send_from_directory(static_dir, asset_path)
-    print(f"[ASSETS] static file not found: {asset_path}", flush=True)
+    logger.debug(f"static file not found: {asset_path}")
     return jsonify({"error": "Asset not found"}), 404
 
 @app.route("/", defaults={"path": ""})
@@ -2374,7 +2421,7 @@ def serve_frontend(path):
     # Check if web-build exists
     static_folder = app.static_folder
     if not static_folder:
-        print(f"[FRONTEND] Static folder not configured", flush=True)
+        logger.warning("Static folder not configured")
         return jsonify({
             "service": "Mental Health AI Assistant API",
             "version": "1.0.0",
@@ -2385,7 +2432,7 @@ def serve_frontend(path):
         }), 200
     
     if not os.path.exists(static_folder):
-        print(f"[FRONTEND] Static folder does not exist: {static_folder}", flush=True)
+        logger.warning(f"Static folder does not exist: {static_folder}")
         return jsonify({
             "service": "Mental Health AI Assistant API",
             "version": "1.0.0",
@@ -2416,7 +2463,7 @@ def serve_frontend(path):
     # This includes /waitlist which is handled by the Expo app's React Navigation
     index_path = os.path.join(static_folder, "index.html")
     if os.path.exists(index_path):
-        print(f"[FRONTEND] Serving index.html for path: {path} (static_folder: {static_folder})", flush=True)
+        logger.debug(f"Serving index.html for path: {path} (static_folder: {static_folder})")
         response = send_from_directory(static_folder, "index.html")
         # Ensure correct content type and prevent caching of index.html
         # This forces browsers to always fetch the latest version
@@ -2428,7 +2475,7 @@ def serve_frontend(path):
         return response
     
     # Fallback: API info if index.html doesn't exist
-    print(f"[FRONTEND] index.html not found at {index_path}", flush=True)
+    logger.warning(f"index.html not found at {index_path}")
     # List what files exist in the static folder for debugging
     try:
         files = os.listdir(static_folder) if os.path.exists(static_folder) else []
@@ -2459,6 +2506,8 @@ if __name__ == "__main__":
     except ValueError:
         port = 10000
     
+    logger.info(f"Starting server on http://0.0.0.0:{port}")
+    logger.info("Server is ready to accept requests...")
     app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
 
     

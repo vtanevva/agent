@@ -83,11 +83,12 @@ def configure_logging():
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
     
-    # Silence noisy third-party loggers
+    # Silence noisy third-party loggers (but NOT werkzeug - we want to see requests)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("googleapiclient").setLevel(logging.WARNING)
     logging.getLogger("google.auth").setLevel(logging.WARNING)
-    logging.getLogger("werkzeug").setLevel(logging.WARNING)
+    # Keep werkzeug at INFO to see HTTP requests
+    logging.getLogger("werkzeug").setLevel(logging.INFO)
     
     _configured = True
 
@@ -125,9 +126,14 @@ def get_logger(name: str, level: Optional[int] = None) -> logging.Logger:
     # Create new logger
     logger = logging.getLogger(name)
     
-    # Set custom level if specified
+    # Ensure propagation is enabled (default, but making it explicit)
+    logger.propagate = True
+    
+    # Don't set level on child loggers unless explicitly specified
+    # This allows them to use root logger's level and propagate correctly
     if level is not None:
         logger.setLevel(level)
+    # If level is None, don't set it - logger will inherit from parent (root logger)
     
     # Cache and return
     _loggers[name] = logger
