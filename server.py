@@ -1428,12 +1428,12 @@ def google_callback():
     if not clean_base_url:
         production_url = os.getenv("PRODUCTION_URL")
         if production_url and 'railway.app' not in production_url.lower():
-            # Use custom domain from PRODUCTION_URL
+            # Use custom domain from PRODUCTION_URL exactly as specified (preserve www. if included)
             if production_url.startswith('http'):
                 parsed = urlparse(production_url)
-                clean_base_url = f"{parsed.scheme}://{parsed.netloc.replace('www.', '')}"
+                clean_base_url = f"{parsed.scheme}://{parsed.netloc}"
             else:
-                clean_base_url = f"{scheme}://{production_url.replace('www.', '')}"
+                clean_base_url = f"{scheme}://{production_url}"
     
     # Priority 3: Check X-Forwarded-Host header (Railway sets this for custom domains)
     if not clean_base_url:
