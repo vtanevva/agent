@@ -118,6 +118,7 @@ export default function LoginPage() {
 
   // Check for OAuth redirect parameters (from URL query params)
   // This works the same way as guest login - simple navigate() call
+  // Also handles page refresh on /chat routes
   useEffect(() => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       const path = window.location.pathname;
@@ -128,17 +129,18 @@ export default function LoginPage() {
         const sessionId = urlParams.get('sessionId');
         
         if (userId && sessionId) {
-          console.log('OAuth redirect detected, navigating to chat...', {userId, sessionId});
-          navigation.navigate('Chat', {userId, sessionId});
-          // Clear URL params
-          window.history.replaceState({}, '', '/chat');
+          console.log('Chat route detected, navigating to chat...', {userId, sessionId});
+          // Use setTimeout to ensure navigation is ready (works for both OAuth redirect and page refresh)
+          setTimeout(() => {
+            navigation.navigate('Chat', {userId, sessionId});
+          }, 100);
         } else if (userId) {
-          // Generate sessionId from userId (same as guest login)
+          // Fallback: if only userId is provided, generate sessionId (backward compatibility)
           const generatedSessionId = genSession(userId);
-          console.log('OAuth redirect detected, navigating to chat...', {userId, sessionId: generatedSessionId});
-          navigation.navigate('Chat', {userId, sessionId: generatedSessionId});
-          // Clear URL params
-          window.history.replaceState({}, '', '/chat');
+          console.log('Chat route detected (fallback), navigating to chat...', {userId, sessionId: generatedSessionId});
+          setTimeout(() => {
+            navigation.navigate('Chat', {userId, sessionId: generatedSessionId});
+          }, 100);
         }
       }
     }
