@@ -12,10 +12,10 @@ import {Svg, Path} from 'react-native-svg';
 
 const CATEGORIES = [
   {key: 'urgent', label: 'Urgent', color: colors.dark[600], icon: '⚡'},
-  {key: 'waiting_for_reply', label: 'Waiting', color: colors.accent[600], icon: '⏳'},
+  {key: 'waiting_for_reply', label: 'Waiting', color: colors.accent[500], icon: '⏳', gradient: [colors.accent[500], colors.secondary[500], colors.dark[500]]},
   {key: 'action_items', label: 'Action Items', color: colors.secondary[600], icon: '✓'},
   {key: 'clients', label: 'Clients', color: colors.primary[700], icon: '👤'},
-  {key: 'invoices', label: 'Invoices', color: colors.accent[500], icon: '💰'},
+  {key: 'invoices', label: 'Invoices', color: colors.accent[500], icon: '💰', gradient: [colors.accent[500], colors.secondary[500], colors.dark[500]]},
   {key: 'newsletters', label: 'Newsletters', color: colors.primary[600], icon: '📰'},
   {key: 'normal', label: 'Other', color: colors.primary[500], icon: '📧'},
 ];
@@ -229,8 +229,17 @@ export default function GmailAgentPage() {
                     style={[
                       styles.categoryChip,
                       selectedCategory === cat.key && styles.categoryChipActive,
-                      {borderLeftColor: cat.color, borderLeftWidth: 3},
                     ]}>
+                    {cat.gradient ? (
+                      <LinearGradient
+                        colors={cat.gradient}
+                        start={{x: 0, y: 0}}
+                        end={{x: 0, y: 1}}
+                        style={styles.categoryGradientBorder}
+                      />
+                    ) : (
+                      <View style={[styles.categorySolidBorder, {backgroundColor: cat.color}]} />
+                    )}
                     <Text style={styles.categoryIcon}>{cat.icon}</Text>
                     <Text style={[styles.categoryChipText, selectedCategory === cat.key && styles.categoryChipTextActive]}>
                       {cat.label} ({count})
@@ -421,10 +430,26 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary[200] + '30',
     borderWidth: 1,
     borderColor: colors.dark[500] + '10',
+    position: 'relative',
+    overflow: 'hidden',
   },
   categoryChipActive: {
     backgroundColor: colors.secondary[500] + '30',
     borderColor: colors.secondary[600] + '50',
+  },
+  categoryGradientBorder: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
+  },
+  categorySolidBorder: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
   },
   categoryIcon: {
     fontSize: 16,

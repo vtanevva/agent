@@ -69,7 +69,7 @@ def send_waitlist_welcome_email(to_email: str, name: str) -> bool:
                     margin: 0 auto; 
                 }}
                 .header {{ 
-                    background: linear-gradient(135deg, #012622 0%, #011A1C 100%); 
+                    background: linear-gradient(135deg, #012622 0%, #775B59 50%, #32161F 100%); 
                     color: #FDFFFC; 
                     padding: 40px 30px; 
                     text-align: center; 
@@ -106,7 +106,6 @@ def send_waitlist_welcome_email(to_email: str, name: str) -> bool:
         <body>
             <div class="container">
                 <div class="header">
-                    <h1>Welcome to Aivis! 🎉</h1>
                 </div>
                 <div class="content">
                     <p>Hi {name},</p>

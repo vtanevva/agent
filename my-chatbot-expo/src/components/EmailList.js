@@ -35,7 +35,7 @@ export default function EmailList({emails, onSelect, onArchive, onDone, hiddenTh
               style={styles.emailCard}>
               <View style={styles.emailContent}>
                 <LinearGradient
-                  colors={[colors.accent[500], colors.secondary[600]]}
+                  colors={[colors.accent[500], colors.secondary[500], colors.dark[500]]}
                   style={styles.emailIcon}>
                   <Text style={styles.emailIconText}>
                     {(email.from?.charAt(0) || 'E').toUpperCase()}

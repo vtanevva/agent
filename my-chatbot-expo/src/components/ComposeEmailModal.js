@@ -168,7 +168,7 @@ export default function ComposeEmailModal({visible, onClose, userId, initialTo, 
                 <Text style={styles.cancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity disabled={sending || !to.trim() || !body.trim()} onPress={handleSend} style={styles.sendWrapper}>
-                <LinearGradient colors={[colors.accent[500], colors.accent[600]]} style={styles.sendButton}>
+                <LinearGradient colors={[colors.accent[500], colors.secondary[500], colors.dark[500]]} style={styles.sendButton}>
                   <Text style={styles.sendText}>{sending ? 'Sending…' : 'Send'}</Text>
                 </LinearGradient>
               </TouchableOpacity>

@@ -425,7 +425,7 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
               disabled={sending || !draft.trim() || (mode === 'forward' && !forwardTo.trim())} 
               onPress={handleSend} 
               style={styles.sendWrapper}>
-              <LinearGradient colors={[colors.accent[500], colors.accent[600]]} style={styles.sendButton}>
+              <LinearGradient colors={[colors.accent[500], colors.secondary[500], colors.dark[500]]} style={styles.sendButton}>
                 <Text style={styles.sendText}>
                   {sentJustNow ? 'Sent ✓' : sending ? (mode === 'forward' ? 'Forwarding...' : 'Sending...') : (mode === 'forward' ? 'Forward' : 'Send')}
                 </Text>
