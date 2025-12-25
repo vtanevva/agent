@@ -24,10 +24,11 @@ const getApiBaseUrl = () => {
   const USE_LOCAL = process.env.USE_LOCAL === 'true' || 
     (typeof window !== 'undefined' && window.location.hostname === 'localhost');
   
-  // Detect if we're in production (running on Railway domain or production build)
+  // Detect if we're in production (running on Railway domain or custom domain)
   const isProduction = typeof window !== 'undefined' && 
     (window.location.hostname.includes('railway.app') || 
-     window.location.hostname.includes('railway'));
+     window.location.hostname.includes('railway') ||
+     window.location.hostname.includes('aivis.pw'));
   
   if (USE_LOCAL && !isProduction) {
     // For web platform, use localhost

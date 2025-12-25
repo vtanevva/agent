@@ -31,6 +31,14 @@ export default function ChatPage() {
   const navigation = useNavigation();
   const {userId, sessionId} = route.params || {};
   
+  // Redirect to Login if params are missing
+  useEffect(() => {
+    if (!userId || !sessionId) {
+      console.warn('ChatPage: Missing userId or sessionId, redirecting to Login');
+      navigation.replace('Login');
+    }
+  }, [userId, sessionId, navigation]);
+  
   const [chat, setChat] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
