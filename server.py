@@ -1850,6 +1850,28 @@ def waitlist_page():
     return jsonify({"error": "Frontend not found"}), 404
 
 
+@app.route("/chat", methods=["GET"])
+@app.route("/Chat", methods=["GET"])
+def chat_page():
+    """Serve the chat page (handled by Expo frontend)."""
+    logger.info("chat_page route called")
+    # Serve index.html for SPA routing - the frontend will handle the /chat route
+    static_folder = app.static_folder
+    if static_folder and os.path.exists(static_folder):
+        index_path = os.path.join(static_folder, "index.html")
+        logger.info(f"Serving index.html from chat route, exists: {os.path.exists(index_path)}")
+        if os.path.exists(index_path):
+            response = send_from_directory(static_folder, "index.html")
+            response.headers['Content-Type'] = 'text/html; charset=utf-8'
+            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            response.headers['X-Content-Type-Options'] = 'nosniff'
+            return response
+    logger.error("index.html not found in chat route")
+    return jsonify({"error": "Frontend not found"}), 404
+
+
 @app.route("/waitlist/admin", methods=["GET"])
 def waitlist_admin():
     """Admin page to view all waitlist signups."""
@@ -2444,19 +2466,24 @@ def serve_static_assets(asset_path):
 @app.route("/<path:path>")
 def serve_frontend(path):
     """Serve Expo web app or API routes."""
+    logger.info(f"serve_frontend called with path: '{path}'")
+    
     # Normalize path to lowercase for comparison
     path_lower = path.lower()
     
     # Don't interfere with API routes (check lowercase)
     if path_lower.startswith("api/"):
+        logger.info(f"Returning 404 for API route: {path}")
         return jsonify({"error": "API endpoint not found"}), 404
     
     # Don't interfere with OAuth routes (check lowercase)
     if path_lower.startswith("google/") or path_lower.startswith("instagram/"):
+        logger.info(f"Returning 404 for OAuth route: {path}")
         return jsonify({"error": "Endpoint not found"}), 404
     
     # Don't interfere with waitlist admin route (check lowercase)
     if path_lower == "waitlist/admin":
+        logger.info(f"Returning 404 for waitlist/admin route: {path}")
         return jsonify({"error": "Endpoint not found"}), 404
     
     # Check if web-build exists
@@ -2501,10 +2528,12 @@ def serve_frontend(path):
                 return send_from_directory(static_folder, root_path)
     
     # Serve index.html for all other routes (SPA routing)
-    # This includes /waitlist which is handled by the Expo app's React Navigation
+    # This includes /waitlist and /chat which are handled by the Expo app's React Navigation
     index_path = os.path.join(static_folder, "index.html")
+    logger.info(f"Checking for index.html at: {index_path}, exists: {os.path.exists(index_path)}")
+    
     if os.path.exists(index_path):
-        logger.debug(f"Serving index.html for path: {path} (static_folder: {static_folder})")
+        logger.info(f"Serving index.html for path: {path}")
         response = send_from_directory(static_folder, "index.html")
         # Ensure correct content type and prevent caching of index.html
         # This forces browsers to always fetch the latest version
@@ -2516,7 +2545,7 @@ def serve_frontend(path):
         return response
     
     # Fallback: API info if index.html doesn't exist
-    logger.warning(f"index.html not found at {index_path}")
+    logger.error(f"index.html not found at {index_path}")
     # List what files exist in the static folder for debugging
     try:
         files = os.listdir(static_folder) if os.path.exists(static_folder) else []
