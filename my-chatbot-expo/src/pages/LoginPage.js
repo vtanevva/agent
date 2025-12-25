@@ -117,11 +117,12 @@ export default function LoginPage() {
   }, [navigation, checkGoogleConnection]);
 
   // Handle /chat URLs with params (both OAuth redirects AND page refreshes)
+  // Handle both /chat and /Chat (case-insensitive)
   useEffect(() => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const path = window.location.pathname;
+      const path = window.location.pathname.toLowerCase();
       
-      // Only handle if we're on the /chat route
+      // Only handle if we're on the /chat route (case-insensitive)
       if (path === '/chat') {
         const urlParams = new URLSearchParams(window.location.search);
         const userId = urlParams.get('userId');
