@@ -119,24 +119,34 @@ export default function LoginPage() {
   // Handle /chat URLs with params (both OAuth redirects AND page refreshes)
   // Handle both /chat and /Chat (case-insensitive)
   useEffect(() => {
+    console.log('LoginPage mounted, checking URL...');
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      const path = window.location.pathname.toLowerCase();
+      const path = window.location.pathname;
+      const pathLower = path.toLowerCase();
+      console.log('Current path:', path, 'Lower:', pathLower);
       
       // Only handle if we're on the /chat route (case-insensitive)
-      if (path === '/chat') {
+      if (pathLower === '/chat') {
         const urlParams = new URLSearchParams(window.location.search);
         const userId = urlParams.get('userId');
         const sessionId = urlParams.get('sessionId');
+        console.log('Chat route detected! userId:', userId, 'sessionId:', sessionId);
         
         if (userId && sessionId) {
-          console.log('Chat route detected, navigating...', {userId, sessionId});
-          // Navigate immediately (works for both OAuth redirect and page refresh)
-          navigation.navigate('Chat', {userId, sessionId});
+          console.log('Navigating to Chat with params:', {userId, sessionId});
+          // Use setTimeout to ensure navigation is ready
+          setTimeout(() => {
+            navigation.navigate('Chat', {userId, sessionId});
+          }, 100);
         } else if (userId) {
           // Fallback: if only userId is provided, generate sessionId
           const generatedSessionId = genSession(userId);
-          console.log('Chat route detected (generating sessionId)...', {userId, sessionId: generatedSessionId});
-          navigation.navigate('Chat', {userId, sessionId: generatedSessionId});
+          console.log('Navigating to Chat with generated sessionId:', {userId, sessionId: generatedSessionId});
+          setTimeout(() => {
+            navigation.navigate('Chat', {userId, sessionId: generatedSessionId});
+          }, 100);
+        } else {
+          console.log('Chat route but missing userId/sessionId');
         }
       }
     }

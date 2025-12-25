@@ -67,14 +67,8 @@ export default function App() {
           config: {
             screens: {
               Waitlist: 'waitlist',
-              Chat: {
-                path: 'chat',
-                parse: {
-                  userId: (userId) => userId,
-                  sessionId: (sessionId) => sessionId,
-                },
-              },
               Login: '',
+              // Don't include Chat here - LoginPage will handle /chat navigation manually
             },
           },
         }}>
