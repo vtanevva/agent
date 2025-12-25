@@ -1,5 +1,6 @@
 """Main Flask server for the mental health AI assistant"""
 
+import sys
 import os
 import json
 import uuid
@@ -8,6 +9,14 @@ import random
 import string
 from datetime import datetime
 from urllib.parse import urlparse
+
+# Ensure Windows consoles don't crash on unicode output (e.g., ✅)
+if sys.platform.startswith("win"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 import certifi
 import psutil

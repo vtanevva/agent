@@ -63,7 +63,14 @@ class GmailAgent:
         
         # Send new email
         if any(phrase in lower for phrase in [
-            "send email to", "email to", "compose email", "write email"
+            "send email to",
+            "send an email to",
+            "email to",
+            "compose email",
+            "write email",
+            # Treat "send a message to X" as compose-email intent (Gmail-backed messaging)
+            "send a message to",
+            "send message to",
         ]):
             return "send"
         
@@ -76,6 +83,93 @@ class GmailAgent:
             return "detail"
         
         return "unknown"
+
+    def _extract_recipient_and_message(self, message: str) -> Dict[str, str]:
+        """
+        Extract recipient ("to") and an optional short message the user wants to send.
+
+        Handles phrases like:
+        - "send a message to Marin saying hi"
+        - "send a message to Marin: hi"
+        - "send an email to Marin saying hi"
+        - "email Marin about the report"
+        """
+        text = (message or "").strip()
+
+        # Highest-signal patterns first: explicitly includes "saying"/":" message payload
+        patterns = [
+            # send a message to X saying Y
+            r"send\s+(?:a\s+)?message\s+to\s+(?P<to>.+?)\s+(?:saying|that\s+says)\s+(?P<body>.+)$",
+            # send a message to X: Y
+            r"send\s+(?:a\s+)?message\s+to\s+(?P<to>.+?)\s*:\s*(?P<body>.+)$",
+            # send an email to X saying Y
+            r"send\s+an?\s+email\s+to\s+(?P<to>.+?)\s+(?:saying|that\s+says)\s+(?P<body>.+)$",
+            # send email to X saying Y
+            r"send\s+email\s+to\s+(?P<to>.+?)\s+(?:saying|that\s+says)\s+(?P<body>.+)$",
+            # email X saying Y
+            r"email\s+(?P<to>.+?)\s+(?:saying|that\s+says)\s+(?P<body>.+)$",
+        ]
+
+        for pat in patterns:
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                return {
+                    "to": (m.group("to") or "").strip(),
+                    "body": (m.group("body") or "").strip(),
+                }
+
+        # Existing "about/regarding/re/..." semantics (no explicit body extraction)
+        recipient_patterns = [
+            r"send\s+an?\s+email\s+to\s+(.+)",   # send an email to X...
+            r"send\s+email\s+to\s+(.+)",        # send email to X...
+            r"send\s+(?:a\s+)?message\s+to\s+(.+)",  # send a message to X...
+            r"email\s+(.+)",                    # email X...
+        ]
+
+        raw_to = ""
+        for pat in recipient_patterns:
+            m = re.search(pat, text, re.IGNORECASE)
+            if m:
+                candidate = (m.group(1) or "").strip()
+                # Strip common trailing phrases after the name/nickname
+                # e.g. "Marin about the meeting" -> "Marin"
+                split_tokens = [
+                    " saying ",
+                    " that says ",
+                    " about ",
+                    " regarding ",
+                    " re: ",
+                    " re ",
+                    " with ",
+                    " on ",
+                    " for ",
+                    ":",
+                ]
+                cand_lower = candidate.lower()
+                cut_idx = None
+                for tok in split_tokens:
+                    pos = cand_lower.find(tok)
+                    if pos != -1:
+                        cut_idx = pos
+                        break
+                if cut_idx is not None:
+                    candidate = candidate[:cut_idx].strip()
+                raw_to = candidate
+                break
+
+        if raw_to:
+            return {"to": raw_to, "body": ""}
+
+        # Fallback: "to X ..." extraction, but stop before common continuation tokens
+        m = re.search(
+            r"\bto\s+(?P<to>.+?)(?:\s+(?:saying|that\s+says|about|regarding|re:|with|on|for)\b|:|,|$)",
+            text,
+            re.IGNORECASE,
+        )
+        if m:
+            return {"to": (m.group("to") or "").strip(), "body": ""}
+
+        return {"to": "", "body": ""}
     
     def _extract_contact_name(self, message: str) -> Optional[str]:
         """
@@ -164,41 +258,9 @@ class GmailAgent:
             #   "send an email to Marin - Fontys about the meeting"
             #   "email Marin about the report"
             #   "send email to marin@example.com"
-            lower_msg = message.lower()
-            raw_to = ""
-
-            # Try several patterns in order of specificity
-            patterns = [
-                r"send\s+an\s+email\s+to\s+(.+)",   # send an email to X...
-                r"send\s+email\s+to\s+(.+)",        # send email to X...
-                r"send\s+an\s+email\s+(.+)",        # send an email X...
-                r"email\s+(.+)",                    # email X...
-            ]
-
-            for pat in patterns:
-                m = re.search(pat, message, re.IGNORECASE)
-                if m:
-                    candidate = m.group(1).strip()
-                    # Strip common trailing phrases after the name/nickname
-                    # e.g. "Marin about the meeting" -> "Marin"
-                    split_tokens = [" about ", " regarding ", " re: ", " re ", " with ", " on ", " for "]
-                    cand_lower = candidate.lower()
-                    cut_idx = None
-                    for tok in split_tokens:
-                        pos = cand_lower.find(tok)
-                        if pos != -1:
-                            cut_idx = pos
-                            break
-                    if cut_idx is not None:
-                        candidate = candidate[:cut_idx].strip()
-                    raw_to = candidate
-                    break
-
-            # Fallback: simple "to X" extraction if patterns failed
-            if not raw_to:
-                m = re.search(r"\bto\s+([^\n,]+)", message, re.IGNORECASE)
-                if m:
-                    raw_to = m.group(1).strip()
+            extracted = self._extract_recipient_and_message(message)
+            raw_to = extracted.get("to", "").strip()
+            user_note = extracted.get("body", "").strip()
 
             # Resolve nickname/name to actual email using contacts
             resolved_to = raw_to
@@ -212,10 +274,17 @@ class GmailAgent:
                     resolved_to = raw_to
             
             # Use LLM to generate subject and body
-            prompt = (
-                f"User wants to send an email to {raw_to or resolved_to}. "
-                f"Message: {message}\n\nGenerate a brief subject line and email body."
-            )
+            if user_note:
+                prompt = (
+                    f"User wants to send an email to {raw_to or resolved_to}. "
+                    f'The email should say: "{user_note}".\n\n'
+                    "Generate a brief subject line and email body."
+                )
+            else:
+                prompt = (
+                    f"User wants to send an email to {raw_to or resolved_to}. "
+                    f"Request: {message}\n\nGenerate a brief subject line and email body."
+                )
             
             try:
                 llm_response = self.llm_service.chat_completion_text(

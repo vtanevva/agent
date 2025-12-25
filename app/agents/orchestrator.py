@@ -28,7 +28,17 @@ IntentType = Literal["calendar", "email", "contacts", "general"]
 
 # Intent detection keywords
 CALENDAR_KEYWORDS = ["calendar", "events", "schedule", "appointments", "meetings"]
-EMAIL_KEYWORDS = ["emails", "email", "inbox", "reply to", "gmail"]
+# NOTE: We also treat "send a message to <person>" as an email-compose request
+# because this app currently supports messaging via Gmail compose, not SMS/DMs.
+EMAIL_KEYWORDS = [
+    "emails",
+    "email",
+    "inbox",
+    "reply to",
+    "gmail",
+    "send a message to",
+    "send message to",
+]
 
 
 def detect_intent(user_message: str) -> IntentType:
@@ -269,7 +279,8 @@ def build_orchestrator() -> Orchestrator:
         contacts_agent=contacts_agent,
     )
     
-    print("[INIT] ✅ Orchestrator built with AivisCore + Calendar + Gmail agents")
+    # Avoid unicode output on Windows consoles that can't encode emoji
+    print("[INIT] Orchestrator built with AivisCore + Calendar + Gmail agents")
     return orchestrator
 
 
