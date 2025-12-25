@@ -25,25 +25,20 @@ export default function App() {
   const getInitialRoute = () => {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       const path = window.location.pathname;
+      const urlParams = new URLSearchParams(window.location.search);
+      
       if (path === '/waitlist') return 'Waitlist';
-      // Always start with Login for /chat, then navigate with params in onReady
-      // This ensures Chat always receives params when it mounts
+      
+      // If on /chat route with params, let linking handle it (don't set initial route)
+      // React Navigation's linking will automatically navigate to Chat with params
+      if (path === '/chat' && (urlParams.get('userId') || urlParams.get('sessionId'))) {
+        return 'Login'; // Start with Login, linking will handle the deep link navigation
+      }
     }
     return 'Login';
   };
 
-  // Handle URL paths for web - navigate when navigation is ready
-  const handleInitialNavigation = () => {
-    if (Platform.OS === 'web' && typeof window !== 'undefined' && navigationRef.current) {
-      const path = window.location.pathname;
-      
-      // Navigate to Waitlist if URL is /waitlist
-      // For /chat routes, let LoginPage handle navigation (works like guest login)
-      if (path === '/waitlist') {
-        navigationRef.current.navigate('Waitlist');
-      }
-    }
-  };
+  // No need for handleInitialNavigation - React Navigation's linking handles it automatically
 
   // Handle deep linking
   useEffect(() => {
@@ -75,10 +70,10 @@ export default function App() {
         ref={navigationRef}
         onReady={() => {
           isNavigationReady.current = true;
-          handleInitialNavigation();
         }}
         linking={{
-          prefixes: ['/'],
+          enabled: true,
+          prefixes: [Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : '', '/'],
           config: {
             screens: {
               Waitlist: 'waitlist',
