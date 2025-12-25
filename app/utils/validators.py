@@ -8,8 +8,8 @@ class InputValidator:
     # Email validation regex
     EMAIL_REGEX = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
     
-    # User ID validation (alphanumeric + hyphens, 3-50 chars)
-    USER_ID_REGEX = re.compile(r'^[a-zA-Z0-9-]{3,50}$')
+    # User ID validation (alphanumeric + hyphens, 1-50 chars)
+    USER_ID_REGEX = re.compile(r'^[a-zA-Z0-9-]{1,50}$')
     
     # Session ID validation (alphanumeric + hyphens, 8-100 chars)
     SESSION_ID_REGEX = re.compile(r'^[a-zA-Z0-9-]{8,100}$')
@@ -40,7 +40,7 @@ class InputValidator:
         
         user_id = user_id.strip().lower()
         if not cls.USER_ID_REGEX.match(user_id):
-            raise ValidationError("Invalid user ID format (alphanumeric + hyphens, 3-50 chars)")
+            raise ValidationError("Invalid user ID format (alphanumeric + hyphens, 1-50 chars)")
             
         return user_id
     
