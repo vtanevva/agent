@@ -2447,6 +2447,12 @@ def serve_frontend(path):
     # Normalize path to lowercase for case-insensitive routing
     path_lower = path.lower()
     
+    # Redirect /Chat to /chat (preserve query string)
+    if path == "Chat" or path.startswith("Chat?"):
+        query_string = request.query_string.decode('utf-8')
+        redirect_url = f"/chat?{query_string}" if query_string else "/chat"
+        return redirect(redirect_url, code=301)
+    
     # Don't interfere with API routes
     if path_lower.startswith("api/"):
         return jsonify({"error": "API endpoint not found"}), 404
