@@ -116,8 +116,30 @@ export default function LoginPage() {
     };
   }, [navigation, checkGoogleConnection]);
 
-  // Note: OAuth redirects to /chat?userId=x&sessionId=y are now handled automatically
-  // by React Navigation's linking config in App.js. No manual navigation needed here.
+  // Handle /chat URLs with params (both OAuth redirects AND page refreshes)
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const path = window.location.pathname;
+      
+      // Only handle if we're on the /chat route
+      if (path === '/chat') {
+        const urlParams = new URLSearchParams(window.location.search);
+        const userId = urlParams.get('userId');
+        const sessionId = urlParams.get('sessionId');
+        
+        if (userId && sessionId) {
+          console.log('Chat route detected, navigating...', {userId, sessionId});
+          // Navigate immediately (works for both OAuth redirect and page refresh)
+          navigation.navigate('Chat', {userId, sessionId});
+        } else if (userId) {
+          // Fallback: if only userId is provided, generate sessionId
+          const generatedSessionId = genSession(userId);
+          console.log('Chat route detected (generating sessionId)...', {userId, sessionId: generatedSessionId});
+          navigation.navigate('Chat', {userId, sessionId: generatedSessionId});
+        }
+      }
+    }
+  }, [navigation]);
 
   // Also check when screen comes into focus (in case OAuth completed while app was backgrounded)
   useFocusEffect(
