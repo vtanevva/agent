@@ -2444,24 +2444,18 @@ def serve_static_assets(asset_path):
 @app.route("/<path:path>")
 def serve_frontend(path):
     """Serve Expo web app or API routes."""
-    # Normalize path to lowercase for case-insensitive routing
+    # Normalize path to lowercase for comparison
     path_lower = path.lower()
     
-    # Redirect /Chat to /chat (preserve query string)
-    if path == "Chat" or path.startswith("Chat?"):
-        query_string = request.query_string.decode('utf-8')
-        redirect_url = f"/chat?{query_string}" if query_string else "/chat"
-        return redirect(redirect_url, code=301)
-    
-    # Don't interfere with API routes
+    # Don't interfere with API routes (check lowercase)
     if path_lower.startswith("api/"):
         return jsonify({"error": "API endpoint not found"}), 404
     
-    # Don't interfere with OAuth routes
+    # Don't interfere with OAuth routes (check lowercase)
     if path_lower.startswith("google/") or path_lower.startswith("instagram/"):
         return jsonify({"error": "Endpoint not found"}), 404
     
-    # Don't interfere with waitlist admin route (handled by Flask)
+    # Don't interfere with waitlist admin route (check lowercase)
     if path_lower == "waitlist/admin":
         return jsonify({"error": "Endpoint not found"}), 404
     
