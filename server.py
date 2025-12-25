@@ -330,6 +330,11 @@ def _get_redirect_uri():
     custom_redirect_uri = os.getenv("OAUTH_REDIRECT_URI")
     if custom_redirect_uri:
         return custom_redirect_uri
+
+    # Prefer explicit production base URL if provided (keeps www if you configured it)
+    if production_url:
+        base_url = production_url if production_url.startswith("http") else f"https://{production_url}"
+        return f"{base_url}/google/oauth2callback"
     
     # Use request host if available (for dynamic detection)
     if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https':
@@ -338,9 +343,8 @@ def _get_redirect_uri():
             scheme = 'https' if (request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https') else 'http'
             host = request.host  # Gets the domain from request
             if host and host not in ['localhost', '127.0.0.1']:
-                # Clean host (remove www if present)
-                clean_host = host.replace('www.', '') if host.startswith('www.') else host
-                return f"{scheme}://{clean_host}/google/oauth2callback"
+                # Preserve host exactly (do NOT strip www.)
+                return f"{scheme}://{host}/google/oauth2callback"
         except:
             pass
         
@@ -348,9 +352,6 @@ def _get_redirect_uri():
         if railway_url:
             # Railway provides domain without protocol, add it
             base_url = railway_url if railway_url.startswith('http') else f"https://{railway_url}"
-            return f"{base_url}/google/oauth2callback"
-        elif production_url:
-            base_url = production_url if production_url.startswith('http') else f"https://{production_url}"
             return f"{base_url}/google/oauth2callback"
         else:
             # Fallback to old hardcoded URL if env vars not set (backward compatibility)
