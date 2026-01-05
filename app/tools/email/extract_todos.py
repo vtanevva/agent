@@ -15,7 +15,7 @@ from app.utils.tool_registry import register, ToolSchema
 
 logger = get_logger(__name__)
 
-PROMPT_VERSION = "1.0"
+PROMPT_VERSION = "1.1"
 
 
 def _best_effort_json_parse(text: str) -> Optional[Dict[str, Any]]:
@@ -99,6 +99,59 @@ def _normalize_todos(raw: Any) -> List[Dict[str, Any]]:
     return deduped
 
 
+def _is_generic_or_email_level_task(text: str, subject: str) -> bool:
+    """
+    Filter out non-actionable, generic, or "whole-email as task" items like:
+    - "Read this email"
+    - "Handle/Process/Review email about <subject>"
+    - "Follow up" with no concrete action
+    """
+    if not text:
+        return True
+
+    t = re.sub(r"\s+", " ", text.strip()).lower()
+    subj = re.sub(r"\s+", " ", (subject or "").strip()).lower()
+
+    # Too long usually means it's a summary, not a task
+    if len(t) > 220:
+        return True
+
+    generic_starts = (
+        "read this email",
+        "read the email",
+        "review this email",
+        "review the email",
+        "go through this email",
+        "process this email",
+        "handle this email",
+        "handle this thread",
+        "handle this conversation",
+        "deal with this email",
+        "deal with this thread",
+        "check this email",
+        "look at this email",
+        "look into this email",
+    )
+    if any(t.startswith(p) for p in generic_starts):
+        return True
+
+    # "Follow up" alone is not a task; require specifics
+    if t in {"follow up", "follow-up", "followup"}:
+        return True
+
+    # Avoid tasks that are basically just the subject line
+    if subj and (t == subj or t.startswith(subj + " ") or subj.startswith(t)):
+        return True
+
+    # Common "email about X" vague task
+    if "email about" in t or "thread about" in t:
+        # Allow if it includes a concrete action verb beyond "email/thread about"
+        if not re.search(r"\b(prepare|create|draft|send|book|schedule|call|meet|present|submit|finish|deliver|update|share|attach|review|approve|sign|pay|confirm)\b", t):
+            return True
+
+    return False
+
+
 def extract_todos_from_thread(user_id: str, thread_id: str) -> str:
     """
     Extract TODO items from a Gmail thread and store them in MongoDB.
@@ -136,13 +189,24 @@ def extract_todos_from_thread(user_id: str, thread_id: str) -> str:
 
     prompt = (
         "Extract actionable TODO items for the user from this email.\n\n"
-        "Rules:\n"
-        "- Only include tasks that require someone to do something.\n"
+        "Very important:\n"
+        "- Do NOT turn the whole email/thread into a single task (no 'Handle this email', 'Review this thread', etc.).\n"
+        "- Only extract concrete actions explicitly requested or clearly implied by the message.\n"
+        "- If the email says the user must do a presentation, create a task like 'Prepare presentation for <topic>'.\n"
         "- Prefer tasks assigned to the recipient (the user). If unclear, set assignee='me'.\n"
         "- If a due date/time is mentioned, copy it as a short string (do NOT invent dates).\n"
-        "- Return STRICT JSON with exactly this shape:\n"
-        "  {\"todos\":[{\"text\":string,\"due\":string|null,\"assignee\":string,\"confidence\":number,\"source_quote\":string|null}]}\n"
-        "- Return an empty todos array if none.\n\n"
+        "- Keep each task short and specific (ideally <= 12 words).\n"
+        "- ALWAYS include a short exact quote from the email for each task (source_quote).\n"
+        "- Return at most 10 todos.\n\n"
+        "Return STRICT JSON with exactly this shape:\n"
+        "{\"todos\":[{\"text\":string,\"due\":string|null,\"assignee\":string,\"confidence\":number,\"source_quote\":string|null}]}\n"
+        "Return an empty todos array if none.\n\n"
+        "Examples (good):\n"
+        "- Email: 'Can you prepare the Q1 presentation by Friday?' -> text='Prepare Q1 presentation', due='Friday'\n"
+        "- Email: 'Please send me the invoice PDF' -> text='Send invoice PDF'\n"
+        "Examples (bad):\n"
+        "- 'Read this email'\n"
+        "- 'Handle email about Q1'\n\n"
         f"Subject: {subject}\n"
         f"From: {sender}\n"
         f"Date: {date}\n\n"
@@ -164,6 +228,10 @@ def extract_todos_from_thread(user_id: str, thread_id: str) -> str:
 
     parsed = _best_effort_json_parse(resp_text) or {}
     todos = _normalize_todos(parsed.get("todos"))
+    # Post-filter generic / whole-email tasks
+    todos = [t for t in todos if not _is_generic_or_email_level_task(str(t.get("text") or ""), subject)]
+    # Hard cap (defense-in-depth)
+    todos = todos[:10]
 
     stored = False
     col = get_email_todos_collection()
