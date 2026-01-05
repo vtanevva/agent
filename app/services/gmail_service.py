@@ -55,6 +55,76 @@ def extract_todos_from_thread(user_id: str, thread_id: str) -> Dict[str, Any]:
         return {"success": False, "error": "Invalid todos output"}
 
 
+def list_email_todos(user_id: str, limit: int = 100) -> Dict[str, Any]:
+    """
+    List extracted TODO items stored in MongoDB collection `email_todos` for a user.
+    Returns a flattened list for UI consumption.
+    """
+    from datetime import datetime
+
+    def _dt_to_iso(v):
+        if isinstance(v, datetime):
+            return v.isoformat()
+        return v
+
+    try:
+        db = get_db()
+        if not db.is_connected or db.db is None:
+            return {"success": False, "error": "MongoDB not connected"}
+
+        col = db.db.get_collection("email_todos")
+        cursor = (
+            col.find({"user_id": user_id})
+            .sort("extracted_at", -1)
+            .limit(max(1, min(int(limit or 100), 500)))
+        )
+        docs = list(cursor)
+
+        items: List[Dict[str, Any]] = []
+        for doc in docs:
+            thread_id = doc.get("thread_id")
+            subject = doc.get("subject", "(No subject)")
+            sender = doc.get("from", "")
+            date = doc.get("date", "")
+            extracted_at = _dt_to_iso(doc.get("extracted_at"))
+            todos = doc.get("todos") or []
+            if not isinstance(todos, list):
+                todos = []
+            for idx, t in enumerate(todos):
+                if isinstance(t, str):
+                    text = t
+                    due = None
+                    assignee = "me"
+                    confidence = 0.5
+                elif isinstance(t, dict):
+                    text = (t.get("text") or "").strip()
+                    due = t.get("due")
+                    assignee = t.get("assignee", "me")
+                    confidence = t.get("confidence", 0.6)
+                else:
+                    continue
+                if not text:
+                    continue
+                items.append(
+                    {
+                        "id": f"{thread_id}:{idx}",
+                        "text": text,
+                        "due": due,
+                        "assignee": assignee,
+                        "confidence": confidence,
+                        "thread_id": thread_id,
+                        "subject": subject,
+                        "from": sender,
+                        "date": date,
+                        "extracted_at": extracted_at,
+                    }
+                )
+
+        return {"success": True, "items": items}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 def reply_to_thread(
     user_id: str,
     thread_id: str,

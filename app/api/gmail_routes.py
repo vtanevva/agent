@@ -7,6 +7,7 @@ from flask import Blueprint, request, jsonify
 from app.services.gmail_service import (
     get_thread_detail,
     extract_todos_from_thread,
+    list_email_todos,
     reply_to_thread,
     forward_thread,
     archive_thread,
@@ -243,6 +244,73 @@ def gmail_extract_todos():
     result = extract_todos_from_thread(user_id=user_id, thread_id=thread_id)
     status = 200 if result.get("success", True) else 500
     return jsonify(result), status
+
+
+@gmail_bp.route("/email-todos", methods=["POST"])
+def gmail_list_email_todos():
+    """List extracted email TODOs from MongoDB (flattened list)."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
+    limit = int(data.get("limit", 100))
+
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    result = list_email_todos(user_id=user_id, limit=limit)
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
+
+
+@gmail_bp.route("/extract-todos-recent", methods=["POST"])
+def gmail_extract_todos_recent():
+    """Batch extract todos from recent inbox threads and store into MongoDB (email_todos)."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
+    max_threads = int(data.get("max_threads", 5))
+
+    # Check rate limit (reuse gmail bucket)
+    _check_gmail_rate_limit(user_id)
+
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    # Inline batch extraction to keep a single canonical function:
+    # app.services.gmail_service.extract_todos_from_thread
+    max_threads = max(1, min(int(max_threads or 5), 10))
+    threads_resp = list_threads(user_id=user_id, label="INBOX", max_results=max_threads)
+    if not threads_resp.get("success"):
+        status = 500
+        return jsonify({"success": False, "error": threads_resp.get("error", "Failed to list threads")}), status
+
+    threads = threads_resp.get("threads") or []
+    extracted = 0
+    total_todos = 0
+    errors = []
+    for t in threads:
+        thread_id = t.get("threadId") or t.get("thread_id") or t.get("id")
+        if not thread_id:
+            continue
+        result = extract_todos_from_thread(user_id=user_id, thread_id=thread_id)
+        if result.get("success"):
+            extracted += 1
+            todos = result.get("todos") or []
+            if isinstance(todos, list):
+                total_todos += len(todos)
+        else:
+            errors.append({"thread_id": thread_id, "error": result.get("error", "unknown")})
+
+    out = {
+        "success": True,
+        "threads_processed": len(threads),
+        "threads_extracted": extracted,
+        "todos_found": total_todos,
+        "errors": errors[:10],
+    }
+    return jsonify(out), 200
 
 
 @gmail_bp.route("/send", methods=["POST"])

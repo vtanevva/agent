@@ -1,4 +1,4 @@
-import React, {useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import {Svg, Path} from 'react-native-svg';
 import {colors} from '../styles/colors';
 import {commonStyles} from '../styles/commonStyles';
+import {API_BASE_URL} from '../config/api';
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -22,12 +23,74 @@ export default function TasksPage() {
   const {userId, sessionId} = route.params || {};
 
   const [newTodo, setNewTodo] = useState('');
-  const [todos, setTodos] = useState([
-    {id: uid(), text: 'Reply to the client about the proposal', status: 'todo', impact: 4, effort: 2},
-    {id: uid(), text: 'Book calendar slot for demo', status: 'todo', impact: 3, effort: 1},
-    {id: uid(), text: 'Review invoice email', status: 'in_progress', impact: 3, effort: 2},
-    {id: uid(), text: 'Send weekly update', status: 'done', impact: 2, effort: 1},
-  ]);
+  const [todos, setTodos] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState('');
+
+  const loadEmailTodos = async () => {
+    if (!userId) return;
+    setLoading(true);
+    setError('');
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/gmail/email-todos`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({user_id: userId, limit: 200}),
+      });
+      const data = await r.json();
+      if (!r.ok || !data?.success) {
+        throw new Error(data?.error || `HTTP ${r.status}`);
+      }
+      // Map email todos → local task cards
+      const mapped = (data.items || []).map((it) => ({
+        id: it.id || uid(),
+        text: it.text || '',
+        status: 'todo',
+        impact: it.confidence >= 0.85 ? 4 : it.confidence >= 0.6 ? 3 : 2,
+        effort: 2,
+        meta: {
+          from: it.from || '',
+          subject: it.subject || '',
+          thread_id: it.thread_id || '',
+          extracted_at: it.extracted_at || '',
+          due: it.due || null,
+        },
+      }));
+      setTodos(mapped.filter((t) => t.text));
+    } catch (e) {
+      setError(e?.message || 'Failed to load email todos');
+      setTodos([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const syncFromGmail = async () => {
+    if (!userId) return;
+    setSyncing(true);
+    setError('');
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/gmail/extract-todos-recent`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({user_id: userId, max_threads: 5}),
+      });
+      const data = await r.json();
+      if (!r.ok || !data?.success) {
+        throw new Error(data?.error || `HTTP ${r.status}`);
+      }
+      await loadEmailTodos();
+    } catch (e) {
+      setError(e?.message || 'Failed to sync from Gmail');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (userId) loadEmailTodos();
+  }, [userId]);
 
   const columns = useMemo(() => {
     const groups = {todo: [], in_progress: [], done: []};
@@ -97,6 +160,33 @@ export default function TasksPage() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Todos</Text>
           <Text style={styles.cardHint}>Tap a task to move it: Todo → In progress → Done.</Text>
+
+          {!userId ? (
+            <View style={styles.banner}>
+              <Text style={styles.bannerText}>Missing userId — open Tasks from an active session.</Text>
+            </View>
+          ) : (
+            <View style={styles.controlsRow}>
+              <TouchableOpacity
+                onPress={syncFromGmail}
+                disabled={syncing || loading}
+                style={[styles.controlButton, (syncing || loading) && styles.controlButtonDisabled]}>
+                <Text style={styles.controlButtonText}>{syncing ? 'Syncing…' : 'Sync from Gmail'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={loadEmailTodos}
+                disabled={syncing || loading}
+                style={[styles.controlButtonAlt, (syncing || loading) && styles.controlButtonDisabled]}>
+                <Text style={styles.controlButtonTextAlt}>{loading ? 'Refreshing…' : 'Refresh'}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {error ? (
+            <View style={styles.bannerError}>
+              <Text style={styles.bannerErrorText}>{error}</Text>
+            </View>
+          ) : null}
 
           <View style={styles.addRow}>
             <TextInput
@@ -183,6 +273,21 @@ function TodoColumn({title, count, items, onPressItem}) {
             <Text style={styles.todoItemText} numberOfLines={2}>
               {t.text}
             </Text>
+            {!!t?.meta?.subject && (
+              <Text style={styles.todoMeta} numberOfLines={1}>
+                {t.meta.subject}
+              </Text>
+            )}
+            {!!t?.meta?.from && (
+              <Text style={styles.todoMetaSecondary} numberOfLines={1}>
+                {t.meta.from}
+              </Text>
+            )}
+            {!!t?.meta?.due && (
+              <Text style={styles.todoMetaSecondary} numberOfLines={1}>
+                Due: {t.meta.due}
+              </Text>
+            )}
           </TouchableOpacity>
         ))
       )}
@@ -284,6 +389,71 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.primary[900] + '70',
   },
+  controlsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 12,
+  },
+  controlButton: {
+    flex: 1,
+    backgroundColor: colors.secondary[500],
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...commonStyles.shadowSm,
+  },
+  controlButtonAlt: {
+    width: 110,
+    backgroundColor: colors.primary[100],
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.dark[500] + '15',
+  },
+  controlButtonDisabled: {
+    opacity: 0.6,
+  },
+  controlButtonText: {
+    color: colors.primary[50],
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  controlButtonTextAlt: {
+    color: colors.primary[900],
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  banner: {
+    backgroundColor: colors.primary[100],
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.dark[500] + '10',
+    marginBottom: 12,
+  },
+  bannerText: {
+    color: colors.primary[900] + '90',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  bannerError: {
+    backgroundColor: colors.dark[500] + '10',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: colors.dark[500] + '25',
+    marginBottom: 12,
+  },
+  bannerErrorText: {
+    color: colors.dark[600],
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
   addRow: {
     flexDirection: 'row',
     gap: 10,
@@ -359,6 +529,18 @@ const styles = StyleSheet.create({
     color: colors.primary[900],
     fontSize: 12,
     fontWeight: '600',
+  },
+  todoMeta: {
+    marginTop: 6,
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.secondary[700],
+  },
+  todoMetaSecondary: {
+    marginTop: 2,
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.primary[900] + '80',
   },
   table: {
     borderWidth: 1,

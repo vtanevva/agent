@@ -77,8 +77,7 @@ class Config:
         "https://www.googleapis.com/auth/calendar.readonly",
     ]
     
-    # OAuth redirect URLs
-    OAUTH_REDIRECT_URI: Optional[str] = os.getenv("OAUTH_REDIRECT_URI")
+    # Frontend base URL (used for some redirects / links)
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
     
     # ═══════════════════════════════════════════════════════════════════
@@ -149,9 +148,6 @@ class Config:
             if not cls.MONGO_URI:
                 missing.append("MONGO_URI (production)")
             
-            if not cls.OAUTH_REDIRECT_URI:
-                missing.append("OAUTH_REDIRECT_URI (production)")
-        
         return missing
     
     @classmethod

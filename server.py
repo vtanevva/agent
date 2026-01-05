@@ -326,11 +326,6 @@ def _get_redirect_uri():
     railway_url = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
     production_url = os.getenv("PRODUCTION_URL")
     
-    # Check for custom redirect URI from environment (highest priority)
-    custom_redirect_uri = Config.OAUTH_REDIRECT_URI or os.getenv("OAUTH_REDIRECT_URI")
-    if custom_redirect_uri:
-        return custom_redirect_uri
-
     # Prefer explicit production base URL if provided (keeps www if you configured it)
     if production_url:
         base_url = production_url if production_url.startswith("http") else f"https://{production_url}"
