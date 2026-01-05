@@ -88,10 +88,13 @@ def build_google_flow(redirect_uri: str, state: Optional[str] = None) -> Flow:
     if google_client_id and google_client_secret:
         # Use environment variables
         google_project_id = os.getenv("GOOGLE_PROJECT_ID", "gmail-agent-466700")
-        google_redirect_uri = os.getenv(
-            "GOOGLE_REDIRECT_URI", 
-            "https://web-production-0b6ce.up.railway.app/google/oauth2callback"
-        )
+        # IMPORTANT: ensure the redirect_uri we actually use is always included in the client config.
+        # Some environments set GOOGLE_REDIRECT_URI separately; keep it as an optional additional URI.
+        google_redirect_uri = os.getenv("GOOGLE_REDIRECT_URI") or redirect_uri
+        redirect_uris = []
+        for uri in [redirect_uri, google_redirect_uri]:
+            if uri and uri not in redirect_uris:
+                redirect_uris.append(uri)
         
         client_config = {
             "web": {
@@ -101,7 +104,7 @@ def build_google_flow(redirect_uri: str, state: Optional[str] = None) -> Flow:
                 "token_uri": "https://oauth2.googleapis.com/token",
                 "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
                 "client_secret": google_client_secret,
-                "redirect_uris": [google_redirect_uri]
+                "redirect_uris": redirect_uris
             }
         }
         flow = Flow.from_client_config(

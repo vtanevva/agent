@@ -409,7 +409,16 @@ export default function VoiceChat() {
   };
 
   const handleLogout = () => {
-    navigation.navigate('Login');
+    // Web: do a hard navigation to fully clear any in-memory navigation state.
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      // React Navigation (web) stores state in history.state; clear it before reload.
+      try {
+        window.history.replaceState(null, '', '/');
+      } catch {}
+      window.location.replace('/');
+      return;
+    }
+    navigation.reset({index: 0, routes: [{name: 'Login'}]});
   };
 
   const handleEmailSelect = (threadId, from) => {
@@ -762,6 +771,14 @@ export default function VoiceChat() {
                 }}
                 style={styles.actionButton}>
                 <Text style={styles.actionText}>Calendar Events</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                onPress={() => {
+                  navigation.navigate('Tasks', {userId, sessionId});
+                  setShowSidebar(false);
+                }}
+                style={styles.actionButton}>
+                <Text style={styles.actionText}>Tasks</Text>
               </TouchableOpacity>
               <TouchableOpacity 
                 onPress={() => {

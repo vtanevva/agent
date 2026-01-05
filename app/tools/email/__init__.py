@@ -10,6 +10,7 @@ from .reply import reply_email
 from .send import send_email
 from .style import analyze_email_style, generate_reply_draft, generate_forward_draft
 from .classifier import classify_email, CLASSIFICATION_VERSION
+from .extract_todos import extract_todos_from_thread
 
 __all__ = [
     "list_recent_emails",
@@ -22,5 +23,6 @@ __all__ = [
     "generate_forward_draft",
     "classify_email",
     "CLASSIFICATION_VERSION",
+    "extract_todos_from_thread",
 ]
 

@@ -6,6 +6,7 @@ from flask import Blueprint, request, jsonify
 
 from app.services.gmail_service import (
     get_thread_detail,
+    extract_todos_from_thread,
     reply_to_thread,
     forward_thread,
     archive_thread,
@@ -218,6 +219,28 @@ def gmail_thread_detail():
         user_id=user_id,
         thread_id=thread_id
     )
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
+
+
+@gmail_bp.route("/extract-todos", methods=["POST"])
+def gmail_extract_todos():
+    """Extract TODOs from a given thread and store them in MongoDB (email_todos)."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
+    thread_id = data.get("thread_id")
+    if not thread_id:
+        return jsonify({"success": False, "error": "Missing thread_id"}), 400
+
+    # Check rate limit (reuse gmail bucket)
+    _check_gmail_rate_limit(user_id)
+
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    result = extract_todos_from_thread(user_id=user_id, thread_id=thread_id)
     status = 200 if result.get("success", True) else 500
     return jsonify(result), status
 

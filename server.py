@@ -327,7 +327,7 @@ def _get_redirect_uri():
     production_url = os.getenv("PRODUCTION_URL")
     
     # Check for custom redirect URI from environment (highest priority)
-    custom_redirect_uri = os.getenv("OAUTH_REDIRECT_URI")
+    custom_redirect_uri = Config.OAUTH_REDIRECT_URI or os.getenv("OAUTH_REDIRECT_URI")
     if custom_redirect_uri:
         return custom_redirect_uri
 
@@ -336,26 +336,27 @@ def _get_redirect_uri():
         base_url = production_url if production_url.startswith("http") else f"https://{production_url}"
         return f"{base_url}/google/oauth2callback"
     
-    # Use request host if available (for dynamic detection)
-    if request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https':
-        # Try to use the current request host (works with custom domains)
-        try:
-            scheme = 'https' if (request.is_secure or request.headers.get('X-Forwarded-Proto') == 'https') else 'http'
-            host = request.host  # Gets the domain from request
-            if host and host not in ['localhost', '127.0.0.1']:
-                # Preserve host exactly (do NOT strip www.)
-                return f"{scheme}://{host}/google/oauth2callback"
-        except:
-            pass
-        
-        # Fallback to environment variables
-        if railway_url:
-            # Railway provides domain without protocol, add it
-            base_url = railway_url if railway_url.startswith('http') else f"https://{railway_url}"
-            return f"{base_url}/google/oauth2callback"
-        else:
-            # Fallback to old hardcoded URL if env vars not set (backward compatibility)
-            return "https://web-production-0b6ce.up.railway.app/google/oauth2callback"
+    # Use request host / forwarded host if available (for dynamic detection behind proxies)
+    try:
+        forwarded_proto = request.headers.get("X-Forwarded-Proto")
+        scheme = "https" if (request.is_secure or forwarded_proto == "https") else "http"
+
+        forwarded_host = request.headers.get("X-Forwarded-Host")
+        if forwarded_host and forwarded_host not in ["localhost", "127.0.0.1"]:
+            return f"{scheme}://{forwarded_host}/google/oauth2callback"
+
+        host = request.host
+        if host and host not in ["localhost", "127.0.0.1"]:
+            return f"{scheme}://{host}/google/oauth2callback"
+    except Exception:
+        pass
+
+    # Fallback to environment variables
+    if railway_url:
+        base_url = railway_url if railway_url.startswith("http") else f"https://{railway_url}"
+        return f"{base_url}/google/oauth2callback"
+
+    # Development fallback
     return "http://localhost:10000/google/oauth2callback"
 
 

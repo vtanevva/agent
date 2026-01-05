@@ -79,6 +79,20 @@ export default function MenuPage() {
               <Text style={styles.gridText}>Contacts</Text>
             </TouchableOpacity>
 
+            {/* Tasks */}
+            <TouchableOpacity
+              style={styles.gridBox}
+              onPress={() => {
+                navigation.navigate('Tasks', {userId, sessionId});
+              }}>
+              <View style={[styles.gridIcon, {backgroundColor: colors.accent[500] + '20'}]}>
+                <Svg width="32" height="32" viewBox="0 0 24 24" fill={colors.accent[600]}>
+                  <Path d="M9 16.2l-3.5-3.5L4 14.2l5 5 12-12-1.4-1.4L9 16.2z" />
+                </Svg>
+              </View>
+              <Text style={styles.gridText}>Tasks</Text>
+            </TouchableOpacity>
+
             {/* Box 3: Settings */}
             <TouchableOpacity 
               style={styles.gridBox}

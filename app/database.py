@@ -64,6 +64,15 @@ class DatabaseManager:
             logger.info("Created indexes on emails collection")
         except Exception as e:
             logger.warning(f"Failed to create indexes (may already exist): {e}")
+
+        try:
+            # Indexes for extracted email todos (one doc per user/thread)
+            todos_col = self.db.get_collection("email_todos")
+            todos_col.create_index([("user_id", 1), ("thread_id", 1)], unique=True)
+            todos_col.create_index([("user_id", 1), ("extracted_at", -1)])
+            logger.info("Created indexes on email_todos collection")
+        except Exception as e:
+            logger.warning(f"Failed to create email_todos indexes (may already exist): {e}")
     
     def disconnect(self):
         """Safely close database connection"""

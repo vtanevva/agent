@@ -424,7 +424,17 @@ export default function ChatPage() {
   };
 
   const handleLogout = () => {
-    navigation.navigate('Login');
+    // Web: do a hard navigation to fully clear any in-memory navigation state.
+    // This avoids bouncing back into Chat due to stale state or URL handling.
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      // React Navigation (web) stores state in history.state; clear it before reload.
+      try {
+        window.history.replaceState(null, '', '/');
+      } catch {}
+      window.location.replace('/');
+      return;
+    }
+    navigation.reset({index: 0, routes: [{name: 'Login'}]});
   };
 
   const handleCheckEmails = async () => {
@@ -578,6 +588,14 @@ export default function ChatPage() {
               </TouchableOpacity>
               <TouchableOpacity onPress={handleCheckCalendar} style={styles.actionButton}>
                 <Text style={styles.actionText}>Calendar Events</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  navigation.navigate('Tasks', {userId, sessionId});
+                  setShowSidebar(false);
+                }}
+                style={styles.actionButton}>
+                <Text style={styles.actionText}>Tasks</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => {

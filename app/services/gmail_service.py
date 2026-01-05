@@ -19,6 +19,7 @@ from app.tools.email import (
     analyze_email_style,
     generate_reply_draft,
 )
+from app.tools.email.extract_todos import extract_todos_from_thread as tool_extract_todos_from_thread
 from app.tools.email.forward import forward_email as tool_forward_email
 from app.utils.oauth_utils import load_google_credentials
 
@@ -35,6 +36,23 @@ def get_thread_detail(user_id: str, thread_id: str) -> Dict[str, Any]:
         return json.loads(raw)
     except Exception:
         return {"success": False, "error": "Invalid detail output"}
+
+
+def extract_todos_from_thread(user_id: str, thread_id: str) -> Dict[str, Any]:
+    """
+    Extract TODO items from a Gmail thread and store them in MongoDB (email_todos).
+    Thin wrapper around app.tools.email.extract_todos.extract_todos_from_thread (which returns JSON string).
+    """
+    import json
+
+    raw = tool_extract_todos_from_thread(user_id=user_id, thread_id=thread_id)
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        if isinstance(data, dict):
+            return data
+        return {"success": False, "error": "Invalid todos output"}
+    except Exception:
+        return {"success": False, "error": "Invalid todos output"}
 
 
 def reply_to_thread(

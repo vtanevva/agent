@@ -39,3 +39,11 @@ def get_waitlist_collection() -> Optional[Collection]:
         return db_manager.db["waitlist"]
     return None
 
+
+def get_email_todos_collection() -> Optional[Collection]:
+    """Get the email_todos collection (extracted todo items from emails)."""
+    db_manager = get_db()
+    if db_manager.is_connected and db_manager.db is not None:
+        return db_manager.db["email_todos"]
+    return None
+
