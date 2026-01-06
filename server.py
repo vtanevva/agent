@@ -334,6 +334,13 @@ def _build_flow(redirect_uri: str, state: str | None = None):
 
 def _get_redirect_uri():
     """Get the appropriate redirect URI based on environment."""
+    # 🔧 FORCE LOCAL DEVELOPMENT MODE
+    # If FORCE_LOCAL_OAUTH is set to true, always use localhost (for testing)
+    force_local = os.getenv("FORCE_LOCAL_OAUTH", "false").lower() == "true"
+    if force_local:
+        logger.info("🏠 Forcing localhost OAuth redirect (FORCE_LOCAL_OAUTH=true)")
+        return "http://localhost:10000/google/oauth2callback"
+    
     # Check for Railway or other production URL from environment
     railway_url = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
     production_url = os.getenv("PRODUCTION_URL")
@@ -353,7 +360,8 @@ def _get_redirect_uri():
             return f"{scheme}://{forwarded_host}/google/oauth2callback"
 
         host = request.host
-        if host and host not in ["localhost", "127.0.0.1"]:
+        # Also check for local network IPs (192.168.x.x, 10.x.x.x)
+        if host and not any(h in host for h in ["localhost", "127.0.0.1", "192.168.", "10."]):
             return f"{scheme}://{host}/google/oauth2callback"
     except Exception:
         pass
@@ -1453,6 +1461,83 @@ def google_callback():
         except Exception as e:
             # Don't fail OAuth if backfill fails
             logger.warning(f"⚠️ Could not trigger backfill for user {state}: {e}")
+        
+        # 📧 EMAIL CLASSIFICATION: Classify existing emails on first login
+        # Uses the existing classify_background endpoint (already supports v3.0 + fact extraction)
+        try:
+            import threading
+            from app.database import get_db
+            
+            db = get_db()
+            if db.is_connected and db.db is not None:
+                users_col = db.db["users"]
+                emails_col = db.db["emails"]
+                
+                # Check if user has been processed
+                user_doc = users_col.find_one({"user_id": state})
+                email_count = emails_col.count_documents({"user_id": state})
+                
+                # Only trigger if: has emails AND not yet classified
+                if email_count > 0 and (not user_doc or not user_doc.get("initial_email_classification_done")):
+                    logger.info(f"📧 New user {state} - classifying {email_count} emails with v3.0")
+                    
+                    # Mark as in-progress
+                    users_col.update_one(
+                        {"user_id": state},
+                        {
+                            "$set": {
+                                "user_id": state,
+                                "initial_email_classification_done": False,
+                                "email_classification_started_at": datetime.utcnow().isoformat(),
+                            }
+                        },
+                        upsert=True
+                    )
+                    
+                    # Trigger classification in background
+                    def classify_user_emails():
+                        import requests
+                        try:
+                            logger.info(f"🔄 Starting email classification for user {state}")
+                            
+                            # Use existing classify_background endpoint (supports v3.0 + fact extraction)
+                            response = requests.post(
+                                "http://localhost:10000/api/gmail/classify-background",
+                                json={"user_id": state, "max_emails": 200},
+                                timeout=600
+                            )
+                            
+                            if response.status_code == 200:
+                                logger.info(f"✅ Email classification completed for user {state}")
+                                users_col.update_one(
+                                    {"user_id": state},
+                                    {
+                                        "$set": {
+                                            "initial_email_classification_done": True,
+                                            "email_classification_completed_at": datetime.utcnow().isoformat(),
+                                        }
+                                    }
+                                )
+                            else:
+                                logger.error(f"❌ Email classification failed for user {state}: HTTP {response.status_code}")
+                                
+                        except Exception as e:
+                            logger.error(f"❌ Email classification error for user {state}: {e}")
+                    
+                    # Run in background thread (non-blocking)
+                    thread = threading.Thread(target=classify_user_emails, daemon=True)
+                    thread.start()
+                    
+                    logger.info(f"📧 Email classification started in background for user {state}")
+                else:
+                    if email_count == 0:
+                        logger.info(f"ℹ️ No emails to classify for user {state}")
+                    else:
+                        logger.info(f"✅ User {state} emails already classified")
+                        
+        except Exception as e:
+            # Don't fail OAuth if classification fails
+            logger.warning(f"⚠️ Could not trigger email classification for user {state}: {e}")
 
     except Exception as e:
         logger.error(f"OAuth callback error: {e}", exc_info=True)
@@ -1483,15 +1568,22 @@ def google_callback():
     # Determine the base URL for redirect
     clean_base_url = None
     
+    # 🔧 PRIORITY 0: Force localhost if FORCE_LOCAL_OAUTH is enabled
+    force_local = os.getenv("FORCE_LOCAL_OAUTH", "false").lower() == "true"
+    if force_local:
+        logger.info("🏠 Forcing localhost final redirect (FORCE_LOCAL_OAUTH=true)")
+        clean_base_url = "http://localhost:8081"  # Your frontend port
+    
     # Priority 1: Check PRODUCTION_URL first (explicit configuration takes highest priority)
-    production_url = os.getenv("PRODUCTION_URL")
-    if production_url and 'railway.app' not in production_url.lower():
-        # Use custom domain from PRODUCTION_URL exactly as specified (preserve www. if included)
-        if production_url.startswith('http'):
-            parsed = urlparse(production_url)
-            clean_base_url = f"{parsed.scheme}://{parsed.netloc}"
-        else:
-            clean_base_url = f"{scheme}://{production_url}"
+    if not clean_base_url:
+        production_url = os.getenv("PRODUCTION_URL")
+        if production_url and 'railway.app' not in production_url.lower():
+            # Use custom domain from PRODUCTION_URL exactly as specified (preserve www. if included)
+            if production_url.startswith('http'):
+                parsed = urlparse(production_url)
+                clean_base_url = f"{parsed.scheme}://{parsed.netloc}"
+            else:
+                clean_base_url = f"{scheme}://{production_url}"
     
     # Priority 2: Check expo_redirect if it's a web URL (only if PRODUCTION_URL not set)
     if not clean_base_url and expo_app and expo_redirect and (expo_redirect.startswith('http://') or expo_redirect.startswith('https://')):

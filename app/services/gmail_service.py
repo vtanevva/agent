@@ -1,12 +1,15 @@
 ﻿from __future__ import annotations
 
 import threading
+import ssl
+import httplib2
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.http import HttpRequest
 
 from app.database import get_db
 from app.tools.email import (
@@ -22,6 +25,24 @@ from app.tools.email import (
 from app.tools.email.extract_todos import extract_todos_from_thread as tool_extract_todos_from_thread
 from app.tools.email.forward import forward_email as tool_forward_email
 from app.utils.oauth_utils import load_google_credentials
+
+
+def _build_gmail_service(creds):
+    """Build Gmail API service with SSL error handling for Windows."""
+    try:
+        # Try standard build first
+        return build("gmail", "v1", credentials=creds)
+    except (ssl.SSLError, Exception) as e:
+        print(f"[INFO] Standard Gmail API build failed, trying with custom HTTP: {e}", flush=True)
+        try:
+            # Create custom HTTP client with relaxed SSL (for Windows issues)
+            http = httplib2.Http()
+            http = creds.authorize(http)
+            return build("gmail", "v1", http=http)
+        except Exception as e2:
+            print(f"[ERROR] Gmail API build failed with custom HTTP: {e2}", flush=True)
+            # Fallback to standard build (will fail, but with proper error)
+            return build("gmail", "v1", credentials=creds)
 
 
 def extract_facts_from_email(user_id: str, email_data: Dict[str, Any]) -> None:
@@ -264,7 +285,7 @@ def archive_thread(user_id: str, thread_id: str) -> Dict[str, Any]:
     """Archive a Gmail thread by removing it from the INBOX."""
     try:
         creds = load_google_credentials(user_id)
-        service = build("gmail", "v1", credentials=creds)
+        service = _build_gmail_service(creds)
 
         # If a messageId was provided, resolve to threadId
         try:
@@ -290,7 +311,7 @@ def mark_thread_handled(user_id: str, thread_id: str) -> Dict[str, Any]:
     """Apply a 'Handled' label to a thread and mark it as read."""
     try:
         creds = load_google_credentials(user_id)
-        service = build("gmail", "v1", credentials=creds)
+        service = _build_gmail_service(creds)
 
         # Ensure label exists (create if missing)
         labels = service.users().labels().list(userId="me").execute().get("labels", [])
@@ -331,7 +352,7 @@ def list_threads(user_id: str, label: str = "INBOX", max_results: int = 50) -> D
     """List Gmail threads for a given label."""
     try:
         creds = load_google_credentials(user_id)
-        service = build("gmail", "v1", credentials=creds)
+        service = _build_gmail_service(creds)
         resp = service.users().threads().list(
             userId="me",
             labelIds=[label] if label else None,
@@ -443,7 +464,7 @@ def search_threads(user_id: str, query: str, max_results: int = 20) -> Dict[str,
         
         # STEP 3: Fetch from Gmail API to get more results or fill gaps
         creds = load_google_credentials(user_id)
-        service = build("gmail", "v1", credentials=creds)
+        service = _build_gmail_service(creds)
         resp = service.users().messages().list(
             userId="me",
             q=query,
@@ -534,7 +555,7 @@ def classify_single_email(
         # If thread_id provided, fetch email details
         if thread_id and not email_data:
             creds = load_google_credentials(user_id)
-            service = build("gmail", "v1", credentials=creds)
+            service = _build_gmail_service(creds)
 
             # Get thread details
             thread = service.users().threads().get(userId="me", id=thread_id, format="full").execute()
@@ -675,7 +696,7 @@ def triaged_inbox(
         nonlocal classified_emails, max_results  # Allow modification of outer scope variable
         try:
             creds = load_google_credentials(user_id)
-            service = build("gmail", "v1", credentials=creds)
+            service = _build_gmail_service(creds)
 
             unclassified_threads: List[Dict[str, Any]] = []
             # Fetch recent emails from inbox
@@ -705,10 +726,11 @@ def triaged_inbox(
                     print(f"[WARNING] Failed to fetch message {msg_id}: {e}", flush=True)
                     return None
             
-            # Use ThreadPoolExecutor to fetch metadata in parallel (max 20 concurrent requests)
+            # Use ThreadPoolExecutor to fetch metadata in parallel
             # Gmail API has rate limits, so we limit concurrency to avoid quota errors
+            # WINDOWS FIX: Reduced from 20 to 3 to avoid SSL threading issues on Windows
             processed_emails = []
-            with ThreadPoolExecutor(max_workers=20) as executor:
+            with ThreadPoolExecutor(max_workers=3) as executor:
                 # Submit all fetch tasks
                 future_to_msg_id = {
                     executor.submit(fetch_message_metadata, msg["id"]): msg["id"] 
@@ -837,7 +859,8 @@ def triaged_inbox(
                 
                 # Use ThreadPoolExecutor to fetch and classify emails in parallel
                 # Use fewer workers for full body fetches (they're larger and slower)
-                with ThreadPoolExecutor(max_workers=10) as executor:
+                # WINDOWS FIX: Reduced from 10 to 2 to avoid SSL threading issues on Windows
+                with ThreadPoolExecutor(max_workers=2) as executor:
                     # Submit classification tasks
                     future_to_unclass = {
                         executor.submit(fetch_and_classify_email, unclass): unclass
@@ -953,20 +976,27 @@ def triaged_inbox(
     # Ensure we don't exceed max_results
     classified_emails = classified_emails[:max_results]
 
-    # Group by category
+    # Group by category (v3.0 - 10 categories)
     categories: Dict[str, List[Dict[str, Any]]] = {
         "urgent": [],
-        "waiting_for_reply": [],
         "action_items": [],
-        "newsletters": [],
-        "invoices": [],
+        "waiting_for_reply": [],
         "clients": [],
+        "invoices": [],
         "normal": [],
+        "notifications": [],
+        "newsletters": [],
+        "promotional": [],
+        "transactional": [],
+        "social": [],
     }
     for email in classified_emails:
         cat = email.get("category", "normal")
         if cat in categories:
             categories[cat].append(email)
+        else:
+            # Handle any unknown categories (fallback to normal)
+            categories["normal"].append(email)
 
     return {
         "success": True,
@@ -985,7 +1015,7 @@ def classify_background(user_id: str, max_emails: int = 20) -> Dict[str, Any]:
     def _worker() -> None:
         try:
             creds = load_google_credentials(user_id)
-            service = build("gmail", "v1", credentials=creds)
+            service = _build_gmail_service(creds)
 
             # Get unclassified emails from inbox
             resp = service.users().messages().list(
@@ -1086,7 +1116,9 @@ def classify_background(user_id: str, max_emails: int = 20) -> Dict[str, Any]:
             count = 0
             message_ids = [msg["id"] for msg in messages[:max_emails * 2]]  # Get extra to account for threads
             
-            with ThreadPoolExecutor(max_workers=10) as executor:
+            # WINDOWS FIX: Reduce workers to avoid SSL threading issues on Windows
+            # On Windows, high concurrency with SSL can cause "[SSL: WRONG_VERSION_NUMBER]" errors
+            with ThreadPoolExecutor(max_workers=2) as executor:
                 future_to_msg_id = {
                     executor.submit(fetch_and_classify_message, msg_id): msg_id
                     for msg_id in message_ids

@@ -499,6 +499,89 @@ def get_thread_summary(thread_id):
         return handle_api_error(e)
 
 
+@memory_bp.route('/email-processing-status', methods=['GET'])
+def email_processing_status():
+    """
+    Get email classification status for a user.
+    
+    Query params:
+    - user_id: User ID (required)
+    
+    Returns:
+    {
+        "success": true,
+        "user_id": "v",
+        "email_count": 150,
+        "classified_count": 120,
+        "status": "completed",  // "not_started", "in_progress", "completed"
+        "started_at": "2026-01-06T...",
+        "completed_at": "2026-01-06T...",
+        "message": "All emails classified"
+    }
+    """
+    try:
+        user_id = request.args.get('user_id')
+        if not user_id:
+            return jsonify({
+                "success": False,
+                "error": "user_id required"
+            }), 400
+        
+        from app.database import get_db
+        from app.tools.email.classifier import CLASSIFICATION_VERSION
+        
+        db = get_db()
+        if not db.is_connected or db.db is None:
+            return jsonify({
+                "success": False,
+                "error": "Database not connected"
+            }), 500
+        
+        users_col = db.db["users"]
+        emails_col = db.db["emails"]
+        
+        # Get user document
+        user_doc = users_col.find_one({"user_id": user_id})
+        
+        # Count total emails and classified emails
+        email_count = emails_col.count_documents({"user_id": user_id})
+        classified_count = emails_col.count_documents({
+            "user_id": user_id,
+            "classification_version": CLASSIFICATION_VERSION
+        })
+        
+        # Determine status
+        if email_count == 0:
+            status = "no_emails"
+            message = "No emails to classify"
+        elif not user_doc or not user_doc.get("initial_email_classification_done"):
+            if classified_count > 0:
+                status = "in_progress"
+                message = f"Classifying emails... ({classified_count}/{email_count} done)"
+            else:
+                status = "not_started"
+                message = f"{email_count} emails waiting to be classified"
+        else:
+            status = "completed"
+            message = f"All {email_count} emails classified (v{CLASSIFICATION_VERSION})"
+        
+        return jsonify({
+            "success": True,
+            "user_id": user_id,
+            "email_count": email_count,
+            "classified_count": classified_count,
+            "status": status,
+            "classification_version": CLASSIFICATION_VERSION,
+            "started_at": user_doc.get("email_classification_started_at") if user_doc else None,
+            "completed_at": user_doc.get("email_classification_completed_at") if user_doc else None,
+            "message": message
+        })
+        
+    except Exception as e:
+        logger.error(f"Error checking email processing status: {e}")
+        return handle_api_error(e)
+
+
 @memory_bp.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
@@ -574,134 +657,6 @@ def backfill_email_facts():
         
     except Exception as e:
         logger.error(f"Error starting email fact backfill: {e}")
-        return handle_api_error(e)
-
-
-@memory_bp.route('/admin/reclassify-emails', methods=['POST'])
-def reclassify_emails():
-    """
-    Re-classify old emails with v3.0 and extract facts from important ones (ADMIN ONLY).
-    
-    Expected JSON body:
-    {
-        "user_id": "user123",  // required
-        "max_emails": 100      // optional - default: all
-    }
-    
-    Returns:
-    {
-        "success": true,
-        "message": "Re-classification started",
-        "user_id": "user123",
-        "classification_version": "3.0"
-    }
-    """
-    try:
-        data = request.json or {}
-        
-        user_id = data.get('user_id')
-        if not user_id:
-            return jsonify({
-                "success": False,
-                "error": "user_id required"
-            }), 400
-        
-        max_emails = data.get('max_emails')  # None = all emails
-        
-        from app.database import get_db
-        from app.tools.email.classifier import classify_email, CLASSIFICATION_VERSION
-        from app.services.gmail_service import extract_facts_from_email
-        from datetime import datetime
-        import threading
-        
-        def run_reclassify():
-            try:
-                db = get_db()
-                if not db.is_connected or db.db is None:
-                    logger.error("Database not connected for re-classification")
-                    return
-                
-                emails_col = db.db["emails"]
-                
-                # Find old emails
-                query = {
-                    "user_id": user_id,
-                    "$or": [
-                        {"classification_version": {"$ne": CLASSIFICATION_VERSION}},
-                        {"classification_version": {"$exists": False}}
-                    ]
-                }
-                
-                limit = max_emails if max_emails else 0
-                cursor = emails_col.find(query).limit(limit) if limit else emails_col.find(query)
-                
-                processed = 0
-                facts_extracted = 0
-                
-                for email_doc in cursor:
-                    try:
-                        thread_id = email_doc.get("thread_id")
-                        
-                        email_data = {
-                            "threadId": thread_id,
-                            "from": email_doc.get("from", ""),
-                            "subject": email_doc.get("subject", ""),
-                            "snippet": email_doc.get("snippet", ""),
-                            "body": email_doc.get("snippet", "")[:1000],
-                        }
-                        
-                        # Re-classify
-                        classification = classify_email(email_data, user_id)
-                        category = classification["category"]
-                        
-                        # Update database
-                        emails_col.update_one(
-                            {"user_id": user_id, "thread_id": thread_id},
-                            {
-                                "$set": {
-                                    "category": category,
-                                    "scores": classification["scores"],
-                                    "classified_at": datetime.utcnow().isoformat(),
-                                    "classification_version": CLASSIFICATION_VERSION,
-                                }
-                            }
-                        )
-                        
-                        # Extract facts if important category
-                        IMPORTANT_CATEGORIES = ['urgent', 'action_items', 'clients', 'waiting_for_reply', 'normal']
-                        if category in IMPORTANT_CATEGORIES:
-                            email_data['category'] = category
-                            extract_facts_from_email(user_id, email_data)
-                            facts_extracted += 1
-                        
-                        processed += 1
-                        
-                        if processed % 50 == 0:
-                            logger.info(f"Re-classification progress: {processed} emails, {facts_extracted} fact extractions")
-                        
-                    except Exception as e:
-                        logger.error(f"Error re-classifying email {email_doc.get('thread_id')}: {e}")
-                
-                logger.info(f"Re-classification completed for user {user_id}: {processed} emails, {facts_extracted} fact extractions")
-                
-            except Exception as e:
-                logger.error(f"Re-classification failed for user {user_id}: {e}")
-        
-        # Run in background thread
-        thread = threading.Thread(target=run_reclassify, daemon=True)
-        thread.start()
-        
-        return jsonify({
-            "success": True,
-            "message": "Email re-classification started in background",
-            "user_id": user_id,
-            "max_emails": max_emails or "all",
-            "classification_version": CLASSIFICATION_VERSION,
-            "note": "Check server logs for progress"
-        })
-        
-    except Exception as e:
-        logger.error(f"Error starting re-classification: {e}")
         return handle_api_error(e)
 
 
