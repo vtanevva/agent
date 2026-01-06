@@ -518,6 +518,65 @@ def health_check():
     })
 
 
+@memory_bp.route('/admin/backfill-email-facts', methods=['POST'])
+def backfill_email_facts():
+    """
+    Backfill facts from existing emails (ADMIN ONLY).
+    
+    Expected JSON body:
+    {
+        "user_id": "user123",  // required
+        "max_emails": 100      // optional - default: 100
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Backfill started",
+        "user_id": "user123",
+        "max_emails": 100
+    }
+    """
+    try:
+        data = request.json or {}
+        
+        user_id = data.get('user_id')
+        if not user_id:
+            return jsonify({
+                "success": False,
+                "error": "user_id required"
+            }), 400
+        
+        max_emails = int(data.get('max_emails', 100))
+        
+        # Trigger background classification (which now extracts facts)
+        from app.services.gmail_service import classify_background
+        import threading
+        
+        def run_backfill():
+            try:
+                result = classify_background(user_id, max_emails=max_emails)
+                logger.info(f"Email fact backfill completed for user {user_id}: {result}")
+            except Exception as e:
+                logger.error(f"Email fact backfill failed for user {user_id}: {e}")
+        
+        # Run in background thread
+        thread = threading.Thread(target=run_backfill, daemon=True)
+        thread.start()
+        
+        return jsonify({
+            "success": True,
+            "message": "Email fact backfill started in background",
+            "user_id": user_id,
+            "max_emails": max_emails,
+            "note": "Check server logs for progress: '📧 Extracted X facts from email'"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error starting email fact backfill: {e}")
+        return handle_api_error(e)
+
+
 @memory_bp.route('/admin/backfill-facts', methods=['POST'])
 def backfill_facts():
     """

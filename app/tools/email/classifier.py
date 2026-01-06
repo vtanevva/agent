@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 
 # Classification version - increment this when classification rules change
 # This allows re-classification of existing emails when rules are updated
-CLASSIFICATION_VERSION = "2.0"  # Updated for LinkedIn/social filtering and improved thresholds
+CLASSIFICATION_VERSION = "3.0"  # Added notifications, transactional, social, promotional categories + smart fact extraction filtering
 
 
 def compute_rules_score(email: Dict) -> Dict[str, int]:
@@ -17,6 +17,7 @@ def compute_rules_score(email: Dict) -> Dict[str, int]:
     subject = (email.get("subject") or "").lower()
     body = (email.get("body") or "").lower()
     snippet = (email.get("snippet") or "").lower()
+    from_email = (email.get("from") or "").lower()
     
     text = f"{subject} {body} {snippet}"
     
@@ -25,6 +26,10 @@ def compute_rules_score(email: Dict) -> Dict[str, int]:
         "waiting_for_reply": 0,
         "action_items": 0,
         "newsletters": 0,
+        "notifications": 0,
+        "transactional": 0,
+        "social": 0,
+        "promotional": 0,
         "invoices": 0,
         "clients": 0,
     }
@@ -78,16 +83,49 @@ def compute_rules_score(email: Dict) -> Dict[str, int]:
     if any(kw in text for kw in invoice_keywords):
         scores["invoices"] += 30
     
-    # Newsletters and social connection requests
-    newsletter_keywords = ["unsubscribe", "newsletter", "promotion", "special offer", "sale"]
-    social_keywords = ["want to connect", "connection request", "linkedin", "connect with you", 
-                       "follow you", "viewed your profile", "endorsed you"]
+    # Newsletters
+    newsletter_keywords = ["unsubscribe", "newsletter", "digest", "weekly update", "monthly update"]
     if any(kw in text for kw in newsletter_keywords):
         scores["newsletters"] += 25
-    if any(kw in text for kw in social_keywords):
-        scores["newsletters"] += 30  # Social connection requests go to newsletters/normal
     if "unsubscribe" in text.lower():
         scores["newsletters"] += 15
+    
+    # Notifications (automated system notifications)
+    notification_keywords = ["notification", "alert", "jira", "github", "gitlab", "slack", "trello", 
+                            "asana", "automated message", "do not reply", "no-reply", "noreply"]
+    notification_senders = ["noreply@", "no-reply@", "notifications@", "alerts@", "automated@"]
+    if any(kw in text for kw in notification_keywords):
+        scores["notifications"] += 30
+    if any(sender in from_email for sender in notification_senders):
+        scores["notifications"] += 35
+    if "automated" in text or "auto-generated" in text:
+        scores["notifications"] += 20
+    
+    # Transactional (orders, shipping, receipts - not invoices)
+    transactional_keywords = ["order confirmation", "order placed", "shipped", "tracking number", 
+                             "delivery", "order #", "receipt", "confirmation code"]
+    if any(kw in text for kw in transactional_keywords):
+        scores["transactional"] += 30
+    if "order" in text and ("confirmed" in text or "placed" in text):
+        scores["transactional"] += 20
+    
+    # Social media notifications
+    social_keywords = ["want to connect", "connection request", "linkedin", "connect with you", 
+                       "follow you", "viewed your profile", "endorsed you", "twitter", "facebook",
+                       "instagram", "mentioned you", "commented on"]
+    social_domains = ["linkedin.com", "twitter.com", "facebook.com", "instagram.com"]
+    if any(kw in text for kw in social_keywords):
+        scores["social"] += 35
+    if any(domain in from_email for domain in social_domains):
+        scores["social"] += 40
+    
+    # Promotional (marketing, sales)
+    promotional_keywords = ["promotion", "special offer", "sale", "discount", "limited time", 
+                           "% off", "save now", "deal", "exclusive offer", "shop now"]
+    if any(kw in text for kw in promotional_keywords):
+        scores["promotional"] += 30
+    if "%" in subject and any(word in subject for word in ["off", "discount", "sale"]):
+        scores["promotional"] += 25
     
     return scores
 
@@ -250,24 +288,35 @@ Return only ONE label from: URGENT, IMPORTANT, ACTION, CLIENT, INVOICE, NEWSLETT
 def compute_priority_category(total_scores: Dict[str, int]) -> str:
     """
     Determine final category based on total scores and thresholds.
+    Priority order: noise categories first, then important categories
     """
-    # Thresholds (lowered urgent threshold to catch meeting reminders)
-    # Prioritize filtering out newsletters/social first, then categorize important emails
-    if total_scores.get("newsletters", 0) >= 30:
+    # Step 1: Filter out noise/automated emails first (don't waste time on these)
+    if total_scores.get("notifications", 0) >= 30:
+        return "notifications"
+    elif total_scores.get("social", 0) >= 35:
+        return "social"
+    elif total_scores.get("promotional", 0) >= 30:
+        return "promotional"
+    elif total_scores.get("transactional", 0) >= 30:
+        return "transactional"
+    elif total_scores.get("newsletters", 0) >= 25:
         return "newsletters"
-    elif total_scores.get("urgent", 0) >= 50:  # Lowered from 80 to catch reminders
+    
+    # Step 2: Categorize important emails (these should have facts extracted)
+    elif total_scores.get("urgent", 0) >= 50:
         return "urgent"
-    elif total_scores.get("invoices", 0) >= 60:
-        return "invoices"
     elif total_scores.get("clients", 0) >= 50:
         return "clients"
-    elif total_scores.get("action_items", 0) >= 35:  # Lowered from 45 to catch more action items
+    elif total_scores.get("action_items", 0) >= 35:
         return "action_items"
     elif total_scores.get("waiting_for_reply", 0) >= 40:
         return "waiting_for_reply"
+    elif total_scores.get("invoices", 0) >= 60:
+        return "invoices"
+    
+    # Step 3: Default categorization
     else:
-        # Default to action_items for emails that aren't clearly newsletters
-        # Most emails that reach here are probably action items, not truly "normal"
+        # If has any action/urgent indicators, classify as action_items
         if total_scores.get("action_items", 0) > 0 or total_scores.get("urgent", 0) > 0:
             return "action_items"
         return "normal"
@@ -288,9 +337,12 @@ def classify_email(email: Dict, user_id: str) -> Dict:
     sender_scores = compute_sender_score(email, user_id)
     llm_scores = compute_llm_score(email)
     
-    # Combine scores
+    # Combine scores (all categories)
     total_scores = {}
-    for category in ["urgent", "waiting_for_reply", "action_items", "newsletters", "invoices", "clients"]:
+    all_categories = ["urgent", "waiting_for_reply", "action_items", "newsletters", 
+                      "notifications", "transactional", "social", "promotional", 
+                      "invoices", "clients"]
+    for category in all_categories:
         total_scores[category] = (
             rules_scores.get(category, 0) +
             sender_scores.get(category, 0) +

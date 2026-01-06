@@ -24,6 +24,99 @@ from app.tools.email.forward import forward_email as tool_forward_email
 from app.utils.oauth_utils import load_google_credentials
 
 
+def extract_facts_from_email(user_id: str, email_data: Dict[str, Any]) -> None:
+    """
+    Extract facts from email content WITHOUT storing the full email body.
+    
+    This runs in background and only stores extracted facts (preferences, context, etc.)
+    Privacy-friendly: Full email content is never stored in memory system.
+    
+    Args:
+        user_id: User identifier
+        email_data: Email data with 'subject', 'body', 'from', 'to' fields
+    """
+    def _background_extract():
+        try:
+            # FILTER: Only extract facts from important email categories
+            # Skip noise: notifications, newsletters, promotional, transactional, social
+            category = email_data.get('category', 'unknown')
+            
+            SKIP_CATEGORIES = ['notifications', 'newsletters', 'promotional', 'transactional', 'social']
+            EXTRACT_CATEGORIES = ['urgent', 'action_items', 'clients', 'waiting_for_reply', 'normal']
+            
+            if category in SKIP_CATEGORIES:
+                # Skip fact extraction for noise emails
+                return
+            
+            from app.memory.memory_gate import get_memory_gate
+            
+            # Build context text for fact extraction (NOT stored, only used for extraction)
+            subject = email_data.get('subject', '')
+            body = email_data.get('body', '')[:2000]  # Limit to 2000 chars for cost control
+            sender = email_data.get('from', '')
+            
+            # Create extraction context (analyze content without storing it)
+            extraction_text = f"Subject: {subject}\n\nFrom: {sender}\n\nContent: {body}"
+            
+            # Extract facts using memory gate
+            gate = get_memory_gate()
+            candidate_facts = gate.extract_candidate_facts(
+                text=extraction_text,
+                user_id=user_id,
+                source_ref=f"email:{email_data.get('thread_id', 'unknown')}",
+            )
+            
+            if candidate_facts:
+                # Get existing facts for deduplication
+                from app.memory.models import get_memory_facts_collection
+                facts_col = get_memory_facts_collection()
+                
+                if facts_col:
+                    existing_facts = list(facts_col.find({
+                        "user_id": user_id,
+                        "is_active": True
+                    }))
+                    
+                    # Deduplicate
+                    unique_facts = gate.deduplicate_facts(candidate_facts, existing_facts)
+                    
+                    if unique_facts:
+                        # Store unique facts in MongoDB
+                        stored_count = gate.store_facts(user_id, unique_facts)
+                        
+                        if stored_count > 0:
+                            # Embed facts to Pinecone for semantic search
+                            from app.memory.vector_store import get_vector_store
+                            vector_store = get_vector_store()
+                            
+                            vectors = []
+                            for fact in unique_facts:
+                                vectors.append({
+                                    "id": f"fact_{user_id}_{hash(fact.text)}",
+                                    "text": fact.text,
+                                    "metadata": {
+                                        "fact_type": fact.fact_type.value,
+                                        "confidence": fact.confidence,
+                                        "source": "email"
+                                    }
+                                })
+                            
+                            if vectors:
+                                vector_store.upsert_vectors(
+                                    user_id=user_id,
+                                    vectors=vectors,
+                                    vector_type="fact"
+                                )
+                            
+                            print(f"📧 Extracted and embedded {stored_count} facts from email (user: {user_id})", flush=True)
+                            
+        except Exception as e:
+            print(f"[WARNING] Email fact extraction failed: {e}", flush=True)
+    
+    # Run in background thread (non-blocking)
+    threading.Thread(target=_background_extract, daemon=True).start()
+
+
 def get_thread_detail(user_id: str, thread_id: str) -> Dict[str, Any]:
     """
     Return full plain-text content and headers for the selected email/thread.
@@ -463,6 +556,12 @@ def classify_single_email(
 
         # Classify email
         classification = classify_email(email_data, user_id)
+        
+        # Add category to email_data for fact extraction filtering
+        email_data['category'] = classification['category']
+        
+        # Extract facts from email (background, non-blocking, filtered by category)
+        extract_facts_from_email(user_id, email_data)
 
         # Store classification in database if thread_id exists
         if thread_id:
@@ -698,6 +797,12 @@ def triaged_inbox(
                         }
 
                         classification = classify_email(email_data, user_id)
+                        
+                        # Add category to email_data for fact extraction filtering
+                        email_data['category'] = classification['category']
+                        
+                        # Extract facts from email (background, non-blocking, filtered by category)
+                        extract_facts_from_email(user_id, email_data)
 
                         # Store in database with version
                         emails_col.update_one(
@@ -804,6 +909,9 @@ def triaged_inbox(
                                 }
 
                                 classification = classify_email(email_data, user_id)
+                                
+                                # Extract facts from email (background, non-blocking)
+                                extract_facts_from_email(user_id, email_data)
 
                                 # Update with new classification and version
                                 bg_db = get_db()
@@ -945,6 +1053,9 @@ def classify_background(user_id: str, max_emails: int = 20) -> Dict[str, Any]:
                     }
 
                     classification = classify_email(email_data, user_id)
+                    
+                    # Extract facts from email (background, non-blocking)
+                    extract_facts_from_email(user_id, email_data)
 
                     # Store in database
                     if emails_col is not None:

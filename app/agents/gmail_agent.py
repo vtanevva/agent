@@ -224,6 +224,24 @@ class GmailAgent:
         str
             Response (may be JSON for UI to parse)
         """
+        # ===== RETRIEVE USER AWARENESS CONTEXT =====
+        context_bundle = None
+        try:
+            from app.memory.retrieval_service import get_retrieval_service
+            
+            retrieval_service = get_retrieval_service()
+            context_bundle = retrieval_service.retrieve_context(
+                user_id=user_id,
+                thread_id=None,  # Email composition is not thread-specific
+                query_text=message,
+            )
+            
+            facts_count = len(context_bundle.top_facts) if context_bundle else 0
+            logger.info(f"📧 Retrieved {facts_count} facts for email composition")
+            
+        except Exception as e:
+            logger.warning(f"User Awareness retrieval failed for GmailAgent: {e}")
+        
         intent = self._detect_email_intent(message)
         logger.info(f"GmailAgent detected intent: {intent} for message: {message[:50]}")
         
@@ -273,6 +291,17 @@ class GmailAgent:
                     logger.warning(f"Failed to resolve contact email for '{raw_to}': {e}")
                     resolved_to = raw_to
             
+            # Build context-aware system prompt
+            system_prompt = "You are an email composition assistant. Generate professional email content."
+            
+            # Inject user facts into system prompt if available
+            if context_bundle and context_bundle.top_facts:
+                facts_text = "\n".join([
+                    f"- {fact.get('text', '')}"
+                    for fact in context_bundle.top_facts[:5]  # Top 5 facts
+                ])
+                system_prompt += f"\n\nKNOWN FACTS ABOUT USER:\n{facts_text}\n\nUse these facts to personalize the email when relevant."
+            
             # Use LLM to generate subject and body
             if user_note:
                 prompt = (
@@ -289,7 +318,7 @@ class GmailAgent:
             try:
                 llm_response = self.llm_service.chat_completion_text(
                     messages=[
-                        {"role": "system", "content": "You are an email composition assistant. Generate professional email content."},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt}
                     ],
                     max_tokens=200
