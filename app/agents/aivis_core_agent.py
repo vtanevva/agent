@@ -67,8 +67,49 @@ class AivisCoreAgent:
         """
         logger.info(f"AivisCoreAgent handling message for user {user_id}")
         
-        # Build system prompt for Aivis Core
-        system_prompt = """You are Aivis, a calm, practical, productivity-oriented AI assistant.
+        # ===== RETRIEVE USER AWARENESS CONTEXT =====
+        try:
+            from app.memory.retrieval_service import get_retrieval_service
+            from app.memory.prompt_builder import get_prompt_builder
+            
+            retrieval_service = get_retrieval_service()
+            prompt_builder = get_prompt_builder()
+            
+            # Retrieve context bundle (facts, summaries, doc chunks, recent messages)
+            context_bundle = retrieval_service.retrieve_context(
+                user_id=user_id,
+                thread_id=session_id,
+                query_text=user_message if isinstance(user_message, str) else None,
+            )
+            
+            # Build system prompt with injected context
+            system_prompt = prompt_builder.build_system_prompt(
+                bundle=context_bundle,
+                assistant_name="Aivis",
+                base_personality="""You are Aivis, a calm, practical, productivity-oriented AI assistant.
+Your primary focus is to help the user manage email, calendar, tasks, projects,
+and information overload so they feel more organized, clear, and in control of
+their work and life logistics.
+
+Core capabilities:
+- Help rewrite, summarize, and draft emails, messages, and documents.
+- Help plan and prioritize tasks and projects with clear next steps.
+- Help organize information into simple structures (lists, bullets, outlines).
+
+Tone and style:
+- Calm, supportive, and grounded. No hype.
+- Concise but not cold; a bit warm and human.
+- Prefer structured answers (bullets, steps, short sections) for planning and organization.
+- Ask clarifying questions only when absolutely necessary to move forward.
+- When rewriting text, keep the user's intent and meaning, but improve clarity, tone, and structure.""",
+            )
+            
+            logger.info(f"📚 Retrieved context: {context_bundle.retrieval_stats.get('total_items', 0)} items")
+            
+        except Exception as e:
+            # Fallback to basic prompt if User Awareness fails
+            logger.warning(f"User Awareness retrieval failed, using basic prompt: {e}")
+            system_prompt = """You are Aivis, a calm, practical, productivity-oriented AI assistant.
 Your primary focus is to help the user manage email, calendar, tasks, projects,
 and information overload so they feel more organized, clear, and in control of
 their work and life logistics.

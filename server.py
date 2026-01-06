@@ -1415,6 +1415,44 @@ def google_callback():
             real_email = state
 
         save_google_credentials(state, creds, real_email)
+        
+        # 🎯 BACKFILL FACTS: User just connected their account
+        # Trigger background backfill of their Gmail messages to extract facts
+        try:
+            from app.memory.background_jobs import get_job_queue
+            from app.memory.models import get_messages_collection
+            
+            # Check if user has existing messages in DB
+            messages_col = get_messages_collection()
+            if messages_col:
+                message_count = messages_col.count_documents({"user_id": state})
+                
+                if message_count > 0:
+                    logger.info(f"🔄 Triggering backfill for user {state} ({message_count} messages)")
+                    
+                    # Enqueue backfill job (non-blocking)
+                    def backfill_for_new_user():
+                        import requests
+                        try:
+                            requests.post(
+                                "http://localhost:10000/memory/admin/backfill-facts",
+                                json={"user_id": state, "limit": 50},  # Last 50 messages
+                                timeout=300  # 5 minutes timeout
+                            )
+                            logger.info(f"✅ Backfill completed for user {state}")
+                        except Exception as e:
+                            logger.error(f"❌ Backfill failed for user {state}: {e}")
+                    
+                    job_queue = get_job_queue()
+                    job_queue.enqueue(
+                        backfill_for_new_user,
+                        job_id=f"backfill-oauth-{state}"
+                    )
+                else:
+                    logger.info(f"ℹ️ No messages to backfill for new user {state}")
+        except Exception as e:
+            # Don't fail OAuth if backfill fails
+            logger.warning(f"⚠️ Could not trigger backfill for user {state}: {e}")
 
     except Exception as e:
         logger.error(f"OAuth callback error: {e}", exc_info=True)

@@ -330,8 +330,8 @@ def add_fact():
             }), 400
         
         from uuid import uuid4
-        from .models import get_memory_facts_collection
-        from .vector_store import get_vector_store
+        from app.memory.models import get_memory_facts_collection
+        from app.memory.vector_store import get_vector_store
         
         facts_col = get_memory_facts_collection()
         if facts_col is None:
@@ -400,7 +400,7 @@ def delete_fact(fact_id):
                 "error": "user_id required"
             }), 400
         
-        from .models import get_memory_facts_collection
+        from app.memory.models import get_memory_facts_collection
         
         facts_col = get_memory_facts_collection()
         if facts_col is None:
@@ -456,7 +456,7 @@ def get_thread_summary(thread_id):
         
         force_update = request.args.get('force_update', '').lower() == 'true'
         
-        from .models import get_thread_summaries_collection
+        from app.memory.models import get_thread_summaries_collection
         
         summaries_col = get_thread_summaries_collection()
         if summaries_col is None:
@@ -503,7 +503,7 @@ def get_thread_summary(thread_id):
 def health_check():
     """Health check endpoint"""
     from app.database import get_db
-    from .vector_store import get_vector_store
+    from app.memory.vector_store import get_vector_store
     
     db = get_db()
     vector_store = get_vector_store()
@@ -516,6 +516,156 @@ def health_check():
             "vector_store": "initialized" if vector_store._initialized else "not_initialized",
         }
     })
+
+
+@memory_bp.route('/admin/backfill-facts', methods=['POST'])
+def backfill_facts():
+    """
+    Backfill facts from existing messages (ADMIN ONLY).
+    
+    Expected JSON body:
+    {
+        "user_id": "user123",  // optional - if not provided, processes all users
+        "limit": 100,          // optional - messages per user (default: 100)
+        "min_length": 20       // optional - minimum message length (default: 20)
+    }
+    """
+    try:
+        data = request.json or {}
+        
+        user_id = data.get('user_id')
+        limit = int(data.get('limit', 100))
+        min_length = int(data.get('min_length', 20))
+        
+        from app.memory.models import get_messages_collection, get_memory_facts_collection
+        from app.memory.memory_gate import get_memory_gate
+        from app.memory.vector_store import get_vector_store
+        from uuid import uuid4
+        
+        messages_col = get_messages_collection()
+        facts_col = get_memory_facts_collection()
+        
+        if not messages_col or not facts_col:
+            return jsonify({
+                "success": False,
+                "error": "Database not available"
+            }), 503
+        
+        # Get messages to process
+        query = {"direction": "in"}
+        if user_id:
+            query["user_id"] = user_id
+        
+        messages = list(messages_col.find(
+            query,
+            {"text": 1, "_id": 1, "ts": 1, "user_id": 1}
+        ).sort("ts", -1).limit(limit))
+        
+        if not messages:
+            return jsonify({
+                "success": True,
+                "messages_processed": 0,
+                "facts_extracted": 0,
+                "message": "No messages found to process"
+            })
+        
+        # Get existing facts for deduplication
+        existing_query = {"is_active": True}
+        if user_id:
+            existing_query["user_id"] = user_id
+        
+        existing_facts = list(facts_col.find(existing_query, {"text": 1, "user_id": 1}))
+        
+        # Build existing facts map by user
+        existing_by_user = {}
+        for fact in existing_facts:
+            uid = fact.get("user_id")
+            if uid not in existing_by_user:
+                existing_by_user[uid] = []
+            existing_by_user[uid].append(fact)
+        
+        # Process messages
+        gate = get_memory_gate()
+        vector_store = get_vector_store()
+        
+        total_candidates = 0
+        total_stored = 0
+        processed = 0
+        
+        for msg in messages:
+            text = msg.get("text", "").strip()
+            msg_user_id = msg.get("user_id")
+            
+            if not msg_user_id or len(text) < min_length:
+                continue
+            
+            processed += 1
+            
+            try:
+                # Extract candidate facts
+                candidates = gate.extract_candidate_facts(
+                    text=text,
+                    user_id=msg_user_id,
+                    source_ref=msg["_id"],
+                )
+                
+                if not candidates:
+                    continue
+                
+                total_candidates += len(candidates)
+                
+                # Deduplicate against user's existing facts
+                user_existing = existing_by_user.get(msg_user_id, [])
+                unique = gate.deduplicate_facts(candidates, user_existing)
+                
+                if not unique:
+                    continue
+                
+                # Store unique facts
+                stored = gate.store_facts(msg_user_id, unique)
+                total_stored += stored
+                
+                if stored > 0:
+                    # Add to existing facts for next iteration
+                    if msg_user_id not in existing_by_user:
+                        existing_by_user[msg_user_id] = []
+                    
+                    for candidate in unique:
+                        existing_by_user[msg_user_id].append({"text": candidate.text})
+                    
+                    # Embed facts to vector store
+                    vectors = []
+                    for candidate in unique:
+                        vectors.append({
+                            "id": f"fact-{uuid4().hex[:8]}",
+                            "text": candidate.text,
+                            "metadata": {
+                                "fact_type": candidate.fact_type.value,
+                                "confidence": candidate.confidence,
+                            }
+                        })
+                    
+                    if vectors:
+                        vector_store.upsert_vectors(
+                            user_id=msg_user_id,
+                            vectors=vectors,
+                            vector_type="fact"
+                        )
+                
+            except Exception as e:
+                logger.error(f"Error processing message {msg['_id']}: {e}")
+                continue
+        
+        return jsonify({
+            "success": True,
+            "messages_processed": processed,
+            "candidate_facts": total_candidates,
+            "facts_stored": total_stored,
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in backfill_facts: {e}")
+        return handle_api_error(e)
 
 
 # Export blueprint

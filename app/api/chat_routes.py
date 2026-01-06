@@ -51,11 +51,13 @@ def save_message(user_id, session_id, user_message, bot_reply):
     except Exception as e:
         print(f"[ERROR] Failed to save message: {e}", flush=True)
     
-    # Extract and store contact notes in background
-    try:
-        _extract_contact_notes(user_id, user_message, bot_reply)
-    except Exception as e:
-        print(f"[ERROR] Failed to extract contact notes: {e}", flush=True)
+    # ===== CONTACT NOTE EXTRACTION (DISABLED FOR PERFORMANCE) =====
+    # This was making 1 API call per contact mentioned (8+ calls per message!)
+    # TODO: Move to async background job or make more selective
+    # try:
+    #     _extract_contact_notes(user_id, user_message, bot_reply)
+    # except Exception as e:
+    #     print(f"[ERROR] Failed to extract contact notes: {e}", flush=True)
 
 
 def _extract_contact_notes(user_id: str, user_message: str, bot_reply: str):
@@ -331,21 +333,41 @@ def chat():
         # Save conversation (save text message, images are stored separately)
         save_message(user_id, session_id, user_message or (f"[{len(images)} image(s)]" if images else ""), reply)
 
-        # Extract and save new facts using LLMService and MemoryService
-        llm_service = get_llm_service()
-        memory_service = get_memory_service()
+        # ===== NEW USER AWARENESS INGESTION =====
+        # Ingest user message into the new memory system for fact extraction
+        try:
+            from app.memory.ingestion_service import get_ingestion_service
+            from app.memory.models import MessageDirection
+            
+            ingestion_service = get_ingestion_service()
+            ingestion_service.ingest_message(
+                user_id=user_id,
+                thread_id=session_id,
+                channel="web_chat",
+                direction=MessageDirection.INCOMING,  # Fixed: was .IN, should be .INCOMING
+                text=user_message,
+                extract_facts=True,  # Extract facts in background
+            )
+        except Exception as e:
+            logger.warning(f"Failed to ingest message into User Awareness system: {e}")
         
-        extracted = llm_service.extract_facts(user_message)
-        for line in extracted.split("\n"):
-            line = line.strip("- ").strip()
-            if line and line.lower() != "none":
-                fact = line.removeprefix("FACT:").strip()
-                memory_service.save_fact(
-                    user_id=user_id,
-                    fact=fact,
-                    session_id=session_id,
-                    metadata={"emotion": "neutral"}
-                )
+        # ===== OLD FACT EXTRACTION (DISABLED) =====
+        # The old approach caused multiple redundant API calls (11+ per message).
+        # Replaced with the User Awareness ingestion above.
+        #
+        # llm_service = get_llm_service()
+        # memory_service = get_memory_service()
+        # extracted = llm_service.extract_facts(user_message)
+        # for line in extracted.split("\n"):
+        #     line = line.strip("- ").strip()
+        #     if line and line.lower() != "none":
+        #         fact = line.removeprefix("FACT:").strip()
+        #         memory_service.save_fact(
+        #             user_id=user_id,
+        #             fact=fact,
+        #             session_id=session_id,
+        #             metadata={"emotion": "neutral"}
+        #         )
 
         # Add rate limit headers to response (if rate limiting is enabled)
         response = jsonify({"reply": reply})

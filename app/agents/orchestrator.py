@@ -27,7 +27,10 @@ logger = get_logger(__name__)
 IntentType = Literal["calendar", "email", "contacts", "general"]
 
 # Intent detection keywords
-CALENDAR_KEYWORDS = ["calendar", "events", "schedule", "appointments", "meetings"]
+# NOTE: Removed ambiguous words like "meetings" to prevent false positives
+# Now we use action-based patterns in detect_intent() instead
+CALENDAR_KEYWORDS = ["calendar", "schedule"]  # Kept minimal, using action patterns instead
+
 # NOTE: We also treat "send a message to <person>" as an email-compose request
 # because this app currently supports messaging via Gmail compose, not SMS/DMs.
 EMAIL_KEYWORDS = [
@@ -43,25 +46,90 @@ EMAIL_KEYWORDS = [
 
 def detect_intent(user_message: str) -> IntentType:
     """
-    Lightweight intent detection based on keyword lists and calendar parsing.
-    
-    - If we detect explicit calendar requests, treat as 'calendar'.
-    - Else if email/inbox-related keywords are present, treat as 'email'.
-    - Otherwise, default to 'general'.
+    Smart intent detection that distinguishes between:
+    - Calendar actions (create/view events) vs questions about scheduling
+    - Email actions (send/check) vs questions about contacts
+    - General chat/advice vs domain-specific actions
     """
+    from app.services.llm_service import get_llm_service
+    
     text = (user_message or "").lower()
     
+    # Quick heuristic: If asking "when/what/how/should/can I" → likely general advice
+    advice_questions = ["when should", "what time", "how should", "can i schedule", "should i", "should we"]
+    if any(q in text for q in advice_questions):
+        logger.info(f"Detected advice question pattern, routing to general: {user_message[:50]}...")
+        return "general"
+    
+    # Use LLM for nuanced detection (with caching)
+    try:
+        llm_service = get_llm_service()
+        
+        prompt = f"""Classify this user message into ONE category:
+
+Message: "{user_message}"
+
+Categories:
+- **calendar**: User wants to CREATE, VIEW, or MANAGE calendar events. Examples: "Schedule a meeting for 3pm", "Show my calendar", "Add event for tomorrow"
+- **email**: User wants to SEND, READ, or MANAGE emails. Examples: "Send email to John", "Check my inbox", "Reply to Sarah"
+- **general**: User is asking for advice, chatting, or discussing topics. Examples: "When should we meet?", "I prefer morning meetings", "What's the weather?"
+
+IMPORTANT:
+- Questions like "When should I..." or "How should I..." are GENERAL (advice), NOT calendar actions
+- Simply mentioning "meeting" or "schedule" doesn't mean calendar action
+- Only choose calendar/email if there's a CLEAR ACTION to perform
+
+Return ONLY one word: calendar, email, or general
+
+Category:"""
+        
+        response = llm_service.chat_completion_text(
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=10,
+        )
+        
+        intent = response.strip().lower()
+        if intent in ["calendar", "email", "general"]:
+            logger.info(f"LLM detected intent: {intent} for message: {user_message[:50]}...")
+            return intent
+            
+    except Exception as e:
+        logger.warning(f"LLM intent detection failed: {e}")
+    
+    # Fallback: keyword-based detection
+    # Check for explicit calendar actions (not just questions)
+    calendar_action_patterns = [
+        "create event",
+        "add event",
+        "book a",
+        "set up a meeting for",
+        "add to calendar",
+        "check my calendar",
+        "show my calendar",
+        "view calendar",
+        "list events",
+        "my events",
+    ]
+    
+    is_calendar_action = any(pattern in text for pattern in calendar_action_patterns)
+    
+    # Also check the calendar detector (which looks for dates/times)
     try:
         calendar_requests = detect_calendar_requests(user_message) or []
     except Exception:
         calendar_requests = []
     
-    if calendar_requests or any(k in text for k in CALENDAR_KEYWORDS):
+    # Only route to calendar if there's an action OR explicit calendar requests detected
+    if calendar_requests or is_calendar_action:
+        logger.info(f"Keyword-based calendar detection for: {user_message[:50]}...")
         return "calendar"
     
     if any(k in text for k in EMAIL_KEYWORDS):
+        logger.info(f"Email keywords detected for: {user_message[:50]}...")
         return "email"
     
+    logger.info(f"Defaulting to general for: {user_message[:50]}...")
     return "general"
 
 

@@ -301,7 +301,7 @@ Thread messages:
 
 Summary:"""
             
-            summary_text = llm_service.call_llm(
+            summary_text = llm_service.chat_completion_text(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
                 max_tokens=200,

@@ -30,6 +30,7 @@ class PromptBuilder:
         self,
         bundle: ContextBundle,
         assistant_name: str = "Aivis",
+        base_personality: str = None,
     ) -> str:
         """
         Build system prompt with injected context.
@@ -37,14 +38,18 @@ class PromptBuilder:
         Args:
             bundle: ContextBundle with retrieved context
             assistant_name: Name of the assistant
+            base_personality: Custom personality/instructions (optional)
         
         Returns:
             System prompt string
         """
         sections = []
         
-        # System instructions
-        sections.append(f"""You are {assistant_name}, a personal AI assistant.
+        # System instructions (use custom or default)
+        if base_personality:
+            sections.append(base_personality)
+        else:
+            sections.append(f"""You are {assistant_name}, a personal AI assistant.
 
 Your role:
 - Help the user with their tasks, questions, and requests
@@ -98,6 +103,7 @@ DOCUMENT EXCERPTS (from user's files):
         bundle: ContextBundle,
         user_message: str,
         assistant_name: str = "Aivis",
+        base_personality: str = None,
         include_recent_messages: bool = True,
     ) -> List[Dict[str, str]]:
         """
@@ -107,6 +113,7 @@ DOCUMENT EXCERPTS (from user's files):
             bundle: ContextBundle with retrieved context
             user_message: Latest user message
             assistant_name: Name of the assistant
+            base_personality: Custom personality/instructions (optional)
             include_recent_messages: Whether to include recent thread messages
         
         Returns:
@@ -115,7 +122,7 @@ DOCUMENT EXCERPTS (from user's files):
         messages = []
         
         # System message with context
-        system_prompt = self.build_system_prompt(bundle, assistant_name)
+        system_prompt = self.build_system_prompt(bundle, assistant_name, base_personality)
         messages.append({
             "role": "system",
             "content": system_prompt
@@ -262,4 +269,22 @@ def build_context_aware_messages(
     logger.info(f"📝 Built context-aware prompt: ~{builder.estimate_token_count(bundle)} tokens")
     
     return messages
+
+
+# Singleton instance
+_prompt_builder: Optional[PromptBuilder] = None
+
+
+def get_prompt_builder() -> PromptBuilder:
+    """
+    Get singleton instance of PromptBuilder.
+    
+    Returns:
+        PromptBuilder instance
+    """
+    global _prompt_builder
+    if _prompt_builder is None:
+        _prompt_builder = PromptBuilder()
+        logger.info("✅ PromptBuilder initialized")
+    return _prompt_builder
 

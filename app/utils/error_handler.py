@@ -82,3 +82,29 @@ def format_error_response(error: Exception) -> Dict[str, Any]:
             "message": "An unexpected error occurred",
             "status_code": 500
         }
+
+def handle_api_error(error: Exception):
+    """
+    Handle API errors and return appropriate JSON response.
+    
+    Args:
+        error: Exception to handle
+    
+    Returns:
+        Tuple of (response, status_code)
+    """
+    logger.error(f"API Error: {str(error)}")
+    logger.error(traceback.format_exc())
+    
+    if isinstance(error, AppError):
+        return jsonify({
+            "success": False,
+            "error": error.message,
+            "error_code": error.error_code
+        }), error.status_code
+    else:
+        return jsonify({
+            "success": False,
+            "error": "An unexpected error occurred",
+            "details": str(error)
+        }), 500

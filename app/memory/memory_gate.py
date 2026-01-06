@@ -125,7 +125,7 @@ Return JSON array of facts:
 If no stable facts found, return: []
 """
             
-            response = llm_service.call_llm(
+            response = llm_service.chat_completion_text(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
                 max_tokens=500,
