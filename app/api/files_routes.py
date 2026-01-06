@@ -1,94 +1,191 @@
-"""File upload and processing API routes."""
+"""File API routes for Google Drive operations."""
 
-import os
-import base64
 from flask import Blueprint, request, jsonify
-from werkzeug.utils import secure_filename
-from typing import Optional
 
-from app.services.file_processor import (
-    encode_image_bytes_to_base64,
-    detect_file_type,
-    get_mime_type,
-)
+from app.agents.file_agent import FileAgent
+from app.services.llm_service import LLMService
+from app.services.memory_service import MemoryService
 from app.utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
-files_bp = Blueprint('files', __name__, url_prefix='/api/files')
+files_bp = Blueprint("files", __name__, url_prefix="/api/files")
 
-# Allowed file extensions
-ALLOWED_IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
-ALLOWED_DOCUMENT_EXTENSIONS = {'.pdf', '.docx', '.doc'}
-ALLOWED_EXTENSIONS = ALLOWED_IMAGE_EXTENSIONS | ALLOWED_DOCUMENT_EXTENSIONS
-
-# Max file size: 10MB
-MAX_FILE_SIZE = 10 * 1024 * 1024
+# Initialize services (will be set by the main app)
+llm_service = None
+memory_service = None
+file_agent = None
 
 
-def allowed_file(filename: str) -> bool:
-    """Check if file extension is allowed."""
-    from pathlib import Path
-    return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
+def init_file_routes(app, llm_svc, memory_svc):
+    """Initialize file routes with services"""
+    global llm_service, memory_service, file_agent
+    llm_service = llm_svc
+    memory_service = memory_svc
+    file_agent = FileAgent(llm_service, memory_service)
+    app.register_blueprint(files_bp)
 
 
-@files_bp.route("/upload", methods=["POST"])
-def upload_file():
+@files_bp.route("/search", methods=["POST"])
+def search_files():
     """
-    Upload and process a file (image, PDF, DOCX).
+    Search for files related to a prompt.
     
-    Returns base64-encoded data URI for images, or file info for documents.
+    Request body:
+    {
+        "user_id": "user123",
+        "query": "find my task list",
+        "max_results": 10
+    }
     """
     try:
-        if 'file' not in request.files:
-            return jsonify({"error": "No file provided"}), 400
+        data = request.get_json()
+        user_id = data.get("user_id")
+        query = data.get("query")
+        max_results = data.get("max_results", 10)
         
-        file = request.files['file']
-        user_id = request.form.get('user_id', 'anonymous')
+        if not user_id or not query:
+            return jsonify({"error": "Missing user_id or query"}), 400
         
-        if file.filename == '':
-            return jsonify({"error": "No file selected"}), 400
+        logger.info(f"File search request from {user_id}: {query}")
         
-        if not allowed_file(file.filename):
-            return jsonify({
-                "error": f"File type not allowed. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"
-            }), 400
+        result = file_agent.handle_chat(
+            user_id=user_id,
+            message=f"search for {query}",
+        )
         
-        # Read file
-        file_bytes = file.read()
-        
-        # Check file size
-        if len(file_bytes) > MAX_FILE_SIZE:
-            return jsonify({
-                "error": f"File too large. Max size: {MAX_FILE_SIZE / (1024 * 1024):.1f}MB"
-            }), 400
-        
-        file_type = detect_file_type(file.filename)
-        mime_type = get_mime_type(file.filename)
-        
-        result = {
-            "success": True,
-            "filename": secure_filename(file.filename),
-            "file_type": file_type,
-            "mime_type": mime_type,
-            "size": len(file_bytes),
-        }
-        
-        # For images, encode to base64
-        if file_type == 'image':
-            base64_data = encode_image_bytes_to_base64(file_bytes, mime_type)
-            result["data_uri"] = base64_data
-            result["message"] = "Image uploaded and encoded successfully"
-        else:
-            # For documents, store base64 for later processing
-            base64_encoded = base64.b64encode(file_bytes).decode('utf-8')
-            result["base64_data"] = base64_encoded
-            result["message"] = "Document uploaded successfully (text extraction not yet implemented)"
-        
-        logger.info(f"File uploaded: {file.filename} ({file_type}, {len(file_bytes)} bytes) by user {user_id}")
-        return jsonify(result), 200
-        
+        return jsonify(result)
+    
     except Exception as e:
-        logger.error(f"Error uploading file: {e}", exc_info=True)
+        logger.error(f"Error in search_files: {e}", exc_info=True)
         return jsonify({"error": str(e)}), 500
 
+
+@files_bp.route("/list", methods=["POST"])
+def list_files():
+    """
+    List recent files.
+    
+    Request body:
+    {
+        "user_id": "user123",
+        "max_results": 20
+    }
+    """
+    try:
+        data = request.get_json()
+        user_id = data.get("user_id")
+        max_results = data.get("max_results", 20)
+        
+        if not user_id:
+            return jsonify({"error": "Missing user_id"}), 400
+        
+        logger.info(f"List files request from {user_id}")
+        
+        result = file_agent.handle_chat(
+            user_id=user_id,
+            message="show recent files",
+        )
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        logger.error(f"Error in list_files: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@files_bp.route("/by-type", methods=["POST"])
+def list_files_by_type():
+    """
+    List files by specific type.
+    
+    Request body:
+    {
+        "user_id": "user123",
+        "file_types": ["document", "spreadsheet"],
+        "max_results": 20
+    }
+    """
+    try:
+        data = request.get_json()
+        user_id = data.get("user_id")
+        file_types = data.get("file_types", [])
+        max_results = data.get("max_results", 20)
+        
+        if not user_id:
+            return jsonify({"error": "Missing user_id"}), 400
+        
+        if not file_types:
+            return jsonify({"error": "Missing file_types"}), 400
+        
+        logger.info(f"List files by type request from {user_id}: {file_types}")
+        
+        file_type_msg = " and ".join(file_types)
+        result = file_agent.handle_chat(
+            user_id=user_id,
+            message=f"show me {file_type_msg}",
+        )
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        logger.error(f"Error in list_files_by_type: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@files_bp.route("/detail/<file_id>", methods=["GET"])
+def get_file_detail(file_id: str):
+    """
+    Get details for a specific file.
+    
+    Query params:
+    - user_id: User identifier
+    """
+    try:
+        user_id = request.args.get("user_id")
+        
+        if not user_id:
+            return jsonify({"error": "Missing user_id"}), 400
+        
+        logger.info(f"Get file detail request from {user_id}: {file_id}")
+        
+        result = file_agent.handle_chat(
+            user_id=user_id,
+            message=f"show file detail {file_id}",
+        )
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        logger.error(f"Error in get_file_detail: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@files_bp.route("/sync", methods=["POST"])
+def sync_files():
+    """
+    Trigger a background sync of file metadata.
+    
+    Request body:
+    {
+        "user_id": "user123"
+    }
+    """
+    try:
+        from app.services.file_service import sync_files_metadata
+        
+        data = request.get_json()
+        user_id = data.get("user_id")
+        
+        if not user_id:
+            return jsonify({"error": "Missing user_id"}), 400
+        
+        logger.info(f"File sync request from {user_id}")
+        
+        result = sync_files_metadata(user_id)
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        logger.error(f"Error in sync_files: {e}", exc_info=True)
+        return jsonify({"error": str(e)}), 500

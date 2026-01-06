@@ -19,11 +19,12 @@ from app.utils.logging_utils import get_logger
 
 logger = get_logger(__name__)
 
-IntentType = Literal["calendar", "email", "general"]
+IntentType = Literal["calendar", "email", "files", "general"]
 
 # Intent detection keywords
 CALENDAR_KEYWORDS = ["calendar", "events", "schedule", "appointments", "meetings"]
 EMAIL_KEYWORDS = ["emails", "email", "inbox", "reply to", "gmail"]
+FILES_KEYWORDS = ["files", "documents", "drive", "search", "find", "spreadsheets", "sheets", "presentations", "slides", "pdfs", "images"]
 
 
 def detect_intent(user_message: str) -> IntentType:
@@ -32,6 +33,7 @@ def detect_intent(user_message: str) -> IntentType:
     
     - If we detect explicit calendar requests, treat as 'calendar'.
     - Else if email/inbox-related keywords are present, treat as 'email'.
+    - Else if file/document-related keywords are present, treat as 'files'.
     - Otherwise, default to 'general'.
     """
     text = (user_message or "").lower()
@@ -47,6 +49,9 @@ def detect_intent(user_message: str) -> IntentType:
     if any(k in text for k in EMAIL_KEYWORDS):
         return "email"
     
+    if any(k in text for k in FILES_KEYWORDS):
+        return "files"
+    
     return "general"
 
 
@@ -58,6 +63,7 @@ class Orchestrator:
     - "general" → AivisCoreAgent (productivity, chat, tasks)
     - "calendar" → CalendarAgent (via tool-calling agent)
     - "email" → GmailAgent (via tool-calling agent)
+    - "files" → FileAgent (Google Drive operations)
     - "contacts" → ContactsAgent (future)
     """
     
@@ -68,6 +74,7 @@ class Orchestrator:
         memory_service,
         gmail_agent=None,
         calendar_agent=None,
+        file_agent=None,
         contacts_agent=None,
     ):
         """
@@ -85,6 +92,8 @@ class Orchestrator:
             Agent for email operations (stub for now)
         calendar_agent : CalendarAgent, optional
             Agent for calendar operations (stub for now)
+        file_agent : FileAgent, optional
+            Agent for file operations
         contacts_agent : ContactsAgent, optional
             Agent for contact management (stub for now)
         """
@@ -93,6 +102,7 @@ class Orchestrator:
         self.memory_service = memory_service
         self.gmail_agent = gmail_agent
         self.calendar_agent = calendar_agent
+        self.file_agent = file_agent
         self.contacts_agent = contacts_agent
     
     def handle_chat(
@@ -119,17 +129,23 @@ class Orchestrator:
         Returns
         -------
         Tuple[str, str]
-            (intent, reply) where intent is "calendar", "email", or "general"
+            (intent, reply) where intent is "calendar", "email", "files", or "general"
         """
         # Detect intent
         intent = detect_intent(user_message)
         
-        # Check auth requirements
+        # Check auth requirements for calendar and email
         if intent in ("calendar", "email"):
             auth_response = require_google_auth(user_id)
             if auth_response:
                 # Return error message if auth required
                 return intent, "Please connect your Google account to use this feature."
+        
+        # Files also require Google auth for Drive access
+        if intent == "files":
+            auth_response = require_google_auth(user_id)
+            if auth_response:
+                return intent, "Please connect your Google account to access your files."
         
         # Load session history from memory
         session_memory = self.memory_service.get_session_history(
@@ -168,6 +184,26 @@ class Orchestrator:
                 reply = "Gmail features are not available right now. Please try again later."
             return intent, reply
         
+        elif intent == "files":
+            # Files intent - use FileAgent
+            logger.info(f"Routing to FileAgent for user {user_id}")
+            if self.file_agent:
+                result = self.file_agent.handle_chat(
+                    user_id=user_id,
+                    message=user_message,
+                    session_memory=session_memory,
+                    metadata=metadata,
+                )
+                # FileAgent returns a dict, need to convert to string response
+                if isinstance(result, dict):
+                    reply = result.get("message", "") or f"Found {result.get('count', 0)} file(s)"
+                else:
+                    reply = str(result)
+            else:
+                logger.warning("FileAgent not available")
+                reply = "File features are not available right now. Please try again later."
+            return intent, reply
+        
         else:
             # General intent - use AivisCoreAgent
             logger.info(f"Routing to AivisCoreAgent for user {user_id}")
@@ -201,6 +237,7 @@ def build_orchestrator() -> Orchestrator:
     from app.agents.gmail_agent import GmailAgent
     from app.agents.calendar_agent import CalendarAgent
     from app.agents.contacts_agent import ContactsAgent
+    from app.agents.file_agent import FileAgent
     
     # Build services
     llm_service = get_llm_service()
@@ -226,6 +263,12 @@ def build_orchestrator() -> Orchestrator:
         memory_service=memory_service,
     )
     
+    # FileAgent for Google Drive operations
+    file_agent = FileAgent(
+        llm_service=llm_service,
+        memory_service=memory_service,
+    )
+    
     # Contacts agent is still a stub
     contacts_agent = ContactsAgent()
     
@@ -236,10 +279,11 @@ def build_orchestrator() -> Orchestrator:
         memory_service=memory_service,
         gmail_agent=gmail_agent,
         calendar_agent=calendar_agent,
+        file_agent=file_agent,
         contacts_agent=contacts_agent,
     )
     
-    print("[INIT] ✅ Orchestrator built with AivisCore + Calendar + Gmail agents")
+    print("[INIT] ✅ Orchestrator built with AivisCore + Calendar + Gmail + File agents")
     return orchestrator
 
 
