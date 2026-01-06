@@ -129,6 +129,14 @@ def create_app():
     db_connected = init_database()
     if db_connected:
         logger.info("MongoDB connected successfully")
+        
+        # Initialize memory system indexes
+        try:
+            from app.memory.models import ensure_indexes
+            ensure_indexes()
+            logger.info("✅ Memory system indexes initialized")
+        except Exception as e:
+            logger.warning(f"Failed to initialize memory indexes: {e}")
     else:
         logger.warning("MongoDB not connected - running in offline mode")
 
@@ -143,7 +151,11 @@ def create_app():
     app.register_blueprint(calendar_bp)
     app.register_blueprint(files_bp)
     
-    logger.info("Registered API blueprints: chat, gmail, contacts, calendar, files")
+    # Register memory system blueprint
+    from app.api.memory_routes import memory_bp
+    app.register_blueprint(memory_bp)
+    
+    logger.info("Registered API blueprints: chat, gmail, contacts, calendar, files, memory")
     
     # Add request logging
     @app.before_request
