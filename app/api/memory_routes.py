@@ -577,6 +577,134 @@ def backfill_email_facts():
         return handle_api_error(e)
 
 
+@memory_bp.route('/admin/reclassify-emails', methods=['POST'])
+def reclassify_emails():
+    """
+    Re-classify old emails with v3.0 and extract facts from important ones (ADMIN ONLY).
+    
+    Expected JSON body:
+    {
+        "user_id": "user123",  // required
+        "max_emails": 100      // optional - default: all
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Re-classification started",
+        "user_id": "user123",
+        "classification_version": "3.0"
+    }
+    """
+    try:
+        data = request.json or {}
+        
+        user_id = data.get('user_id')
+        if not user_id:
+            return jsonify({
+                "success": False,
+                "error": "user_id required"
+            }), 400
+        
+        max_emails = data.get('max_emails')  # None = all emails
+        
+        from app.database import get_db
+        from app.tools.email.classifier import classify_email, CLASSIFICATION_VERSION
+        from app.services.gmail_service import extract_facts_from_email
+        from datetime import datetime
+        import threading
+        
+        def run_reclassify():
+            try:
+                db = get_db()
+                if not db.is_connected or db.db is None:
+                    logger.error("Database not connected for re-classification")
+                    return
+                
+                emails_col = db.db["emails"]
+                
+                # Find old emails
+                query = {
+                    "user_id": user_id,
+                    "$or": [
+                        {"classification_version": {"$ne": CLASSIFICATION_VERSION}},
+                        {"classification_version": {"$exists": False}}
+                    ]
+                }
+                
+                limit = max_emails if max_emails else 0
+                cursor = emails_col.find(query).limit(limit) if limit else emails_col.find(query)
+                
+                processed = 0
+                facts_extracted = 0
+                
+                for email_doc in cursor:
+                    try:
+                        thread_id = email_doc.get("thread_id")
+                        
+                        email_data = {
+                            "threadId": thread_id,
+                            "from": email_doc.get("from", ""),
+                            "subject": email_doc.get("subject", ""),
+                            "snippet": email_doc.get("snippet", ""),
+                            "body": email_doc.get("snippet", "")[:1000],
+                        }
+                        
+                        # Re-classify
+                        classification = classify_email(email_data, user_id)
+                        category = classification["category"]
+                        
+                        # Update database
+                        emails_col.update_one(
+                            {"user_id": user_id, "thread_id": thread_id},
+                            {
+                                "$set": {
+                                    "category": category,
+                                    "scores": classification["scores"],
+                                    "classified_at": datetime.utcnow().isoformat(),
+                                    "classification_version": CLASSIFICATION_VERSION,
+                                }
+                            }
+                        )
+                        
+                        # Extract facts if important category
+                        IMPORTANT_CATEGORIES = ['urgent', 'action_items', 'clients', 'waiting_for_reply', 'normal']
+                        if category in IMPORTANT_CATEGORIES:
+                            email_data['category'] = category
+                            extract_facts_from_email(user_id, email_data)
+                            facts_extracted += 1
+                        
+                        processed += 1
+                        
+                        if processed % 50 == 0:
+                            logger.info(f"Re-classification progress: {processed} emails, {facts_extracted} fact extractions")
+                        
+                    except Exception as e:
+                        logger.error(f"Error re-classifying email {email_doc.get('thread_id')}: {e}")
+                
+                logger.info(f"Re-classification completed for user {user_id}: {processed} emails, {facts_extracted} fact extractions")
+                
+            except Exception as e:
+                logger.error(f"Re-classification failed for user {user_id}: {e}")
+        
+        # Run in background thread
+        thread = threading.Thread(target=run_reclassify, daemon=True)
+        thread.start()
+        
+        return jsonify({
+            "success": True,
+            "message": "Email re-classification started in background",
+            "user_id": user_id,
+            "max_emails": max_emails or "all",
+            "classification_version": CLASSIFICATION_VERSION,
+            "note": "Check server logs for progress"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error starting re-classification: {e}")
+        return handle_api_error(e)
+
+
 @memory_bp.route('/admin/backfill-facts', methods=['POST'])
 def backfill_facts():
     """
