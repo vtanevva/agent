@@ -99,6 +99,51 @@ def get_document_chunks_collection():
     return None
 
 
+def get_preferences_collection():
+    """Get preferences collection"""
+    from app.database import get_db
+    db = get_db()
+    if db.is_connected and db.db is not None:
+        return db.db["preferences"]
+    return None
+
+
+def get_projects_collection():
+    """Get projects collection"""
+    from app.database import get_db
+    db = get_db()
+    if db.is_connected and db.db is not None:
+        return db.db["projects"]
+    return None
+
+
+def get_tasks_collection():
+    """Get tasks collection (unified, not just email)"""
+    from app.database import get_db
+    db = get_db()
+    if db.is_connected and db.db is not None:
+        return db.db["tasks"]
+    return None
+
+
+def get_truth_ledger_collection():
+    """Get truth_ledger collection"""
+    from app.database import get_db
+    db = get_db()
+    if db.is_connected and db.db is not None:
+        return db.db["truth_ledger"]
+    return None
+
+
+def get_relationships_collection():
+    """Get relationships collection"""
+    from app.database import get_db
+    db = get_db()
+    if db.is_connected and db.db is not None:
+        return db.db["relationships"]
+    return None
+
+
 def ensure_indexes():
     """Create indexes for all memory collections"""
     from app.database import get_db
@@ -144,6 +189,38 @@ def ensure_indexes():
         chunks.create_index([("user_id", 1), ("doc_id", 1), ("chunk_index", 1)])
         chunks.create_index("doc_id")
         
+        # Preferences collection
+        preferences = db.db["preferences"]
+        preferences.create_index([("user_id", 1)], unique=True)
+        preferences.create_index([("updated_at", -1)])
+        
+        # Projects collection
+        projects = db.db["projects"]
+        projects.create_index([("user_id", 1), ("status", 1)])
+        projects.create_index([("user_id", 1), ("updated_at", -1)])
+        projects.create_index([("user_id", 1), ("name", 1)])
+        
+        # Tasks collection
+        tasks = db.db["tasks"]
+        tasks.create_index([("user_id", 1), ("status", 1)])
+        tasks.create_index([("user_id", 1), ("due_date", 1)])
+        tasks.create_index([("user_id", 1), ("priority", 1)])
+        tasks.create_index([("user_id", 1), ("created_at", -1)])
+        tasks.create_index([("source", 1), ("source_ref", 1)])
+        
+        # Truth ledger collection
+        truth_ledger = db.db["truth_ledger"]
+        truth_ledger.create_index([("user_id", 1), ("fact_id", 1)])
+        truth_ledger.create_index([("user_id", 1), ("changed_at", -1)])
+        truth_ledger.create_index([("reason", 1)])
+        
+        # Relationships collection
+        relationships = db.db["relationships"]
+        relationships.create_index([("user_id", 1), ("contact_email", 1)], unique=True)
+        relationships.create_index([("user_id", 1), ("importance", 1)])
+        relationships.create_index([("user_id", 1), ("last_contact", -1)])
+        relationships.create_index([("relationship_type", 1)])
+        
         logger.info("✅ Memory system indexes created successfully")
         
     except Exception as e:
@@ -178,7 +255,10 @@ MEMORY_FACT_SCHEMA = {
     "text": str,
     "type": str,  # FactType
     "confidence": float,  # 0.0 to 1.0
-    "source_ref": Optional[str],  # Reference to source message/doc
+    "source_ref": Optional[str],  # Reference to source message/doc (evidenceRef)
+    "vector_id": Optional[str],  # Pinecone vector ID (for tracking)
+    "valid_from": Optional[datetime],  # When fact became true
+    "valid_to": Optional[datetime],  # When fact became false (null if still valid)
     "created_at": datetime,
     "updated_at": datetime,
     "is_active": bool,
@@ -215,5 +295,76 @@ DOCUMENT_CHUNK_SCHEMA = {
     "text": str,
     "meta": Optional[Dict[str, Any]],  # page, section, etc.
     "created_at": datetime,
+}
+
+PREFERENCES_SCHEMA = {
+    "_id": str,  # preference_id
+    "user_id": str,
+    "memory_namespace": str,  # Canonical Pinecone namespace
+    "primary_email": Optional[str],
+    "workspace_id": Optional[str],
+    "timezone": Optional[str],
+    "language": Optional[str],
+    "notification_settings": Optional[Dict[str, Any]],
+    "ai_personality": Optional[Dict[str, Any]],
+    "created_at": datetime,
+    "updated_at": datetime,
+}
+
+PROJECT_SCHEMA = {
+    "_id": str,  # project_id
+    "user_id": str,
+    "name": str,
+    "description": Optional[str],
+    "status": str,  # "active", "archived", "completed"
+    "related_contacts": List[str],
+    "related_threads": List[str],
+    "summary": Optional[str],
+    "key_facts": List[str],
+    "created_at": datetime,
+    "updated_at": datetime,
+    "last_activity": datetime,
+}
+
+TASK_SCHEMA = {
+    "_id": str,  # task_id
+    "user_id": str,
+    "title": str,
+    "description": Optional[str],
+    "status": str,  # "pending", "in_progress", "completed", "cancelled"
+    "priority": str,  # "low", "medium", "high", "urgent"
+    "source": str,  # "email", "chat", "calendar", "manual"
+    "source_ref": Optional[str],  # thread_id, message_id, etc.
+    "due_date": Optional[datetime],
+    "completed_at": Optional[datetime],
+    "created_at": datetime,
+    "updated_at": datetime,
+}
+
+TRUTH_LEDGER_SCHEMA = {
+    "_id": str,  # ledger_id
+    "user_id": str,
+    "fact_id": str,  # Links to memory_facts._id
+    "version": int,
+    "previous_value": str,
+    "new_value": str,
+    "reason": str,  # "contradiction", "update", "refinement"
+    "confidence_change": float,
+    "evidence_ref": Optional[str],
+    "changed_at": datetime,
+}
+
+RELATIONSHIP_SCHEMA = {
+    "_id": str,  # relationship_id
+    "user_id": str,
+    "contact_email": str,
+    "importance": str,  # "high", "medium", "low"
+    "relationship_type": str,  # "colleague", "friend", "family", "client"
+    "last_contact": Optional[datetime],
+    "contact_frequency": int,  # messages per month
+    "notes": List[str],  # Important notes about this person
+    "projects": List[str],  # Shared projects
+    "created_at": datetime,
+    "updated_at": datetime,
 }
 

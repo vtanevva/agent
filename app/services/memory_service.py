@@ -264,9 +264,8 @@ class MemoryService:
             if session_id:
                 meta["session_id"] = session_id
             
-            # Get user email for namespace (fallback to user_id if email not available)
-            from app.utils.user_email_utils import get_user_email
-            namespace = get_user_email(user_id)
+            # Get canonical namespace
+            namespace = self._get_canonical_namespace(user_id)
             
             # Upsert to Pinecone
             self._pinecone_index.upsert(
@@ -312,9 +311,8 @@ class MemoryService:
             return []
         
         try:
-            # Get user email for namespace (fallback to user_id if email not available)
-            from app.utils.user_email_utils import get_user_email
-            namespace = get_user_email(user_id)
+            # Get canonical namespace
+            namespace = self._get_canonical_namespace(user_id)
             
             if query:
                 # Semantic search with query embedding

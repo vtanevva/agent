@@ -54,6 +54,47 @@ class VectorStore:
             self.embedding_service = get_llm_service()
         return self.embedding_service
     
+    def _get_canonical_namespace(self, user_id: str) -> str:
+        """
+        Get canonical Pinecone namespace for user.
+        
+        Strategy:
+        1. Try to get from users.memory_namespace (canonical format)
+        2. Fallback to email (via user_email_utils)
+        3. Fallback to user_id
+        
+        Args:
+            user_id: User identifier
+            
+        Returns:
+            Canonical namespace (u:<userId> preferred, or email/user_id as fallback)
+        """
+        try:
+            from app.memory.models import get_users_collection
+            users_col = get_users_collection()
+            
+            if users_col:
+                user = users_col.find_one({"user_id": user_id})
+                if user and "memory_namespace" in user:
+                    namespace = user["memory_namespace"]
+                    logger.debug(f"Using canonical namespace for {user_id}: {namespace}")
+                    return namespace
+        except Exception as e:
+            logger.debug(f"Could not get canonical namespace for {user_id}: {e}")
+        
+        # Fallback to email
+        try:
+            from app.utils.user_email_utils import get_user_email
+            namespace = get_user_email(user_id)
+            logger.debug(f"Using email namespace for {user_id}: {namespace}")
+            return namespace
+        except Exception as e:
+            logger.debug(f"Could not get email for {user_id}: {e}")
+        
+        # Final fallback to user_id
+        logger.debug(f"Using user_id as namespace fallback: {user_id}")
+        return user_id.lower().strip()
+    
     def initialize(self) -> bool:
         """
         Initialize Pinecone connection (lazy).
@@ -193,9 +234,8 @@ class VectorStore:
             return []
         
         try:
-            # Get user email for namespace (fallback to user_id if email not available)
-            from app.utils.user_email_utils import get_user_email
-            namespace = get_user_email(user_id)
+            # Get canonical namespace
+            namespace = self._get_canonical_namespace(user_id)
             
             # Generate query embedding
             embedding_service = self._get_embedding_service()
@@ -253,9 +293,8 @@ class VectorStore:
             return False
         
         try:
-            # Get user email for namespace (fallback to user_id if email not available)
-            from app.utils.user_email_utils import get_user_email
-            namespace = get_user_email(user_id)
+            # Get canonical namespace
+            namespace = self._get_canonical_namespace(user_id)
             
             self._index.delete(
                 ids=vector_ids,
@@ -282,9 +321,8 @@ class VectorStore:
             return {}
         
         try:
-            # Get user email for namespace (fallback to user_id if email not available)
-            from app.utils.user_email_utils import get_user_email
-            namespace = get_user_email(user_id)
+            # Get canonical namespace
+            namespace = self._get_canonical_namespace(user_id)
             
             stats = self._index.describe_index_stats()
             namespace_stats = stats.namespaces.get(namespace, {})
