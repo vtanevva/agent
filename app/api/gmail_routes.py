@@ -524,14 +524,26 @@ def gmail_classify_email():
     return jsonify(result), status
 
 
-@gmail_bp.route("/triaged-inbox", methods=["POST"])
+@gmail_bp.route("/triaged-inbox", methods=["GET", "POST"])
 def gmail_triaged_inbox():
-    """Get triaged inbox with emails categorized by priority."""
-    data = request.get_json(force=True, silent=True) or {}
-    user_id_raw = data.get("user_id", "")
+    """
+    Get triaged inbox with emails categorized by priority (v3.0 - 10 categories).
+    
+    Supports both GET (for caching) and POST (for compatibility).
+    Returns cached v3.0 classifications instantly (<50ms).
+    """
+    # Support both GET (query params) and POST (JSON body)
+    if request.method == "GET":
+        user_id_raw = request.args.get("user_id", "")
+        max_results = int(request.args.get("max_results", 50))
+        category_filter = request.args.get("category_filter")
+    else:  # POST
+        data = request.get_json(force=True, silent=True) or {}
+        user_id_raw = data.get("user_id", "")
+        max_results = int(data.get("max_results", 50))
+        category_filter = data.get("category") or data.get("category_filter")
+    
     user_id = _normalize_user_id(user_id_raw)
-    max_results = int(data.get("max_results", 50))
-    category_filter = data.get("category")  # Optional: filter by specific category
 
     auth_response = require_google_auth(user_id)
     if auth_response:

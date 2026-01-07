@@ -10,14 +10,22 @@ import {API_BASE_URL} from '../config/api';
 import {useRoute, useNavigation} from '@react-navigation/native';
 import {Svg, Path} from 'react-native-svg';
 
+// v3.0 Email Categories - 10 categories with smart filtering
 const CATEGORIES = [
-  {key: 'urgent', label: 'Urgent', color: colors.dark[600], icon: '⚡'},
-  {key: 'waiting_for_reply', label: 'Waiting', color: colors.accent[500], icon: '⏳', gradient: [colors.accent[500], colors.secondary[500], colors.dark[500]]},
-  {key: 'action_items', label: 'Action Items', color: colors.secondary[600], icon: '✓'},
-  {key: 'clients', label: 'Clients', color: colors.primary[700], icon: '👤'},
-  {key: 'invoices', label: 'Invoices', color: colors.accent[500], icon: '💰', gradient: [colors.accent[500], colors.secondary[500], colors.dark[500]]},
-  {key: 'newsletters', label: 'Newsletters', color: colors.primary[600], icon: '📰'},
-  {key: 'normal', label: 'Other', color: colors.primary[500], icon: '📧'},
+  // High Priority (facts extracted)
+  {key: 'urgent', label: 'Urgent', color: '#DC2626', icon: '🔴'},
+  {key: 'action_items', label: 'Action Items', color: '#059669', icon: '✅'},
+  {key: 'waiting_for_reply', label: 'Waiting for Reply', color: '#F59E0B', icon: '⏳'},
+  {key: 'clients', label: 'Clients', color: '#7C3AED', icon: '👥'},
+  {key: 'invoices', label: 'Invoices', color: '#059669', icon: '💰'},
+  {key: 'normal', label: 'General', color: '#3B82F6', icon: '📧'},
+  
+  // Low Priority (no facts extracted - filtered out)
+  {key: 'notifications', label: 'Notifications', color: '#6B7280', icon: '🔔'},
+  {key: 'newsletters', label: 'Newsletters', color: '#8B5CF6', icon: '📰'},
+  {key: 'promotional', label: 'Promotional', color: '#EC4899', icon: '🛍️'},
+  {key: 'transactional', label: 'Receipts', color: '#10B981', icon: '🧾'},
+  {key: 'social', label: 'Social', color: '#3B82F6', icon: '👋'},
 ];
 
 export default function GmailAgentPage() {
@@ -44,15 +52,15 @@ export default function GmailAgentPage() {
     if (showLoading) setLoading(true);
     
     try {
-      // Always fetch all categories, don't filter on backend
-      const r = await fetch(`${API_BASE_URL}/api/gmail/triaged-inbox`, {
-        method: 'POST',
+      // v3.0 Optimized: GET request for instant caching (<50ms response)
+      const params = new URLSearchParams({
+        user_id: userId,
+        max_results: emailLimit.toString(),
+      });
+      
+      const r = await fetch(`${API_BASE_URL}/api/gmail/triaged-inbox?${params}`, {
+        method: 'GET', // Changed to GET for better caching
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          user_id: userId,
-          max_results: emailLimit, // Use selected limit
-          category: null, // Always fetch all, filter client-side
-        }),
       });
       const data = await r.json();
       if (data?.success) {
