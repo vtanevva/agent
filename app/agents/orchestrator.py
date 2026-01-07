@@ -304,7 +304,6 @@ def build_orchestrator() -> Orchestrator:
     """
     from app.services.llm_service import get_llm_service
     from app.services.memory_service import get_memory_service
-    from app.services.nodes_service import NodesService
     from app.agents.aivis_core_agent import AivisCoreAgent
     from app.agents.gmail_agent import GmailAgent
     from app.agents.calendar_agent import CalendarAgent
@@ -313,13 +312,11 @@ def build_orchestrator() -> Orchestrator:
     # Build services
     llm_service = get_llm_service()
     memory_service = get_memory_service()
-    nodes_service = NodesService()  # Stub for now
     
     # Build agents
     aivis_core_agent = AivisCoreAgent(
         llm_service=llm_service,
         memory_service=memory_service,
-        nodes_service=nodes_service,
     )
     
     gmail_agent = GmailAgent(

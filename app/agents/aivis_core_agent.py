@@ -19,7 +19,7 @@ class AivisCoreAgent:
     specifically email or calendar related.
     """
     
-    def __init__(self, llm_service, memory_service, nodes_service=None):
+    def __init__(self, llm_service, memory_service):
         """
         Initialize AivisCoreAgent.
         
@@ -29,12 +29,9 @@ class AivisCoreAgent:
             LLM service for text generation
         memory_service : MemoryService
             Memory service for conversation history
-        nodes_service : NodesService, optional
-            Knowledge graph service (stub for now)
         """
         self.llm_service = llm_service
         self.memory_service = memory_service
-        self.nodes_service = nodes_service
     
     def handle_chat(
         self,

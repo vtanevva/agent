@@ -26,7 +26,6 @@ PINECONE_ENV=us-east-1
 
 # Feature Flags
 ENABLE_MEMORY=true
-ENABLE_RAG=true
 
 # App Settings
 APP_ENV=production
