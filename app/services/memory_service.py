@@ -264,13 +264,17 @@ class MemoryService:
             if session_id:
                 meta["session_id"] = session_id
             
+            # Get user email for namespace (fallback to user_id if email not available)
+            from app.utils.user_email_utils import get_user_email
+            namespace = get_user_email(user_id)
+            
             # Upsert to Pinecone
             self._pinecone_index.upsert(
                 vectors=[{"id": vector_id, "values": embedding, "metadata": meta}],
-                namespace=user_id,
+                namespace=namespace,
             )
             
-            print(f"✅ [🧠 FACT SAVED] {fact!r} (id={vector_id}, user={user_id})")
+            print(f"✅ [🧠 FACT SAVED] {fact!r} (id={vector_id}, user={user_id}, namespace={namespace})")
             return True
         except Exception as e:
             print(f"[ERROR] MemoryService.save_fact failed: {e}", flush=True)
@@ -308,6 +312,10 @@ class MemoryService:
             return []
         
         try:
+            # Get user email for namespace (fallback to user_id if email not available)
+            from app.utils.user_email_utils import get_user_email
+            namespace = get_user_email(user_id)
+            
             if query:
                 # Semantic search with query embedding
                 llm_service = self._get_llm_service()
@@ -317,7 +325,7 @@ class MemoryService:
                 embedding = np.random.rand(1536).tolist()
             
             response = self._pinecone_index.query(
-                namespace=user_id,
+                namespace=namespace,
                 vector=embedding,
                 top_k=min(limit, 200),
                 include_metadata=True,

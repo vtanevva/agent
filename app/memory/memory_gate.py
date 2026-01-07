@@ -105,24 +105,41 @@ class MemoryGate:
         try:
             llm_service = self._get_llm_service()
             
-            prompt = f"""Extract stable, long-term facts about the user from this text.
+            prompt = f"""Extract stable, long-term facts about THE USER from this text. Only extract facts that are directly about the user themselves.
 
 Text: "{text}"
 
-Instructions:
+CRITICAL RULES:
+- Only extract facts that are explicitly about THE USER (first person: "I", "my", "me")
+- Do NOT extract facts about other people mentioned in the text
+- Do NOT extract news articles, events, or information about third parties
+- Do NOT extract information the user is forwarding or sharing about others
 - Only extract facts that are stable over time (preferences, identity, work, relationships)
 - Do NOT extract transient emotions, one-off events, or activities
+- Each fact should clearly refer to the user (e.g., "The user works at...", "The user's name is...")
 - Each fact should be a single, clear statement
 - Classify each fact as: preference, identity, work, relationship, or other
-- Assign confidence (0.0-1.0) based on certainty
+- Assign confidence (0.0-1.0) based on certainty that this is about the user themselves
+
+EXAMPLES OF VALID FACTS:
+- "The user's name is Vanesa Taneva" (identity)
+- "The user works as a Data Science Senior Associate" (work)
+- "The user prefers morning meetings" (preference)
+- "The user has a brother" (relationship)
+
+EXAMPLES OF INVALID FACTS (do NOT extract):
+- "Bryan Kohberger was arrested" (this is about someone else, not the user)
+- "Nancy Kyere works at Telecel Ghana" (this is about someone else)
+- "Four University of Idaho students were murdered" (this is news/events, not about the user)
+- Information the user is forwarding about other people
 
 Return JSON array of facts:
 [
-  {{"text": "fact statement", "type": "preference", "confidence": 0.9}},
+  {{"text": "fact statement about the user", "type": "preference", "confidence": 0.9}},
   ...
 ]
 
-If no stable facts found, return: []
+If no stable facts about the user found, return: []
 """
             
             response = llm_service.chat_completion_text(
@@ -159,6 +176,11 @@ If no stable facts found, return: []
                 if not fact_text:
                     continue
                 
+                # Filter out facts that don't clearly refer to the user
+                if not self._is_about_user(fact_text):
+                    logger.debug(f"Rejected fact (not about user): {fact_text}")
+                    continue
+                
                 # Map to FactType enum
                 fact_type = self._map_fact_type(fact_type_str)
                 
@@ -186,6 +208,56 @@ If no stable facts found, return: []
             "other": FactType.OTHER,
         }
         return type_map.get(type_str.lower(), FactType.OTHER)
+    
+    def _is_about_user(self, fact_text: str) -> bool:
+        """
+        Check if a fact is clearly about the user themselves.
+        
+        Args:
+            fact_text: The fact text to check
+            
+        Returns:
+            bool: True if fact appears to be about the user
+        """
+        fact_lower = fact_text.lower()
+        
+        # Must contain user reference indicators
+        user_indicators = [
+            "the user",
+            "user's",
+            "user is",
+            "user has",
+            "user works",
+            "user prefers",
+            "user name",
+            "user's name",
+            "user's email",
+            "user's job",
+            "user's brother",
+            "user's sister",
+            "user's family",
+            "user's colleague",
+        ]
+        
+        has_user_reference = any(indicator in fact_lower for indicator in user_indicators)
+        
+        # Reject facts that mention third parties without user reference
+        third_party_patterns = [
+            r"^(.*) was (arrested|murdered|killed|died)",
+            r"^(.*) works at (?!the user)",
+            r"^(.*) is a (?!user)",
+            r"^(.*) are (murdered|arrested|killed)",
+            r"^(four|several|many|some) (students|people|individuals)",
+        ]
+        
+        # If fact doesn't mention "user" but has third-party patterns, reject it
+        if not has_user_reference:
+            for pattern in third_party_patterns:
+                if re.search(pattern, fact_lower):
+                    return False
+        
+        # Accept if has user reference
+        return has_user_reference
     
     def should_store_fact(self, candidate: CandidateFact) -> bool:
         """

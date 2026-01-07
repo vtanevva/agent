@@ -1470,7 +1470,7 @@ def google_callback():
                     logger.info(f"🔄 Starting email fact extraction for user {state}")
                     response = requests.post(
                         "http://localhost:10000/memory/admin/backfill-email-facts",
-                        json={"user_id": state, "max_emails": 100},  # Extract facts from last 100 emails
+                        json={"user_id": state, "max_emails": 200},  # Extract facts from last 200 emails
                         timeout=600  # 10 minutes timeout
                     )
                     if response.status_code == 200:

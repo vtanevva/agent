@@ -609,7 +609,7 @@ def backfill_email_facts():
     Expected JSON body:
     {
         "user_id": "user123",  // required
-        "max_emails": 100      // optional - default: 100
+        "max_emails": 200      // optional - default: 200
     }
     
     Returns:
@@ -630,7 +630,7 @@ def backfill_email_facts():
                 "error": "user_id required"
             }), 400
         
-        max_emails = int(data.get('max_emails', 100))
+        max_emails = int(data.get('max_emails', 200))
         
         # Extract facts directly from emails (no classification needed)
         from app.services.gmail_service import extract_facts_from_email

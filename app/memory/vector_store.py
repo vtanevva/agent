@@ -2,7 +2,7 @@
 Vector Store Interface for Memory System
 
 Provides a clean abstraction over Pinecone for storing and retrieving embeddings.
-Uses namespaces per user_id for data isolation and security.
+Uses email addresses as namespaces for data isolation and security.
 """
 
 import os
@@ -30,7 +30,7 @@ class VectorStore:
     Vector database interface with Pinecone backend.
     
     Features:
-    - User-isolated namespaces (namespace = user_id)
+    - User-isolated namespaces (namespace = user email address)
     - Type-tagged vectors (fact, summary, doc_chunk, message)
     - Metadata filtering
     """
@@ -112,7 +112,7 @@ class VectorStore:
         Upsert vectors to user's namespace.
         
         Args:
-            user_id: User ID (used as namespace)
+            user_id: User ID (will be converted to email for namespace)
             vectors: List of dicts with keys: id, text, metadata
             vector_type: Type tag (fact, summary, doc_chunk, message)
         
@@ -123,6 +123,10 @@ class VectorStore:
             return False
         
         try:
+            # Get user email for namespace (fallback to user_id if email not available)
+            from app.utils.user_email_utils import get_user_email
+            namespace = get_user_email(user_id)
+            
             embedding_service = self._get_embedding_service()
             records = []
             
@@ -153,9 +157,9 @@ class VectorStore:
             if records:
                 self._index.upsert(
                     vectors=records,
-                    namespace=user_id
+                    namespace=namespace
                 )
-                logger.info(f"✅ Upserted {len(records)} vectors for user {user_id} (type={vector_type})")
+                logger.info(f"✅ Upserted {len(records)} vectors for user {user_id} (namespace={namespace}, type={vector_type})")
                 return True
             
             return False
@@ -176,7 +180,7 @@ class VectorStore:
         Search vectors in user's namespace.
         
         Args:
-            user_id: User ID (namespace)
+            user_id: User ID (will be converted to email for namespace)
             query_text: Search query
             top_k: Number of results
             vector_type: Filter by type (fact, summary, doc_chunk, message)
@@ -189,6 +193,10 @@ class VectorStore:
             return []
         
         try:
+            # Get user email for namespace (fallback to user_id if email not available)
+            from app.utils.user_email_utils import get_user_email
+            namespace = get_user_email(user_id)
+            
             # Generate query embedding
             embedding_service = self._get_embedding_service()
             query_embedding = embedding_service.generate_embedding(query_text)
@@ -202,7 +210,7 @@ class VectorStore:
             
             # Query Pinecone
             response = self._index.query(
-                namespace=user_id,
+                namespace=namespace,
                 vector=query_embedding,
                 top_k=top_k,
                 include_metadata=True,
@@ -219,7 +227,7 @@ class VectorStore:
                     text=match.metadata.get("text") if match.metadata else None
                 ))
             
-            logger.info(f"🔍 Vector search for user {user_id}: {len(matches)} results")
+            logger.info(f"🔍 Vector search for user {user_id} (namespace={namespace}): {len(matches)} results")
             return matches
             
         except Exception as e:
@@ -235,7 +243,7 @@ class VectorStore:
         Delete vectors from user's namespace.
         
         Args:
-            user_id: User ID (namespace)
+            user_id: User ID (will be converted to email for namespace)
             vector_ids: List of vector IDs to delete
         
         Returns:
@@ -245,11 +253,15 @@ class VectorStore:
             return False
         
         try:
+            # Get user email for namespace (fallback to user_id if email not available)
+            from app.utils.user_email_utils import get_user_email
+            namespace = get_user_email(user_id)
+            
             self._index.delete(
                 ids=vector_ids,
-                namespace=user_id
+                namespace=namespace
             )
-            logger.info(f"🗑️ Deleted {len(vector_ids)} vectors for user {user_id}")
+            logger.info(f"🗑️ Deleted {len(vector_ids)} vectors for user {user_id} (namespace={namespace})")
             return True
             
         except Exception as e:
@@ -261,7 +273,7 @@ class VectorStore:
         Get statistics for user's namespace.
         
         Args:
-            user_id: User ID
+            user_id: User ID (will be converted to email for namespace)
         
         Returns:
             Dict with stats
@@ -270,8 +282,12 @@ class VectorStore:
             return {}
         
         try:
+            # Get user email for namespace (fallback to user_id if email not available)
+            from app.utils.user_email_utils import get_user_email
+            namespace = get_user_email(user_id)
+            
             stats = self._index.describe_index_stats()
-            namespace_stats = stats.namespaces.get(user_id, {})
+            namespace_stats = stats.namespaces.get(namespace, {})
             
             return {
                 "total_vectors": namespace_stats.get("vector_count", 0),
