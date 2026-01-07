@@ -64,6 +64,20 @@ Your role:
 USER PROFILE:
 {bundle.profile_summary}""")
         
+        # Pending tasks
+        if bundle.pending_tasks:
+            tasks_text = "\n".join([
+                f"- {task.get('title', 'Untitled')} ({task.get('priority', 'medium')} priority)"
+                + (f" - Due: {task.get('due_date')}" if task.get('due_date') else "")
+                for task in bundle.pending_tasks[:10]  # Limit to 10 tasks
+            ])
+            sections.append(f"""
+PENDING TASKS:
+The user has the following pending tasks:
+{tasks_text}
+
+You can help the user manage these tasks, update their status, or add new ones.""")
+        
         # Facts about user
         if bundle.top_facts:
             facts_text = "\n".join([

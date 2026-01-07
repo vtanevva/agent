@@ -28,38 +28,41 @@ export default function TasksPage() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
 
-  const loadEmailTodos = async () => {
+  const loadTasks = async () => {
     if (!userId) return;
     setLoading(true);
     setError('');
     try {
-      const r = await fetch(`${API_BASE_URL}/api/gmail/email-todos`, {
-        method: 'POST',
+      // Use new unified tasks API
+      const r = await fetch(`${API_BASE_URL}/memory/tasks?user_id=${userId}&limit=200`, {
+        method: 'GET',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({user_id: userId, limit: 200}),
       });
       const data = await r.json();
       if (!r.ok || !data?.success) {
         throw new Error(data?.error || `HTTP ${r.status}`);
       }
-      // Map email todos → local task cards
-      const mapped = (data.items || []).map((it) => ({
-        id: it.id || uid(),
-        text: it.text || '',
-        status: 'todo',
-        impact: it.confidence >= 0.85 ? 4 : it.confidence >= 0.6 ? 3 : 2,
+      // Map tasks to local format
+      const mapped = (data.tasks || []).map((task) => ({
+        id: task._id || uid(),
+        text: task.title || '',
+        status: task.status === 'completed' ? 'done' : task.status === 'in_progress' ? 'in_progress' : 'todo',
+        priority: task.priority || 'medium',
+        impact: task.priority === 'high' ? 4 : task.priority === 'medium' ? 3 : 2,
         effort: 2,
+        source: task.source || 'manual',
         meta: {
-          from: it.from || '',
-          subject: it.subject || '',
-          thread_id: it.thread_id || '',
-          extracted_at: it.extracted_at || '',
-          due: it.due || null,
+          description: task.description || '',
+          due_date: task.due_date || null,
+          source_ref: task.source_ref || '',
+          created_at: task.created_at || '',
         },
+        // Store full task for API updates
+        _taskData: task,
       }));
-      setTodos(mapped.filter((t) => t.text));
+      setTodos(mapped);
     } catch (e) {
-      setError(e?.message || 'Failed to load email todos');
+      setError(e?.message || 'Failed to load tasks');
       setTodos([]);
     } finally {
       setLoading(false);
@@ -71,6 +74,7 @@ export default function TasksPage() {
     setSyncing(true);
     setError('');
     try {
+      // Trigger email todo extraction (this will create tasks automatically)
       const r = await fetch(`${API_BASE_URL}/api/gmail/extract-todos-recent`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -80,7 +84,8 @@ export default function TasksPage() {
       if (!r.ok || !data?.success) {
         throw new Error(data?.error || `HTTP ${r.status}`);
       }
-      await loadEmailTodos();
+      // Reload tasks from unified API
+      await loadTasks();
     } catch (e) {
       setError(e?.message || 'Failed to sync from Gmail');
     } finally {
@@ -89,7 +94,7 @@ export default function TasksPage() {
   };
 
   useEffect(() => {
-    if (userId) loadEmailTodos();
+    if (userId) loadTasks();
   }, [userId]);
 
   const columns = useMemo(() => {
@@ -124,18 +129,77 @@ export default function TasksPage() {
     ];
   }, []);
 
-  const addTodo = () => {
+  const addTodo = async () => {
     const text = (newTodo || '').trim();
-    if (!text) return;
-    setTodos((prev) => [{id: uid(), text, status: 'todo', impact: 3, effort: 2}, ...prev]);
-    setNewTodo('');
+    if (!text || !userId) return;
+    
+    try {
+      // Create task via API
+      const r = await fetch(`${API_BASE_URL}/memory/tasks`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          user_id: userId,
+          title: text,
+          status: 'pending',
+          priority: 'medium',
+          source: 'manual',
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to create task');
+      }
+      
+      // Reload tasks to get the new one
+      await loadTasks();
+      setNewTodo('');
+    } catch (e) {
+      setError(e?.message || 'Failed to add task');
+    }
   };
 
-  const cycleStatus = (id) => {
-    const next = {todo: 'in_progress', in_progress: 'done', done: 'todo'};
-    setTodos((prev) =>
-      prev.map((t) => (t.id === id ? {...t, status: next[t.status] || 'todo'} : t)),
-    );
+  const cycleStatus = async (id) => {
+    if (!userId) return;
+    
+    const task = todos.find((t) => t.id === id);
+    if (!task || !task._taskData) return;
+    
+    // Map UI status to API status
+    const statusMap = {
+      todo: 'pending',
+      in_progress: 'in_progress',
+      done: 'completed',
+    };
+    const nextStatusMap = {
+      todo: 'in_progress',
+      in_progress: 'completed',
+      done: 'pending',
+    };
+    
+    const currentStatus = task.status;
+    const nextStatus = nextStatusMap[currentStatus] || 'pending';
+    const apiStatus = statusMap[nextStatus] || 'pending';
+    
+    try {
+      // Update task via API
+      const r = await fetch(`${API_BASE_URL}/memory/tasks/${id}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          status: apiStatus,
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to update task');
+      }
+      
+      // Reload tasks to get updated status
+      await loadTasks();
+    } catch (e) {
+      setError(e?.message || 'Failed to update task');
+    }
   };
 
   return (
@@ -174,7 +238,7 @@ export default function TasksPage() {
                 <Text style={styles.controlButtonText}>{syncing ? 'Syncing…' : 'Sync from Gmail'}</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={loadEmailTodos}
+                onPress={loadTasks}
                 disabled={syncing || loading}
                 style={[styles.controlButtonAlt, (syncing || loading) && styles.controlButtonDisabled]}>
                 <Text style={styles.controlButtonTextAlt}>{loading ? 'Refreshing…' : 'Refresh'}</Text>
@@ -250,7 +314,7 @@ export default function TasksPage() {
 
         <View style={styles.footerNote}>
           <Text style={styles.footerText}>
-            Next: we can connect this page to MongoDB-backed extracted email todos and calendar events.
+            Tasks are now unified across email, chat, and manual entries. All tasks are stored in MongoDB.
           </Text>
         </View>
       </ScrollView>
@@ -273,19 +337,24 @@ function TodoColumn({title, count, items, onPressItem}) {
             <Text style={styles.todoItemText} numberOfLines={2}>
               {t.text}
             </Text>
-            {!!t?.meta?.subject && (
+            {!!t?.meta?.description && (
               <Text style={styles.todoMeta} numberOfLines={1}>
-                {t.meta.subject}
+                {t.meta.description}
               </Text>
             )}
-            {!!t?.meta?.from && (
+            {!!t?.source && t.source !== 'manual' && (
               <Text style={styles.todoMetaSecondary} numberOfLines={1}>
-                {t.meta.from}
+                From: {t.source}
               </Text>
             )}
-            {!!t?.meta?.due && (
+            {!!t?.meta?.due_date && (
               <Text style={styles.todoMetaSecondary} numberOfLines={1}>
-                Due: {t.meta.due}
+                Due: {new Date(t.meta.due_date).toLocaleDateString()}
+              </Text>
+            )}
+            {!!t?.priority && (
+              <Text style={styles.todoMetaSecondary} numberOfLines={1}>
+                Priority: {t.priority}
               </Text>
             )}
           </TouchableOpacity>

@@ -26,6 +26,7 @@ from app.memory.models import (
     DocumentPermission,
     FactType,
     get_memory_facts_collection,
+    get_tasks_collection,
 )
 from app.utils.error_handler import handle_api_error
 
@@ -876,6 +877,287 @@ def backfill_facts():
         
     except Exception as e:
         logger.error(f"Error in backfill_facts: {e}")
+        return handle_api_error(e)
+
+
+# ============================================================================
+# Task Management Endpoints
+# ============================================================================
+
+@memory_bp.route('/tasks', methods=['GET'])
+def list_tasks():
+    """
+    List tasks for a user.
+    
+    Query parameters:
+    - user_id (required): User ID
+    - status: Filter by status (pending, in_progress, completed, cancelled)
+    - source: Filter by source (email, chat, calendar, manual)
+    - priority: Filter by priority (high, medium, low)
+    - limit: Max results (default: 50)
+    
+    Returns:
+    {
+        "success": true,
+        "tasks": [...],
+        "count": 10
+    }
+    """
+    try:
+        user_id = request.args.get('user_id')
+        if not user_id:
+            return jsonify({"success": False, "error": "user_id is required"}), 400
+        
+        status = request.args.get('status')
+        source = request.args.get('source')
+        priority = request.args.get('priority')
+        limit = int(request.args.get('limit', 50))
+        
+        tasks_col = get_tasks_collection()
+        if not tasks_col:
+            return jsonify({"success": False, "error": "Tasks collection not available"}), 500
+        
+        # Build query
+        query = {"user_id": user_id}
+        if status:
+            query["status"] = status
+        if source:
+            query["source"] = source
+        if priority:
+            query["priority"] = priority
+        
+        # Get tasks, sorted by priority and due date
+        tasks = list(tasks_col.find(query).sort([
+            ("priority", -1),  # High priority first
+            ("due_date", 1),    # Then by due date
+            ("created_at", -1)  # Then by creation date
+        ]).limit(limit))
+        
+        # Convert ObjectId to string and format dates
+        result_tasks = []
+        for task in tasks:
+            task_dict = dict(task)
+            task_dict["_id"] = str(task_dict["_id"])
+            
+            # Convert datetime to ISO string
+            for date_field in ["created_at", "updated_at", "due_date", "completed_at"]:
+                if date_field in task_dict and task_dict[date_field]:
+                    if isinstance(task_dict[date_field], datetime):
+                        task_dict[date_field] = task_dict[date_field].isoformat()
+            
+            result_tasks.append(task_dict)
+        
+        return jsonify({
+            "success": True,
+            "tasks": result_tasks,
+            "count": len(result_tasks)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error listing tasks: {e}")
+        return handle_api_error(e)
+
+
+@memory_bp.route('/tasks', methods=['POST'])
+def create_task():
+    """
+    Create a new task.
+    
+    Body:
+    {
+        "user_id": "v",
+        "title": "Task title",
+        "description": "Optional description",
+        "priority": "high|medium|low",
+        "status": "pending|in_progress",
+        "due_date": "2024-01-01T00:00:00Z",
+        "source": "manual|email|chat|calendar",
+        "source_ref": "optional reference"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "task": {...},
+        "task_id": "..."
+    }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "Request body is required"}), 400
+        
+        user_id = data.get('user_id')
+        title = data.get('title')
+        
+        if not user_id or not title:
+            return jsonify({"success": False, "error": "user_id and title are required"}), 400
+        
+        tasks_col = get_tasks_collection()
+        if not tasks_col:
+            return jsonify({"success": False, "error": "Tasks collection not available"}), 500
+        
+        from uuid import uuid4
+        
+        # Parse due_date if provided
+        due_date = None
+        if data.get('due_date'):
+            try:
+                if isinstance(data['due_date'], str):
+                    from dateutil.parser import parse
+                    due_date = parse(data['due_date'])
+                else:
+                    due_date = data['due_date']
+            except Exception as e:
+                logger.warning(f"Could not parse due_date: {e}")
+        
+        task = {
+            "_id": str(uuid4()),
+            "user_id": user_id,
+            "title": title[:200],  # Limit title length
+            "description": data.get('description'),
+            "status": data.get('status', 'pending'),
+            "priority": data.get('priority', 'medium'),
+            "source": data.get('source', 'manual'),
+            "source_ref": data.get('source_ref'),
+            "due_date": due_date,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        }
+        
+        tasks_col.insert_one(task)
+        
+        # Convert datetime to ISO string for response
+        task_dict = dict(task)
+        for date_field in ["created_at", "updated_at", "due_date"]:
+            if date_field in task_dict and task_dict[date_field]:
+                if isinstance(task_dict[date_field], datetime):
+                    task_dict[date_field] = task_dict[date_field].isoformat()
+        
+        return jsonify({
+            "success": True,
+            "task": task_dict,
+            "task_id": task["_id"]
+        }), 201
+        
+    except Exception as e:
+        logger.error(f"Error creating task: {e}")
+        return handle_api_error(e)
+
+
+@memory_bp.route('/tasks/<task_id>', methods=['PUT'])
+def update_task(task_id):
+    """
+    Update an existing task.
+    
+    Body (all fields optional):
+    {
+        "title": "New title",
+        "description": "New description",
+        "status": "pending|in_progress|completed|cancelled",
+        "priority": "high|medium|low",
+        "due_date": "2024-01-01T00:00:00Z"
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "task": {...}
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        
+        tasks_col = get_tasks_collection()
+        if not tasks_col:
+            return jsonify({"success": False, "error": "Tasks collection not available"}), 500
+        
+        # Find task
+        task = tasks_col.find_one({"_id": task_id})
+        if not task:
+            return jsonify({"success": False, "error": "Task not found"}), 404
+        
+        # Build update
+        update = {"$set": {"updated_at": datetime.utcnow()}}
+        
+        if "title" in data:
+            update["$set"]["title"] = data["title"][:200]
+        if "description" in data:
+            update["$set"]["description"] = data["description"]
+        if "status" in data:
+            update["$set"]["status"] = data["status"]
+            # Set completed_at if status is completed
+            if data["status"] == "completed":
+                update["$set"]["completed_at"] = datetime.utcnow()
+            elif "completed_at" in task:
+                update["$unset"] = {"completed_at": ""}
+        if "priority" in data:
+            update["$set"]["priority"] = data["priority"]
+        if "due_date" in data:
+            if data["due_date"]:
+                try:
+                    if isinstance(data['due_date'], str):
+                        from dateutil.parser import parse
+                        update["$set"]["due_date"] = parse(data['due_date'])
+                    else:
+                        update["$set"]["due_date"] = data['due_date']
+                except Exception as e:
+                    logger.warning(f"Could not parse due_date: {e}")
+            else:
+                update["$unset"] = update.get("$unset", {})
+                update["$unset"]["due_date"] = ""
+        
+        tasks_col.update_one({"_id": task_id}, update)
+        
+        # Get updated task
+        updated_task = tasks_col.find_one({"_id": task_id})
+        task_dict = dict(updated_task)
+        task_dict["_id"] = str(task_dict["_id"])
+        
+        # Convert datetime to ISO string
+        for date_field in ["created_at", "updated_at", "due_date", "completed_at"]:
+            if date_field in task_dict and task_dict[date_field]:
+                if isinstance(task_dict[date_field], datetime):
+                    task_dict[date_field] = task_dict[date_field].isoformat()
+        
+        return jsonify({
+            "success": True,
+            "task": task_dict
+        })
+        
+    except Exception as e:
+        logger.error(f"Error updating task: {e}")
+        return handle_api_error(e)
+
+
+@memory_bp.route('/tasks/<task_id>', methods=['DELETE'])
+def delete_task(task_id):
+    """
+    Delete a task.
+    
+    Returns:
+    {
+        "success": true,
+        "message": "Task deleted"
+    }
+    """
+    try:
+        tasks_col = get_tasks_collection()
+        if not tasks_col:
+            return jsonify({"success": False, "error": "Tasks collection not available"}), 500
+        
+        result = tasks_col.delete_one({"_id": task_id})
+        
+        if result.deleted_count == 0:
+            return jsonify({"success": False, "error": "Task not found"}), 404
+        
+        return jsonify({
+            "success": True,
+            "message": "Task deleted"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error deleting task: {e}")
         return handle_api_error(e)
 
 

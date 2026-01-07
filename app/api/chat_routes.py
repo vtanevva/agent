@@ -241,6 +241,87 @@ def chat():
         except Exception as e:
             logger.warning(f"Failed to ingest message into User Awareness system: {e}")
         
+        # ===== TASK EXTRACTION FROM CHAT =====
+        # Extract actionable tasks from user messages
+        try:
+            from app.memory.models import get_tasks_collection
+            from app.services.llm_service import get_llm_service
+            from uuid import uuid4
+            import json
+            
+            # Check if message contains task-like language
+            task_keywords = ["todo", "task", "remind me", "need to", "should", "must", "have to", "don't forget"]
+            if user_message and any(keyword in user_message.lower() for keyword in task_keywords):
+                # Extract task using LLM
+                llm_service = get_llm_service()
+                task_prompt = f"""Extract any actionable tasks from this message. Return JSON:
+{{
+    "tasks": [
+        {{"title": "Task description", "priority": "high|medium|low"}}
+    ]
+}}
+
+Message: {user_message}
+
+If no clear task, return {{"tasks": []}}"""
+
+                try:
+                    task_response = llm_service.chat_completion_text(
+                        messages=[
+                            {"role": "system", "content": "Extract tasks from messages. Return only JSON."},
+                            {"role": "user", "content": task_prompt}
+                        ],
+                        temperature=0.1,
+                        max_tokens=200
+                    )
+                    
+                    # Parse JSON response
+                    task_data = {}
+                    try:
+                        task_data = json.loads(task_response)
+                    except json.JSONDecodeError:
+                        # Try to extract JSON from response
+                        import re
+                        json_match = re.search(r'\{[\s\S]*\}', task_response)
+                        if json_match:
+                            task_data = json.loads(json_match.group(0))
+                    
+                    tasks_col = get_tasks_collection()
+                    
+                    if tasks_col and task_data.get("tasks"):
+                        for task_item in task_data["tasks"]:
+                            task_title = task_item.get("title", "").strip()
+                            if not task_title:
+                                continue
+                            
+                            task = {
+                                "_id": str(uuid4()),
+                                "user_id": user_id,
+                                "title": task_title[:200],  # Limit title length
+                                "description": task_title if len(task_title) > 200 else None,
+                                "status": "pending",
+                                "priority": task_item.get("priority", "medium"),
+                                "source": "chat",
+                                "source_ref": session_id,
+                                "created_at": datetime.utcnow(),
+                                "updated_at": datetime.utcnow()
+                            }
+                            
+                            # Deduplicate - check if similar task already exists
+                            existing = tasks_col.find_one({
+                                "user_id": user_id,
+                                "title": task["title"],
+                                "status": {"$ne": "completed"}
+                            })
+                            
+                            if not existing:
+                                tasks_col.insert_one(task)
+                                logger.info(f"Created task from chat: {task['title'][:50]}...")
+                except Exception as e:
+                    logger.warning(f"Task extraction from chat failed: {e}")
+        except Exception as e:
+            logger.warning(f"Task extraction setup failed: {e}")
+        
         # Add rate limit headers to response (if rate limiting is enabled)
         response = jsonify({"reply": reply})
         if Config.RATE_LIMIT_ENABLED:

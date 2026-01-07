@@ -121,6 +121,121 @@ def extract_facts_from_email(user_id: str, email_data: Dict[str, Any]) -> None:
                                 )
                             
                             print(f"📧 Extracted and embedded {stored_count} facts from email (user: {user_id})", flush=True)
+            
+            # ===== RELATIONSHIP TRACKING =====
+            # Update relationship metadata when processing emails
+            sender_email = None
+            relationships_col = None
+            try:
+                from app.memory.models import get_relationships_collection
+                from uuid import uuid4
+                import re
+                
+                relationships_col = get_relationships_collection()
+                sender = email_data.get('from', '')
+                
+                if relationships_col and sender:
+                    # Extract email from sender string (handles "Name <email@domain.com>" format)
+                    sender_email = sender
+                    if "<" in sender and ">" in sender:
+                        sender_email = sender.split("<")[1].split(">")[0]
+                    elif "@" in sender:
+                        # Just email address
+                        sender_email = sender.strip()
+                    
+                    # Only process if we have a valid email
+                    if "@" in sender_email and "." in sender_email.split("@")[1]:
+                        # Update or create relationship
+                        relationships_col.update_one(
+                            {
+                                "user_id": user_id,
+                                "contact_email": sender_email
+                            },
+                            {
+                                "$set": {
+                                    "last_contact": datetime.utcnow(),
+                                    "updated_at": datetime.utcnow()
+                                },
+                                "$inc": {
+                                    "contact_count": 1  # Track interaction frequency
+                                },
+                                "$setOnInsert": {
+                                    "_id": str(uuid4()),
+                                    "user_id": user_id,
+                                    "contact_email": sender_email,
+                                    "importance": "medium",  # Default
+                                    "relationship_type": "contact",  # Default
+                                    "created_at": datetime.utcnow()
+                                }
+                            },
+                            upsert=True
+                        )
+            except Exception as e:
+                print(f"[WARNING] Relationship tracking failed: {e}", flush=True)
+            
+            # ===== PROJECT LINKING =====
+            # Check if thread relates to existing project, or create new one
+            try:
+                from app.memory.models import get_projects_collection
+                from uuid import uuid4
+                
+                projects_col = get_projects_collection()
+                thread_id = email_data.get('thread_id')
+                subject = email_data.get('subject', '')
+                
+                if projects_col and thread_id:
+                    # Check if thread already linked to project
+                    existing_project = projects_col.find_one({
+                        "user_id": user_id,
+                        "related_threads": thread_id
+                    })
+                    
+                    if not existing_project:
+                        # Check if subject suggests a project (contains keywords)
+                        project_keywords = ["project", "launch", "initiative", "campaign", "feature", "release", "sprint", "milestone"]
+                        subject_lower = subject.lower()
+                        
+                        if any(keyword in subject_lower for keyword in project_keywords):
+                            # Create or update project
+                            project_name = subject[:100]  # Use subject as project name
+                            
+                            projects_col.update_one(
+                                {
+                                    "user_id": user_id,
+                                    "name": project_name
+                                },
+                                {
+                                    "$addToSet": {"related_threads": thread_id},
+                                    "$set": {
+                                        "last_activity": datetime.utcnow(),
+                                        "updated_at": datetime.utcnow()
+                                    },
+                                    "$setOnInsert": {
+                                        "_id": str(uuid4()),
+                                        "user_id": user_id,
+                                        "name": project_name,
+                                        "status": "active",
+                                        "created_at": datetime.utcnow()
+                                    }
+                                },
+                                upsert=True
+                            )
+                            
+                            # Also link sender to project if we have relationship
+                            if relationships_col and sender_email:
+                                relationships_col.update_one(
+                                    {
+                                        "user_id": user_id,
+                                        "contact_email": sender_email
+                                    },
+                                    {
+                                        "$addToSet": {"projects": project_name}
+                                    }
+                                )
+                            
+                            print(f"[INFO] Linked thread {thread_id} to project '{project_name}'", flush=True)
+            except Exception as e:
+                print(f"[WARNING] Project linking failed: {e}", flush=True)
                             
         except Exception as e:
             print(f"[WARNING] Email fact extraction failed: {e}", flush=True)
@@ -162,17 +277,53 @@ def extract_todos_from_thread(user_id: str, thread_id: str) -> Dict[str, Any]:
 
 def list_email_todos(user_id: str, limit: int = 100) -> Dict[str, Any]:
     """
-    List extracted TODO items stored in MongoDB collection `email_todos` for a user.
-    Returns a flattened list for UI consumption.
+    List tasks extracted from emails.
+    Now reads from unified tasks collection (source="email").
+    Falls back to email_todos collection for backward compatibility.
     """
     from datetime import datetime
+    from app.memory.models import get_tasks_collection
 
     def _dt_to_iso(v):
         if isinstance(v, datetime):
             return v.isoformat()
         return v
 
+    items: List[Dict[str, Any]] = []
+    
     try:
+        # First, try to read from unified tasks collection
+        tasks_col = get_tasks_collection()
+        if tasks_col:
+            cursor = (
+                tasks_col.find({
+                    "user_id": user_id,
+                    "source": "email"
+                })
+                .sort("created_at", -1)
+                .limit(max(1, min(int(limit or 100), 500)))
+            )
+            
+            for task in cursor:
+                items.append({
+                    "id": task.get("_id"),
+                    "text": task.get("title", ""),
+                    "due": _dt_to_iso(task.get("due_date")) if task.get("due_date") else None,
+                    "assignee": "me",  # Default for email tasks
+                    "confidence": 0.7 if task.get("priority") == "high" else 0.6 if task.get("priority") == "medium" else 0.5,
+                    "thread_id": task.get("source_ref", ""),
+                    "subject": "",  # Not stored in tasks, would need to join with emails
+                    "from": "",  # Not stored in tasks
+                    "date": "",  # Not stored in tasks
+                    "extracted_at": _dt_to_iso(task.get("created_at")),
+                    "status": task.get("status", "pending"),
+                    "priority": task.get("priority", "medium"),
+                })
+            
+            if items:
+                return {"success": True, "items": items}
+        
+        # Fallback to email_todos collection for backward compatibility
         db = get_db()
         if not db.is_connected or db.db is None:
             return {"success": False, "error": "MongoDB not connected"}
@@ -185,7 +336,6 @@ def list_email_todos(user_id: str, limit: int = 100) -> Dict[str, Any]:
         )
         docs = list(cursor)
 
-        items: List[Dict[str, Any]] = []
         for doc in docs:
             thread_id = doc.get("thread_id")
             subject = doc.get("subject", "(No subject)")

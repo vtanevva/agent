@@ -20,6 +20,7 @@ from .models import (
     get_memory_facts_collection,
     get_thread_summaries_collection,
     get_document_chunks_collection,
+    get_tasks_collection,
 )
 from .vector_store import get_vector_store
 
@@ -38,6 +39,7 @@ class ContextBundle:
     top_summaries: List[Dict[str, Any]] = field(default_factory=list)
     top_doc_chunks: List[Dict[str, Any]] = field(default_factory=list)
     recent_messages: List[Dict[str, Any]] = field(default_factory=list)
+    pending_tasks: List[Dict[str, Any]] = field(default_factory=list)  # Added tasks
     
     # Metadata
     retrieval_stats: Dict[str, Any] = field(default_factory=dict)
@@ -100,12 +102,16 @@ class RetrievalService:
             if thread_id:
                 bundle.recent_messages = self._get_recent_messages(user_id, thread_id)
             
-            # 6. Collect stats
+            # 6. Get pending tasks
+            bundle.pending_tasks = self._retrieve_pending_tasks(user_id)
+            
+            # 7. Collect stats
             bundle.retrieval_stats = {
                 "facts_count": len(bundle.top_facts),
                 "summaries_count": len(bundle.top_summaries),
                 "doc_chunks_count": len(bundle.top_doc_chunks),
                 "recent_messages_count": len(bundle.recent_messages),
+                "tasks_count": len(bundle.pending_tasks),
             }
             
             logger.info(f"🔍 Retrieved context for user {user_id}: {bundle.retrieval_stats}")
@@ -114,6 +120,49 @@ class RetrievalService:
             logger.error(f"Failed to retrieve context: {e}")
         
         return bundle
+    
+    def _retrieve_pending_tasks(self, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Retrieve pending tasks for the user.
+        
+        Args:
+            user_id: User ID
+            limit: Maximum number of tasks to retrieve
+        
+        Returns:
+            List of task dictionaries
+        """
+        try:
+            tasks_col = get_tasks_collection()
+            if not tasks_col:
+                return []
+            
+            # Get pending tasks, sorted by priority and due date
+            tasks = list(tasks_col.find(
+                {
+                    "user_id": user_id,
+                    "status": {"$ne": "completed"}
+                },
+                {
+                    "title": 1,
+                    "description": 1,
+                    "status": 1,
+                    "priority": 1,
+                    "due_date": 1,
+                    "source": 1,
+                    "created_at": 1
+                }
+            ).sort([
+                ("priority", -1),  # High priority first
+                ("due_date", 1),    # Then by due date
+                ("created_at", -1)  # Then by creation date
+            ]).limit(limit))
+            
+            return tasks
+            
+        except Exception as e:
+            logger.error(f"Failed to retrieve pending tasks: {e}")
+            return []
     
     def _generate_profile_summary(self, user_id: str) -> str:
         """

@@ -8,10 +8,12 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.db.collections import get_email_todos_collection
+from app.memory.models import get_tasks_collection
 from app.services.llm_service import get_llm_service
 from app.tools.email.detail import get_thread_detail as tool_get_thread_detail
 from app.utils.logging_utils import get_logger
 from app.utils.tool_registry import register, ToolSchema
+from uuid import uuid4
 
 logger = get_logger(__name__)
 
@@ -259,6 +261,71 @@ def extract_todos_from_thread(user_id: str, thread_id: str) -> str:
         except Exception as e:
             logger.error(f"Failed to store email todos: {e}", exc_info=True)
             stored = False
+    
+    # Also store in unified tasks collection
+    tasks_col = get_tasks_collection()
+    tasks_stored_count = 0
+    if tasks_col and todos:
+        try:
+            now = datetime.utcnow()
+            for todo_item in todos:
+                # Extract task info from todo
+                todo_text = todo_item.get("text", "") if isinstance(todo_item, dict) else str(todo_item)
+                if not todo_text:
+                    continue
+                
+                # Determine priority from confidence
+                confidence = todo_item.get("confidence", 0.6) if isinstance(todo_item, dict) else 0.6
+                if confidence >= 0.8:
+                    priority = "high"
+                elif confidence >= 0.6:
+                    priority = "medium"
+                else:
+                    priority = "low"
+                
+                # Parse due date if available
+                due_date = None
+                due_str = todo_item.get("due") if isinstance(todo_item, dict) else None
+                if due_str:
+                    # Try to parse date string (basic implementation)
+                    # In production, you'd want more robust date parsing
+                    try:
+                        # This is a placeholder - you may want to use dateutil.parser
+                        pass
+                    except Exception:
+                        pass
+                
+                task = {
+                    "_id": str(uuid4()),
+                    "user_id": user_id,
+                    "title": todo_text[:200],  # Limit title length
+                    "description": todo_text if len(todo_text) > 200 else None,
+                    "status": "pending",
+                    "priority": priority,
+                    "source": "email",
+                    "source_ref": thread_id,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                
+                # Add due date if available
+                if due_date:
+                    task["due_date"] = due_date
+                
+                # Check if task already exists (deduplicate by title and thread)
+                existing = tasks_col.find_one({
+                    "user_id": user_id,
+                    "title": task["title"],
+                    "source_ref": thread_id,
+                    "status": {"$ne": "completed"}
+                })
+                
+                if not existing:
+                    tasks_col.insert_one(task)
+                    tasks_stored_count += 1
+                    logger.info(f"Created task from email: {task['title'][:50]}...")
+        except Exception as e:
+            logger.error(f"Failed to store tasks: {e}", exc_info=True)
 
     return json.dumps(
         {
@@ -269,6 +336,7 @@ def extract_todos_from_thread(user_id: str, thread_id: str) -> str:
             "date": date,
             "todos": todos,
             "stored": stored,
+            "tasks_stored": tasks_stored_count,
         },
         ensure_ascii=False,
     )
