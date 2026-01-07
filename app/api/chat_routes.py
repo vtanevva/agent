@@ -341,7 +341,7 @@ def chat():
             
             ingestion_service = get_ingestion_service()
             ingestion_service.ingest_message(
-                user_id=user_id,
+                    user_id=user_id,
                 thread_id=session_id,
                 channel="web_chat",
                 direction=MessageDirection.INCOMING,  # Fixed: was .IN, should be .INCOMING

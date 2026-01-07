@@ -632,16 +632,85 @@ def backfill_email_facts():
         
         max_emails = int(data.get('max_emails', 100))
         
-        # Trigger background classification (which now extracts facts)
-        from app.services.gmail_service import classify_background
+        # Extract facts directly from emails (no classification needed)
+        from app.services.gmail_service import extract_facts_from_email
+        from app.tools.email import _extract_plain_text
+        from app.utils.oauth_utils import load_google_credentials
+        from googleapiclient.discovery import build
         import threading
         
         def run_backfill():
             try:
-                result = classify_background(user_id, max_emails=max_emails)
-                logger.info(f"Email fact backfill completed for user {user_id}: {result}")
+                # Load credentials and build Gmail service
+                creds = load_google_credentials(user_id)
+                if not creds:
+                    logger.error(f"No credentials found for user {user_id}")
+                    return
+                
+                service = build("gmail", "v1", credentials=creds)
+                
+                # Fetch recent emails from inbox
+                logger.info(f"Fetching up to {max_emails} emails for fact extraction (user: {user_id})")
+                resp = service.users().messages().list(
+                    userId="me",
+                    q="in:inbox -from:me",
+                    maxResults=max_emails * 2,  # Fetch more to account for threads
+                ).execute()
+                
+                messages = resp.get("messages", []) or []
+                seen_threads = set()
+                processed = 0
+                
+                # Process emails sequentially to extract facts
+                for msg_info in messages:
+                    if processed >= max_emails:
+                        break
+                    
+                    try:
+                        msg_id = msg_info["id"]
+                        
+                        # Fetch full message
+                        full_msg = service.users().messages().get(
+                            userId="me",
+                            id=msg_id,
+                            format="full",
+                        ).execute()
+                        
+                        thread_id = full_msg.get("threadId")
+                        if thread_id in seen_threads:
+                            continue  # Skip duplicate threads
+                        seen_threads.add(thread_id)
+                        
+                        # Extract email data
+                        headers = {h["name"]: h["value"] for h in full_msg.get("payload", {}).get("headers", [])}
+                        
+                        # Extract body text using the helper function
+                        payload = full_msg.get("payload", {})
+                        body = _extract_plain_text(payload)
+                        
+                        email_data = {
+                            "threadId": thread_id,
+                            "from": headers.get("From", ""),
+                            "subject": headers.get("Subject", "(No subject)"),
+                            "snippet": full_msg.get("snippet", "")[:200],
+                            "body": body[:2000],  # Limit body length
+                        }
+                        
+                        # Extract facts from email (runs in background thread)
+                        extract_facts_from_email(user_id, email_data)
+                        processed += 1
+                        
+                        # Small delay to avoid rate limits
+                        import time
+                        time.sleep(0.1)
+                        
+                    except Exception as e:
+                        logger.warning(f"Failed to process email {msg_id}: {e}")
+                        continue
+                
+                logger.info(f"✅ Email fact extraction completed for user {user_id} ({processed} emails processed)")
             except Exception as e:
-                logger.error(f"Email fact backfill failed for user {user_id}: {e}")
+                logger.error(f"❌ Email fact backfill failed for user {user_id}: {e}")
         
         # Run in background thread
         thread = threading.Thread(target=run_backfill, daemon=True)

@@ -95,14 +95,6 @@ class Config:
     ]
     
     # ═══════════════════════════════════════════════════════════════════
-    # Instagram/Facebook OAuth
-    # ═══════════════════════════════════════════════════════════════════
-    
-    IG_APP_ID: Optional[str] = os.getenv("IG_APP_ID")
-    IG_APP_SECRET: Optional[str] = os.getenv("IG_APP_SECRET")
-    IG_SCOPES = ["instagram_basic", "instagram_manage_messages", "pages_show_list", "pages_messaging"]
-    
-    # ═══════════════════════════════════════════════════════════════════
     # Rate Limiting
     # ═══════════════════════════════════════════════════════════════════
     

@@ -72,7 +72,7 @@ from app.db.collections import get_conversations_collection, get_tokens_collecti
 from app.utils.oauth_utils import (
     load_google_credentials, save_google_credentials, get_gmail_profile,
     require_google_auth, build_google_flow, parse_expo_state,
-    GOOGLE_SCOPES, IG_SCOPES, OAUTH_BASE, TOKEN_URL
+    GOOGLE_SCOPES, OAUTH_BASE, TOKEN_URL
 )
 from app.utils.email_resend import send_waitlist_welcome_email
 from app.config import Config
@@ -177,10 +177,6 @@ def create_app():
 
 # Create the app instance
 app = create_app()
-
-# Instagram OAuth config (these are used by routes below)
-IG_APP_ID = Config.IG_APP_ID
-IG_APP_SECRET = Config.IG_APP_SECRET
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -1462,8 +1458,39 @@ def google_callback():
             # Don't fail OAuth if backfill fails
             logger.warning(f"⚠️ Could not trigger backfill for user {state}: {e}")
         
+        # 📧 EMAIL FACT EXTRACTION: Extract facts from emails after login (background workers)
+        # This runs separately from classification to ensure facts are extracted immediately after login
+        try:
+            from app.memory.background_jobs import get_job_queue
+            
+            # Enqueue email fact extraction job (non-blocking)
+            def extract_email_facts_for_new_user():
+                import requests
+                try:
+                    logger.info(f"🔄 Starting email fact extraction for user {state}")
+                    response = requests.post(
+                        "http://localhost:10000/memory/admin/backfill-email-facts",
+                        json={"user_id": state, "max_emails": 100},  # Extract facts from last 100 emails
+                        timeout=600  # 10 minutes timeout
+                    )
+                    if response.status_code == 200:
+                        logger.info(f"✅ Email fact extraction completed for user {state}")
+                    else:
+                        logger.error(f"❌ Email fact extraction failed for user {state}: HTTP {response.status_code}")
+                except Exception as e:
+                    logger.error(f"❌ Email fact extraction failed for user {state}: {e}")
+            
+            job_queue = get_job_queue()
+            job_queue.enqueue(
+                extract_email_facts_for_new_user,
+                job_id=f"extract-email-facts-oauth-{state}"
+            )
+        except Exception as e:
+            # Don't fail OAuth if fact extraction fails
+            logger.warning(f"⚠️ Could not trigger email fact extraction for user {state}: {e}")
+        
         # 📧 EMAIL CLASSIFICATION: Classify existing emails on first login
-        # Uses the existing classify_background endpoint (already supports v3.0 + fact extraction)
+        # Uses the existing classify_background endpoint (v3.0 classification only, no fact extraction)
         try:
             import threading
             from app.database import get_db
@@ -1500,7 +1527,8 @@ def google_callback():
                         try:
                             logger.info(f"🔄 Starting email classification for user {state}")
                             
-                            # Use existing classify_background endpoint (supports v3.0 + fact extraction)
+                            # Use existing classify_background endpoint (v3.0 classification only, no fact extraction)
+                            # Fact extraction happens separately via backfill-email-facts endpoint
                             response = requests.post(
                                 "http://localhost:10000/api/gmail/classify-background",
                                 json={"user_id": state, "max_emails": 200},
@@ -1620,113 +1648,6 @@ def google_callback():
     # Web app redirect - redirect to chat page with userId and sessionId
     redirect_url = f"{clean_base_url}/chat?userId={user_id}&sessionId={session_id}"
     return redirect(redirect_url)
-
-
-@app.route("/instagram/auth")
-def instagram_auth():
-    """Instagram OAuth initiation."""
-    user_id = request.args.get("user_id", "demo")
-    redirect_uri = request.url_root.rstrip("/") + "/instagram/callback"
-    oauth = OAuth2Session(IG_APP_ID, redirect_uri=redirect_uri, scope=IG_SCOPES)
-
-    auth_url, state = oauth.authorization_url(
-        OAUTH_BASE,
-        auth_type="rerequest",
-    )
-
-    session["oauth_state"] = state
-    session["oauth_user_id"] = user_id
-    return redirect(auth_url)
-
-
-@app.route("/instagram/callback")
-def instagram_callback():
-    """Instagram OAuth callback."""
-    state = session.pop("oauth_state", None)
-    user_id = session.pop("oauth_user_id", "demo")
-    redirect_uri = request.url_root.rstrip("/") + "/instagram/callback"
-
-    oauth = OAuth2Session(
-        IG_APP_ID,
-        state=state,
-        redirect_uri=redirect_uri
-    )
-
-    token = oauth.fetch_token(
-        TOKEN_URL,
-        client_secret=IG_APP_SECRET,
-        authorization_response=request.url,
-    )
-    user_token = token.get("access_token")
-
-    # List pages user manages
-    pages_resp = requests.get(
-        "https://graph.facebook.com/v19.0/me/accounts",
-        params={"access_token": user_token},
-        timeout=10,
-    ).json()
-
-    pages = pages_resp.get("data", [])
-    if not pages:
-        return "❌ No Facebook Pages found. Make sure you granted the Pages permission.", 400
-
-    # Find page with Instagram Business account
-    linked = None
-    for p in pages:
-        test = requests.get(
-            f"https://graph.facebook.com/v19.0/{p['id']}",
-            params={
-                "fields": "instagram_business_account",
-                "access_token": p["access_token"],
-            },
-            timeout=10,
-        ).json()
-        if test.get("instagram_business_account", {}).get("id"):
-            linked = (p, test["instagram_business_account"])
-            break
-
-    if not linked:
-        return (
-            "❌ None of your Pages are linked to an IG Business/Creator account. "
-            "Go into Facebook Page Settings and link your IG profile first."
-        ), 400
-
-    page, ig_info = linked
-    page_id = page["id"]
-    page_token = page["access_token"]
-    ig_user_id = ig_info["id"]
-
-    # Persist to MongoDB
-    tokens = get_tokens_collection()
-    if tokens is not None:
-        try:
-            tokens.update_one(
-                {"user_id": user_id},
-                {
-                    "$set": {
-                        "instagram": {
-                            "page_id": page_id,
-                            "ig_user_id": ig_user_id,
-                            "access_token": page_token
-                        }
-                    }
-                },
-                upsert=True
-            )
-        except Exception as e:
-            logger.error(f"Failed to save Instagram credentials: {e}", exc_info=True)
-            return f"❌ Error saving credentials: {e}", 500
-    else:
-        # Fallback to file-based storage
-        TOK_DIR = os.path.join(os.path.dirname(__file__), "tokens")
-        os.makedirs(TOK_DIR, exist_ok=True)
-        with open(f"{TOK_DIR}/{user_id}_ig.pkl", "wb") as f:
-            pickle.dump(
-                {"page_id": page_id, "ig_user_id": ig_user_id, "access_token": page_token},
-                f
-            )
-
-    return "✅ Instagram onnected! You can close this tab."
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -2625,7 +2546,7 @@ def serve_frontend(path):
         return jsonify({"error": "API endpoint not found"}), 404
     
     # Don't interfere with OAuth routes (check lowercase)
-    if path_lower.startswith("google/") or path_lower.startswith("instagram/"):
+    if path_lower.startswith("google/"):
         logger.info(f"Returning 404 for OAuth route: {path}")
         return jsonify({"error": "Endpoint not found"}), 404
     

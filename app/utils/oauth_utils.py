@@ -1,4 +1,4 @@
-"""OAuth utilities for Google and Instagram authentication"""
+"""OAuth utilities for Google authentication"""
 
 import os
 import json
@@ -9,7 +9,6 @@ from flask import url_for, jsonify
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
-from requests_oauthlib import OAuth2Session
 
 from app.config import Config
 from app.db.collections import get_tokens_collection
@@ -21,13 +20,7 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/calendar.events",
 ]
 
-# Instagram OAuth config
-IG_SCOPES = [
-    "pages_show_list",
-    "instagram_basic",
-    "instagram_manage_messages",
-]
-
+# Facebook OAuth constants (kept for potential future use)
 OAUTH_BASE = "https://www.facebook.com/v19.0/dialog/oauth"
 TOKEN_URL = "https://graph.facebook.com/v19.0/oauth/access_token"
 

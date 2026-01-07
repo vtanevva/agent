@@ -58,17 +58,8 @@ def extract_facts_from_email(user_id: str, email_data: Dict[str, Any]) -> None:
     """
     def _background_extract():
         try:
-            # FILTER: Only extract facts from important email categories
-            # Skip noise: notifications, newsletters, promotional, transactional, social
-            category = email_data.get('category', 'unknown')
-            
-            SKIP_CATEGORIES = ['notifications', 'newsletters', 'promotional', 'transactional', 'social']
-            EXTRACT_CATEGORIES = ['urgent', 'action_items', 'clients', 'waiting_for_reply', 'normal']
-            
-            if category in SKIP_CATEGORIES:
-                # Skip fact extraction for noise emails
-                return
-            
+            # Extract facts from ALL email categories
+            # (User preference: no filtering, extract from everything)
             from app.memory.memory_gate import get_memory_gate
             
             # Build context text for fact extraction (NOT stored, only used for extraction)
@@ -578,11 +569,11 @@ def classify_single_email(
         # Classify email
         classification = classify_email(email_data, user_id)
         
-        # Add category to email_data for fact extraction filtering
+        # Add category to email_data for future reference
         email_data['category'] = classification['category']
         
-        # Extract facts from email (background, non-blocking, filtered by category)
-        extract_facts_from_email(user_id, email_data)
+        # NOTE: Fact extraction is now handled separately by background workers after login
+        # This prevents fact extraction from happening during triaged inbox classification
 
         # Store classification in database if thread_id exists
         if thread_id:
@@ -774,9 +765,10 @@ def classify_background(user_id: str, max_emails: int = 20) -> Dict[str, Any]:
 
             # Get unclassified emails from inbox
             # Fetch more than requested to account for threads and duplicates
-            fetch_limit = min(max_emails * 3, 500)  # Fetch 3x but cap at 500
+            # Increased from 3x to 5x for better coverage and fact extraction
+            fetch_limit = min(max_emails * 5, 500)  # Fetch 5x but cap at 500 (default: 100 emails)
             
-            print(f"[INFO] Fetching up to {fetch_limit} recent emails from Gmail", flush=True)
+            print(f"[INFO] Fetching up to {fetch_limit} recent emails from Gmail for classification", flush=True)
             
             resp = service.users().messages().list(
                 userId="me",
@@ -845,8 +837,8 @@ def classify_background(user_id: str, max_emails: int = 20) -> Dict[str, Any]:
 
                     classification = classify_email(email_data, user_id)
                     
-                    # Extract facts from email (background, non-blocking)
-                    extract_facts_from_email(user_id, email_data)
+                    # NOTE: Fact extraction is now handled separately by background workers after login
+                    # This prevents fact extraction from happening during triaged inbox classification
 
                     # Store in database
                     if emails_col is not None:
@@ -905,7 +897,7 @@ def classify_background(user_id: str, max_emails: int = 20) -> Dict[str, Any]:
                         executor.submit(fetch_and_classify_message, msg_id): msg_id
                         for msg_id in batch_message_ids
                     }
-                    
+                
                     for future in as_completed(future_to_msg_id):
                         if count >= max_emails:
                             break
@@ -923,7 +915,7 @@ def classify_background(user_id: str, max_emails: int = 20) -> Dict[str, Any]:
                             failed_count += 1
                             print(f"[WARNING] Failed to process message {msg_id}: {e}", flush=True)
                             continue
-                
+
                 # Longer delay between batches to let SSL connections fully settle (Windows fix)
                 import time
                 time.sleep(1.0)  # 1 second pause between batches
