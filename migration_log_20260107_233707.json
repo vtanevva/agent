@@ -1,0 +1,68 @@
+[
+  {
+    "old_namespace": "v",
+    "new_namespace": "u:695d8f9c2cc24510999d4dc3",
+    "vectors_copied": 0,
+    "errors": [
+      "(429)\nReason: Too Many Requests\nHTTP response headers: HTTPHeaderDict({'Date': 'Wed, 07 Jan 2026 22:32:39 GMT', 'Content-Type': 'application/json', 'Content-Length': '166', 'Connection': 'keep-alive', 'x-pinecone-request-latency-ms': '1319', 'x-pinecone-request-id': '4085641559919089463', 'x-envoy-upstream-service-time': '6', 'x-pinecone-response-duration-ms': '1324', 'server': 'envoy'})\nHTTP response body: {\"code\":8,\"message\":\"Request failed. You've reached your write unit limit for the current month (2000000). To continue writing data, upgrade your plan.\",\"details\":[]}\n"
+    ],
+    "success": false
+  },
+  {
+    "old_namespace": "vane",
+    "new_namespace": "u:695d8f9c2cc24510999d4dc3",
+    "vectors_copied": 0,
+    "errors": [
+      "(429)\nReason: Too Many Requests\nHTTP response headers: HTTPHeaderDict({'Date': 'Wed, 07 Jan 2026 22:32:42 GMT', 'Content-Type': 'application/json', 'Content-Length': '166', 'Connection': 'keep-alive', 'x-pinecone-request-latency-ms': '1000', 'x-pinecone-request-id': '3498413296496861644', 'x-envoy-upstream-service-time': '5', 'x-pinecone-response-duration-ms': '1002', 'server': 'envoy'})\nHTTP response body: {\"code\":8,\"message\":\"Request failed. You've reached your write unit limit for the current month (2000000). To continue writing data, upgrade your plan.\",\"details\":[]}\n"
+    ],
+    "success": false
+  },
+  {
+    "old_namespace": "vanesa.taneva@gmail.com",
+    "new_namespace": "u:695d8f9c2cc24510999d4dc3",
+    "vectors_copied": 0,
+    "errors": [
+      "(429)\nReason: Too Many Requests\nHTTP response headers: HTTPHeaderDict({'Date': 'Wed, 07 Jan 2026 22:32:46 GMT', 'Content-Type': 'application/json', 'Content-Length': '166', 'Connection': 'keep-alive', 'x-pinecone-request-latency-ms': '1235', 'x-pinecone-request-id': '26287568020782324', 'x-envoy-upstream-service-time': '4', 'x-pinecone-response-duration-ms': '1236', 'server': 'envoy'})\nHTTP response body: {\"code\":8,\"message\":\"Request failed. You've reached your write unit limit for the current month (2000000). To continue writing data, upgrade your plan.\",\"details\":[]}\n"
+    ],
+    "success": false
+  },
+  {
+    "old_namespace": "",
+    "new_namespace": "u:695d8f9c2cc24510999d4dc3",
+    "vectors_copied": 9,
+    "errors": [],
+    "success": true
+  },
+  {
+    "old_namespace": "vv",
+    "new_namespace": "u:695d8f9c2cc24510999d4dc3",
+    "vectors_copied": 6,
+    "errors": [],
+    "success": true
+  },
+  {
+    "old_namespace": "vanesa",
+    "new_namespace": "u:695d8f9c2cc24510999d4dc3",
+    "vectors_copied": 5,
+    "errors": [],
+    "success": true
+  },
+  {
+    "old_namespace": "vanesa.taneva12@gmail.com",
+    "new_namespace": "u:695d8f9c2cc24510999d4dc3",
+    "vectors_copied": 0,
+    "errors": [
+      "(429)\nReason: Too Many Requests\nHTTP response headers: HTTPHeaderDict({'Date': 'Wed, 07 Jan 2026 22:32:53 GMT', 'Content-Type': 'application/json', 'Content-Length': '166', 'Connection': 'keep-alive', 'x-pinecone-request-latency-ms': '29', 'x-pinecone-request-id': '7141667487455518926', 'x-envoy-upstream-service-time': '1', 'x-pinecone-response-duration-ms': '31', 'server': 'envoy'})\nHTTP response body: {\"code\":8,\"message\":\"Request failed. You've reached your write unit limit for the current month (2000000). To continue writing data, upgrade your plan.\",\"details\":[]}\n"
+    ],
+    "success": false
+  },
+  {
+    "old_namespace": "deya",
+    "new_namespace": "u:695d8d222cc24510999d4bf6",
+    "vectors_copied": 0,
+    "errors": [
+      "(429)\nReason: Too Many Requests\nHTTP response headers: HTTPHeaderDict({'Date': 'Wed, 07 Jan 2026 22:32:53 GMT', 'Content-Type': 'application/json', 'Content-Length': '166', 'Connection': 'keep-alive', 'x-pinecone-request-latency-ms': '247', 'x-pinecone-request-id': '8122089563597698710', 'x-envoy-upstream-service-time': '238', 'x-pinecone-response-duration-ms': '249', 'server': 'envoy'})\nHTTP response body: {\"code\":8,\"message\":\"Request failed. You've reached your write unit limit for the current month (2000000). To continue writing data, upgrade your plan.\",\"details\":[]}\n"
+    ],
+    "success": false
+  }
+]

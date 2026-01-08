@@ -58,6 +58,32 @@ def extract_facts_from_email(user_id: str, email_data: Dict[str, Any]) -> None:
     """
     def _background_extract():
         try:
+            thread_id = email_data.get('thread_id', 'unknown')
+            source_ref = f"email:{thread_id}"
+            
+            # OPTIMIZATION: Check if this thread was already processed
+            # Skip expensive LLM call if facts already exist for this thread
+            from app.memory.models import get_memory_facts_collection
+            facts_col = get_memory_facts_collection()
+            
+            if facts_col:
+                # Check if facts already exist for this thread
+                existing_facts_for_thread = facts_col.find_one({
+                    "user_id": user_id,
+                    "source_ref": source_ref,
+                    "is_active": True
+                })
+                
+                if existing_facts_for_thread:
+                    # Thread already processed - skip LLM call
+                    print(f"[SKIP] Thread {thread_id} already processed, skipping fact extraction", flush=True)
+                    # Still do relationship and project tracking (cheap operations)
+                    skip_fact_extraction = True
+                else:
+                    skip_fact_extraction = False
+            else:
+                skip_fact_extraction = False
+            
             # Extract facts from ALL email categories
             # (User preference: no filtering, extract from everything)
             from app.memory.memory_gate import get_memory_gate
@@ -70,19 +96,20 @@ def extract_facts_from_email(user_id: str, email_data: Dict[str, Any]) -> None:
             # Create extraction context (analyze content without storing it)
             extraction_text = f"Subject: {subject}\n\nFrom: {sender}\n\nContent: {body}"
             
-            # Extract facts using memory gate
-            gate = get_memory_gate()
-            candidate_facts = gate.extract_candidate_facts(
-                text=extraction_text,
-                user_id=user_id,
-                source_ref=f"email:{email_data.get('thread_id', 'unknown')}",
-            )
+            # Extract facts using memory gate (skip if already processed)
+            if not skip_fact_extraction:
+                gate = get_memory_gate()
+                candidate_facts = gate.extract_candidate_facts(
+                    text=extraction_text,
+                    user_id=user_id,
+                    source_ref=source_ref,
+                )
+            else:
+                candidate_facts = []
             
             if candidate_facts:
                 # Get existing facts for deduplication
-                from app.memory.models import get_memory_facts_collection
-                facts_col = get_memory_facts_collection()
-                
+                # facts_col already defined above
                 if facts_col:
                     existing_facts = list(facts_col.find({
                         "user_id": user_id,
@@ -93,18 +120,29 @@ def extract_facts_from_email(user_id: str, email_data: Dict[str, Any]) -> None:
                     unique_facts = gate.deduplicate_facts(candidate_facts, existing_facts)
                     
                     if unique_facts:
-                        # Store unique facts in MongoDB
+                        # Store unique facts in MongoDB and track fact IDs
                         stored_count = gate.store_facts(user_id, unique_facts)
+                        stored_fact_ids = []
                         
                         if stored_count > 0:
+                            # Get fact IDs that were just stored (by source_ref)
+                            if facts_col:
+                                stored_facts = list(facts_col.find({
+                                    "user_id": user_id,
+                                    "source_ref": source_ref,
+                                    "is_active": True
+                                }, {"_id": 1}).sort("created_at", -1).limit(stored_count))
+                                stored_fact_ids = [fact["_id"] for fact in stored_facts]
+                            
                             # Embed facts to Pinecone for semantic search
                             from app.memory.vector_store import get_vector_store
                             vector_store = get_vector_store()
                             
                             vectors = []
-                            for fact in unique_facts:
+                            for i, fact in enumerate(unique_facts):
+                                fact_id = stored_fact_ids[i] if i < len(stored_fact_ids) else f"fact_{user_id}_{hash(fact.text)}"
                                 vectors.append({
-                                    "id": f"fact_{user_id}_{hash(fact.text)}",
+                                    "id": fact_id,
                                     "text": fact.text,
                                     "metadata": {
                                         "fact_type": fact.fact_type.value,
@@ -121,57 +159,94 @@ def extract_facts_from_email(user_id: str, email_data: Dict[str, Any]) -> None:
                                 )
                             
                             print(f"📧 Extracted and embedded {stored_count} facts from email (user: {user_id})", flush=True)
+                            
+                            # Link facts to relationships (will be done after facts are stored, see below)
             
             # ===== RELATIONSHIP TRACKING =====
-            # Update relationship metadata when processing emails
-            sender_email = None
-            relationships_col = None
+            # Use RelationshipsService for clean separation of concerns
             try:
-                from app.memory.models import get_relationships_collection
-                from uuid import uuid4
-                import re
+                from app.services.relationships_service import get_relationships_service
                 
-                relationships_col = get_relationships_collection()
-                sender = email_data.get('from', '')
+                relationships_service = get_relationships_service()
+                result = relationships_service.process_email(user_id, email_data)
                 
-                if relationships_col and sender:
-                    # Extract email from sender string (handles "Name <email@domain.com>" format)
-                    sender_email = sender
-                    if "<" in sender and ">" in sender:
-                        sender_email = sender.split("<")[1].split(">")[0]
-                    elif "@" in sender:
-                        # Just email address
-                        sender_email = sender.strip()
-                    
-                    # Only process if we have a valid email
-                    if "@" in sender_email and "." in sender_email.split("@")[1]:
-                        # Update or create relationship
-                        relationships_col.update_one(
-                            {
-                                "user_id": user_id,
-                                "contact_email": sender_email
-                            },
-                            {
-                                "$set": {
-                                    "last_contact": datetime.utcnow(),
-                                    "updated_at": datetime.utcnow()
-                                },
-                                "$inc": {
-                                    "contact_count": 1  # Track interaction frequency
-                                },
-                                "$setOnInsert": {
-                                    "_id": str(uuid4()),
-                                    "user_id": user_id,
-                                    "contact_email": sender_email,
-                                    "importance": "medium",  # Default
-                                    "relationship_type": "contact",  # Default
-                                    "created_at": datetime.utcnow()
-                                }
-                            },
-                            upsert=True
-                        )
+                recipient_emails = result.get("tracked_emails", [])
+                email_sent_by_user = result.get("email_sent_by_user", False)
+                
             except Exception as e:
                 print(f"[WARNING] Relationship tracking failed: {e}", flush=True)
+                recipient_emails = []
+                email_sent_by_user = False
+            
+            # ===== TASK LINKING TO RELATIONSHIPS =====
+            # Link tasks from this thread to relationships
+            try:
+                from app.memory.models import get_tasks_collection
+                from app.services.relationships_service import get_relationships_service
+                
+                relationships_service = get_relationships_service()
+                
+                if thread_id:
+                    # Find tasks created from this thread
+                    tasks_col = get_tasks_collection()
+                    if tasks_col:
+                        thread_tasks = list(tasks_col.find({
+                            "user_id": user_id,
+                            "source": "email",
+                            "source_ref": thread_id
+                        }, {"_id": 1}))
+                        
+                        task_ids = [task["_id"] for task in thread_tasks]
+                        
+                        if task_ids:
+                            # Link tasks to recipients (if email was sent) or sender (if relationship exists)
+                            if email_sent_by_user and recipient_emails:
+                                # Email was sent - link tasks to recipients
+                                for recipient_email in recipient_emails:
+                                    relationships_service.link_tasks(user_id, recipient_email, task_ids)
+                                    print(f"[RELATIONSHIP] Linked {len(task_ids)} tasks to relationship with {recipient_email}", flush=True)
+                            elif not email_sent_by_user and recipient_emails:
+                                # Email was received - link tasks to sender if relationship exists
+                                # recipient_emails will contain sender if relationship was updated
+                                sender_email = recipient_emails[0]
+                                relationships_service.link_tasks(user_id, sender_email, task_ids)
+                                print(f"[RELATIONSHIP] Linked {len(task_ids)} tasks to existing relationship with {sender_email}", flush=True)
+            except Exception as e:
+                print(f"[WARNING] Task linking to relationships failed: {e}", flush=True)
+            
+            # ===== FACT LINKING TO RELATIONSHIPS =====
+            # Link facts from this thread to relationships
+            try:
+                from app.services.relationships_service import get_relationships_service
+                
+                relationships_service = get_relationships_service()
+                
+                if thread_id and facts_col:
+                    # Find facts created from this thread
+                    source_ref = f"email:{thread_id}"
+                    thread_facts = list(facts_col.find({
+                        "user_id": user_id,
+                        "source_ref": source_ref,
+                        "is_active": True
+                    }, {"_id": 1}))
+                    
+                    fact_ids = [fact["_id"] for fact in thread_facts]
+                    
+                    if fact_ids:
+                        # Link facts to recipients (if email was sent) or sender (if relationship exists)
+                        if email_sent_by_user and recipient_emails:
+                            # Email was sent - link facts to recipients
+                            for recipient_email in recipient_emails:
+                                relationships_service.link_facts(user_id, recipient_email, fact_ids)
+                                print(f"[RELATIONSHIP] Linked {len(fact_ids)} facts to relationship with {recipient_email}", flush=True)
+                        elif not email_sent_by_user and recipient_emails:
+                            # Email was received - link facts to sender if relationship exists
+                            # recipient_emails will contain sender if relationship was updated
+                            sender_email = recipient_emails[0]
+                            relationships_service.link_facts(user_id, sender_email, fact_ids)
+                            print(f"[RELATIONSHIP] Linked {len(fact_ids)} facts to existing relationship with {sender_email}", flush=True)
+            except Exception as e:
+                print(f"[WARNING] Fact linking to relationships failed: {e}", flush=True)
             
             # ===== PROJECT LINKING =====
             # Check if thread relates to existing project, or create new one
@@ -199,7 +274,7 @@ def extract_facts_from_email(user_id: str, email_data: Dict[str, Any]) -> None:
                             # Create or update project
                             project_name = subject[:100]  # Use subject as project name
                             
-                            projects_col.update_one(
+                            result = projects_col.update_one(
                                 {
                                     "user_id": user_id,
                                     "name": project_name
@@ -221,21 +296,34 @@ def extract_facts_from_email(user_id: str, email_data: Dict[str, Any]) -> None:
                                 upsert=True
                             )
                             
-                            # Also link sender to project if we have relationship
-                            if relationships_col and sender_email:
-                                relationships_col.update_one(
-                                    {
-                                        "user_id": user_id,
-                                        "contact_email": sender_email
-                                    },
-                                    {
-                                        "$addToSet": {"projects": project_name}
-                                    }
-                                )
+                            # Log project creation/update
+                            if result.upserted_id:
+                                print(f"[PROJECT] Created new project '{project_name}' and linked thread {thread_id}", flush=True)
+                            else:
+                                print(f"[PROJECT] Updated existing project '{project_name}' and linked thread {thread_id}", flush=True)
                             
-                            print(f"[INFO] Linked thread {thread_id} to project '{project_name}'", flush=True)
+                            # Also link recipient(s) to project if we have relationships (from sent emails)
+                            try:
+                                from app.services.relationships_service import get_relationships_service
+                                
+                                relationships_service = get_relationships_service()
+                                
+                                if recipient_emails:
+                                    # Link all recipients to the project
+                                    for recipient_email in recipient_emails:
+                                        relationships_service.link_project(user_id, recipient_email, project_name)
+                                        print(f"[PROJECT] Linked recipient {recipient_email} to project '{project_name}'", flush=True)
+                            except Exception as e:
+                                print(f"[WARNING] Failed to link recipient to project: {e}", flush=True)
+                        else:
+                            # Log why project wasn't created
+                            print(f"[PROJECT] Subject '{subject[:60]}' does not contain project keywords", flush=True)
+                    else:
+                        print(f"[PROJECT] Thread {thread_id} already linked to project '{existing_project.get('name', 'unnamed')}'", flush=True)
             except Exception as e:
                 print(f"[WARNING] Project linking failed: {e}", flush=True)
+                import traceback
+                traceback.print_exc()
                             
         except Exception as e:
             print(f"[WARNING] Email fact extraction failed: {e}", flush=True)

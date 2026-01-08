@@ -131,7 +131,22 @@ class VectorStore:
                         region=Config.PINECONE_ENV
                     )
                 )
-                logger.info(f"✅ Created Pinecone index: {index_name}")
+                logger.info(f"✅ Created Pinecone index: {index_name} with dimension {self._dimension}")
+            else:
+                # Check existing index dimension
+                index_info = pc.describe_index(index_name)
+                existing_dimension = index_info.dimension
+                if existing_dimension != self._dimension:
+                    logger.error(
+                        f"❌ Pinecone index dimension mismatch! "
+                        f"Index '{index_name}' has dimension {existing_dimension}, "
+                        f"but embeddings are {self._dimension}. "
+                        f"Please delete and recreate the index or use a different index name."
+                    )
+                    self._initialized = True
+                    return False
+                else:
+                    logger.debug(f"✅ Existing Pinecone index '{index_name}' has correct dimension {existing_dimension}")
             
             self._index = pc.Index(index_name)
             self._initialized = True

@@ -359,11 +359,15 @@ RELATIONSHIP_SCHEMA = {
     "user_id": str,
     "contact_email": str,
     "importance": str,  # "high", "medium", "low"
-    "relationship_type": str,  # "colleague", "friend", "family", "client"
+    "relationship_type": str,  # "colleague", "friend", "family", "client", "contact"
     "last_contact": Optional[datetime],
-    "contact_frequency": int,  # messages per month
+    "contact_count": int,  # Total number of interactions (sent + received)
+    "contact_frequency": Optional[int],  # messages per month (calculated)
     "notes": List[str],  # Important notes about this person
-    "projects": List[str],  # Shared projects
+    "related_projects": List[str],  # Project IDs or names this contact is involved in
+    "related_tasks": List[str],  # Task IDs this contact is associated with
+    "related_facts": List[str],  # Fact IDs related to this contact
+    "related_threads": List[str],  # Email thread IDs involving this contact
     "created_at": datetime,
     "updated_at": datetime,
 }

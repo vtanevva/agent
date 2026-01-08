@@ -66,16 +66,31 @@ class MemoryService:
             
             # Check if index exists, create if not
             existing = [ix["name"] for ix in pc.list_indexes()]
+            expected_dimension = 1536  # OpenAI ada-002 dimension
+            
             if index_name not in existing:
                 pc.create_index(
                     name=index_name,
-                    dimension=1536,
+                    dimension=expected_dimension,
                     metric="cosine"
                 )
-                print(f"✅ Created Pinecone index: {index_name}")
+                print(f"✅ Created Pinecone index: {index_name} with dimension {expected_dimension}")
+            else:
+                # Check existing index dimension
+                index_info = pc.describe_index(index_name)
+                existing_dimension = index_info.dimension
+                if existing_dimension != expected_dimension:
+                    print(
+                        f"❌ [ERROR] Pinecone index dimension mismatch! "
+                        f"Index '{index_name}' has dimension {existing_dimension}, "
+                        f"but embeddings are {expected_dimension}. "
+                        f"Please delete and recreate the index or use a different index name.",
+                        flush=True
+                    )
+                    return
             
             self._pinecone_index = pc.Index(index_name)
-            print(f"✅ Pinecone initialized: {index_name}")
+            print(f"✅ Pinecone initialized: {index_name}", flush=True)
         except Exception as e:
             print(f"❌ Error initializing Pinecone: {e}")
             print("⚠️ Continuing without vector memory")
@@ -95,6 +110,44 @@ class MemoryService:
         if any(phrase in text.lower() for phrase in ignore_phrases):
             return False
         return len(text.split()) >= 3
+    
+    def _get_canonical_namespace(self, user_id: str) -> str:
+        """
+        Get canonical Pinecone namespace for user.
+        
+        Strategy:
+        1. Try to get from users.memory_namespace (canonical format)
+        2. Fallback to email (via user_email_utils)
+        3. Fallback to user_id
+        
+        Args:
+            user_id: User identifier
+            
+        Returns:
+            Canonical namespace (u:<userId> preferred, or email/user_id as fallback)
+        """
+        try:
+            from app.memory.models import get_users_collection
+            users_col = get_users_collection()
+            
+            if users_col:
+                user = users_col.find_one({"user_id": user_id})
+                if user and "memory_namespace" in user:
+                    namespace = user["memory_namespace"]
+                    return namespace
+        except Exception as e:
+            print(f"[DEBUG] Could not get canonical namespace from users collection for {user_id}: {e}", flush=True)
+        
+        # Fallback to email
+        try:
+            from app.utils.user_email_utils import get_user_email
+            namespace = get_user_email(user_id)
+            return namespace
+        except Exception as e:
+            print(f"[DEBUG] Could not get email for {user_id}: {e}", flush=True)
+        
+        # Final fallback to user_id
+        return user_id.lower().strip()
     
     def save_conversation(
         self,

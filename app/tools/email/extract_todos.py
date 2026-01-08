@@ -322,8 +322,24 @@ def extract_todos_from_thread(user_id: str, thread_id: str) -> str:
                 
                 if not existing:
                     tasks_col.insert_one(task)
+                    task_id = task["_id"]
                     tasks_stored_count += 1
                     logger.info(f"Created task from email: {task['title'][:50]}...")
+                    
+                    # Link task to relationships if we can identify the contact
+                    # Get sender email from email thread (if available)
+                    try:
+                        from app.memory.models import get_relationships_collection
+                        relationships_col = get_relationships_collection()
+                        
+                        if relationships_col:
+                            # Try to extract contact from email data
+                            # We need to link task to relationship based on thread
+                            # Relationship will be updated when email is processed in extract_facts_from_email
+                            # For now, we'll link via thread - relationships will be updated separately
+                            pass  # Relationship linking happens in extract_facts_from_email
+                    except Exception as e:
+                        logger.warning(f"Failed to link task to relationship: {e}")
         except Exception as e:
             logger.error(f"Failed to store tasks: {e}", exc_info=True)
 

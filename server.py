@@ -1132,7 +1132,7 @@ def google_callback():
                         try:
                             requests.post(
                                 "http://localhost:10000/memory/admin/backfill-facts",
-                                json={"user_id": state, "limit": 50},  # Last 50 messages
+                                json={"user_id": state, "limit": 20},  # Last 50 messages
                                 timeout=300  # 5 minutes timeout
                             )
                             logger.info(f"✅ Backfill completed for user {state}")
@@ -1150,36 +1150,40 @@ def google_callback():
             # Don't fail OAuth if backfill fails
             logger.warning(f"⚠️ Could not trigger backfill for user {state}: {e}")
         
-        # 📧 EMAIL FACT EXTRACTION: Extract facts from emails after login (background workers)
-        # This runs separately from classification to ensure facts are extracted immediately after login
+        # 🎯 COMPREHENSIVE BACKFILL: Extract facts, tasks, relationships, and projects from past data
+        # This processes both emails and chat messages to build complete memory
         try:
             from app.memory.background_jobs import get_job_queue
             
-            # Enqueue email fact extraction job (non-blocking)
-            def extract_email_facts_for_new_user():
+            # Enqueue comprehensive backfill job (non-blocking)
+            def comprehensive_backfill_for_new_user():
                 import requests
                 try:
-                    logger.info(f"🔄 Starting email fact extraction for user {state}")
+                    logger.info(f"🔄 Starting comprehensive backfill for user {state}")
                     response = requests.post(
-                        "http://localhost:10000/memory/admin/backfill-email-facts",
-                        json={"user_id": state, "max_emails": 100},  # Extract facts from last 100 emails
+                        "http://localhost:10000/memory/admin/backfill-comprehensive",
+                        json={
+                            "user_id": state,
+                            "max_emails": 20,  # Process last 100 emails
+                            "max_messages": 20  # Process last 50 chat messages
+                        },
                         timeout=600  # 10 minutes timeout
                     )
                     if response.status_code == 200:
-                        logger.info(f"✅ Email fact extraction completed for user {state}")
+                        logger.info(f"✅ Comprehensive backfill completed for user {state}")
                     else:
-                        logger.error(f"❌ Email fact extraction failed for user {state}: HTTP {response.status_code}")
+                        logger.error(f"❌ Comprehensive backfill failed for user {state}: HTTP {response.status_code}")
                 except Exception as e:
-                    logger.error(f"❌ Email fact extraction failed for user {state}: {e}")
+                    logger.error(f"❌ Comprehensive backfill failed for user {state}: {e}")
             
             job_queue = get_job_queue()
             job_queue.enqueue(
-                extract_email_facts_for_new_user,
-                job_id=f"extract-email-facts-oauth-{state}"
+                comprehensive_backfill_for_new_user,
+                job_id=f"comprehensive-backfill-oauth-{state}"
             )
         except Exception as e:
-            # Don't fail OAuth if fact extraction fails
-            logger.warning(f"⚠️ Could not trigger email fact extraction for user {state}: {e}")
+            # Don't fail OAuth if backfill fails
+            logger.warning(f"⚠️ Could not trigger comprehensive backfill for user {state}: {e}")
         
         # 📧 EMAIL CLASSIFICATION: Classify existing emails on first login
         # Uses the existing classify_background endpoint (v3.0 classification only, no fact extraction)
@@ -1223,7 +1227,7 @@ def google_callback():
                             # Fact extraction happens separately via backfill-email-facts endpoint
                             response = requests.post(
                                 "http://localhost:10000/api/gmail/classify-background",
-                                json={"user_id": state, "max_emails": 200},
+                                json={"user_id": state, "max_emails": 20},
                                 timeout=600
                             )
                             
