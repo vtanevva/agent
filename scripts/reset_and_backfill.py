@@ -56,6 +56,7 @@ def reset_and_backfill(user_id: str, max_emails: int = 100):
     stats = {
         "facts_deleted": 0,
         "relationships_deleted": 0,
+        "project_contact_relationships_deleted": 0,
         "projects_deleted": 0,
         "email_tasks_deleted": 0,
     }
@@ -75,8 +76,8 @@ def reset_and_backfill(user_id: str, max_emails: int = 100):
         print(f"    [ERROR] Could not delete facts: {e}")
     print()
     
-    # 2. Delete Relationships
-    print("[2] Deleting relationships...")
+    # 2. Delete Relationships (old collection)
+    print("[2] Deleting relationships (old collection)...")
     try:
         relationships_col = db_manager.db["relationships"]
         count_before = relationships_col.count_documents({"user_id": user_id})
@@ -88,6 +89,21 @@ def reset_and_backfill(user_id: str, max_emails: int = 100):
             print(f"    [INFO] No relationships found for user '{user_id}'")
     except Exception as e:
         print(f"    [ERROR] Could not delete relationships: {e}")
+    print()
+    
+    # 2.5. Delete Project-Contact Relationships (new collection)
+    print("[2.5] Deleting project-contact relationships (new collection)...")
+    try:
+        project_contact_rels_col = db_manager.db["project_contact_relationships"]
+        count_before = project_contact_rels_col.count_documents({"user_id": user_id})
+        if count_before > 0:
+            result = project_contact_rels_col.delete_many({"user_id": user_id})
+            stats["project_contact_relationships_deleted"] = result.deleted_count
+            print(f"    [OK] Deleted {result.deleted_count} project-contact relationships")
+        else:
+            print(f"    [INFO] No project-contact relationships found for user '{user_id}'")
+    except Exception as e:
+        print(f"    [ERROR] Could not delete project-contact relationships: {e}")
     print()
     
     # 3. Delete Projects
@@ -155,6 +171,7 @@ def reset_and_backfill(user_id: str, max_emails: int = 100):
     print("=" * 70)
     print(f"Facts deleted: {stats['facts_deleted']}")
     print(f"Relationships deleted: {stats['relationships_deleted']}")
+    print(f"Project-contact relationships deleted: {stats['project_contact_relationships_deleted']}")
     print(f"Projects deleted: {stats['projects_deleted']}")
     print(f"Email tasks deleted: {stats['email_tasks_deleted']}")
     print()
@@ -227,7 +244,8 @@ if __name__ == "__main__":
     # Ask for confirmation
     print("\n[WARNING] This will:")
     print(f"  - Delete ALL facts for user '{args.user_id}'")
-    print(f"  - Delete ALL relationships for user '{args.user_id}'")
+    print(f"  - Delete ALL relationships (old collection) for user '{args.user_id}'")
+    print(f"  - Delete ALL project-contact relationships (new collection) for user '{args.user_id}'")
     print(f"  - Delete ALL projects for user '{args.user_id}'")
     print(f"  - Delete ALL email tasks for user '{args.user_id}'")
     print(f"  - Trigger comprehensive backfill to re-extract everything")

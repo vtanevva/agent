@@ -12,6 +12,7 @@ import MenuPage from './src/pages/MenuPage';
 import GmailAgentPage from './src/pages/GmailAgentPage';
 import ContactsPage from './src/pages/ContactsPage';
 import ContactDetailPage from './src/pages/ContactDetailPage';
+import ContactsWithRelationshipsPage from './src/pages/ContactsWithRelationshipsPage';
 import WaitlistPage from './src/pages/WaitlistPage';
 import TasksPage from './src/pages/TasksPage';
 import {genSession} from './src/config/api';
@@ -87,6 +88,7 @@ export default function App() {
           <Stack.Screen name="GmailAgent" component={GmailAgentPage} />
           <Stack.Screen name="Contacts" component={ContactsPage} />
           <Stack.Screen name="ContactDetail" component={ContactDetailPage} />
+          <Stack.Screen name="ContactsWithRelationships" component={ContactsWithRelationshipsPage} />
           <Stack.Screen name="Tasks" component={TasksPage} />
           <Stack.Screen name="Waitlist" component={WaitlistPage} />
         </Stack.Navigator>

@@ -798,6 +798,14 @@ export default function VoiceChat() {
               </TouchableOpacity>
               <TouchableOpacity 
                 onPress={() => {
+                  navigation.navigate('ContactsWithRelationships', {userId});
+                  setShowSidebar(false);
+                }}
+                style={styles.actionButton}>
+                <Text style={styles.actionText}>Contacts & Relationships</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                onPress={() => {
                   navigation.navigate('GmailAgent', {userId});
                   setShowSidebar(false);
                 }}

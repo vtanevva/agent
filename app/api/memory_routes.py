@@ -605,13 +605,13 @@ def health_check():
 @memory_bp.route('/admin/backfill-comprehensive', methods=['POST'])
 def backfill_comprehensive():
     """
-    Comprehensive backfill: Extract facts, tasks, relationships, and projects from past emails and messages.
+    Comprehensive backfill: Extract facts, tasks, relationships, and projects from past emails.
+    Note: Only processes emails. Chat messages are processed on-the-fly as they arrive (no backfill needed).
     
     Expected JSON body:
     {
         "user_id": "user123",  // required
-        "max_emails": 100,     // optional - default: 100
-        "max_messages": 50     // optional - default: 50 (chat messages)
+        "max_emails": 100      // optional - default: 100
     }
     
     Returns:
@@ -632,28 +632,31 @@ def backfill_comprehensive():
             }), 400
         
         max_emails = int(data.get('max_emails', 100))
-        max_messages = int(data.get('max_messages', 50))
         
         from app.services.gmail_service import extract_facts_from_email, extract_todos_from_thread
         from app.tools.email import _extract_plain_text
         from app.utils.oauth_utils import load_google_credentials
         from googleapiclient.discovery import build
-        from app.memory.models import get_messages_collection
-        from app.memory.ingestion_service import get_ingestion_service
-        from app.memory.models import MessageDirection
         import threading
         import time
         
         def run_comprehensive_backfill():
             try:
                 # Get initial counts to calculate deltas
-                from app.memory.models import get_memory_facts_collection, get_relationships_collection, get_projects_collection
+                from app.memory.models import (
+                    get_memory_facts_collection, 
+                    get_relationships_collection, 
+                    get_projects_collection,
+                    get_project_contact_relationships_collection
+                )
                 facts_col = get_memory_facts_collection()
-                relationships_col = get_relationships_collection()
+                relationships_col = get_relationships_collection()  # Old collection
+                project_relationships_col = get_project_contact_relationships_collection()  # New collection
                 projects_col = get_projects_collection()
                 
                 initial_facts_count = facts_col.count_documents({"user_id": user_id}) if facts_col else 0
                 initial_relationships_count = relationships_col.count_documents({"user_id": user_id}) if relationships_col else 0
+                initial_project_relationships_count = project_relationships_col.count_documents({"user_id": user_id}) if project_relationships_col else 0
                 initial_projects_count = projects_col.count_documents({"user_id": user_id}) if projects_col else 0
                 
                 stats = {
@@ -661,9 +664,9 @@ def backfill_comprehensive():
                     "emails_skipped": 0,  # Newsletter/marketing emails skipped
                     "facts_extracted": 0,
                     "tasks_extracted": 0,
-                    "relationships_updated": 0,
+                    "relationships_updated": 0,  # Old collection
+                    "project_relationships_created": 0,  # New collection
                     "projects_created": 0,
-                    "messages_processed": 0,
                     "skipped_categories": {}  # Track which categories were skipped
                 }
                 
@@ -759,11 +762,58 @@ def backfill_comprehensive():
                                 # Extract relationships and projects synchronously for accurate stats
                                 try:
                                     from app.services.relationships_service import get_relationships_service
-                                    relationships_service = get_relationships_service()
-                                    relationship_result = relationships_service.process_email(user_id, email_data)
+                                    from app.agents.contacts_agent import ContactsAgent
                                     
-                                    # Count if new relationships were tracked
-                                    if relationship_result.get("tracked_emails"):
+                                    relationships_service = get_relationships_service()
+                                    contacts_agent = ContactsAgent()
+                                    
+                                    relationship_result = relationships_service.process_email(user_id, email_data)
+                                    tracked_emails = relationship_result.get("tracked_emails", [])
+                                    
+                                    # Also extract sender/recipient emails directly from email_data for project-contact relationships
+                                    # This ensures we capture contacts even if they weren't tracked in the old collection
+                                    all_contact_emails = set(tracked_emails)  # Start with tracked emails
+                                    
+                                    # Log email data for debugging
+                                    sender = email_data.get('from', '')
+                                    recipients = email_data.get('to', '')
+                                    logger.debug(f"[BACKFILL] Email data - from: '{sender}', to: '{recipients}', tracked: {tracked_emails}")
+                                    
+                                    # Extract sender email
+                                    if sender:
+                                        sender_email = relationships_service._extract_email_from_string(sender)
+                                        if sender_email:
+                                            is_user_email = relationships_service._is_email_from_user(user_id, sender_email)
+                                            logger.debug(f"[BACKFILL] Sender email extracted: '{sender_email}', is_user: {is_user_email}")
+                                            if not is_user_email:
+                                                # It's a received email from someone else - add sender as contact
+                                                all_contact_emails.add(sender_email)
+                                                logger.debug(f"[BACKFILL] Added sender email: {sender_email}")
+                                    
+                                    # Extract recipient emails (for sent emails)
+                                    if recipients:
+                                        if isinstance(recipients, str):
+                                            recipient_list = [recipients]
+                                        elif isinstance(recipients, list):
+                                            recipient_list = recipients
+                                        else:
+                                            recipient_list = []
+                                        
+                                        for recipient in recipient_list:
+                                            recipient_email = relationships_service._extract_email_from_string(recipient)
+                                            if recipient_email:
+                                                is_user_email = relationships_service._is_email_from_user(user_id, recipient_email)
+                                                logger.debug(f"[BACKFILL] Recipient email extracted: '{recipient_email}', is_user: {is_user_email}")
+                                                if not is_user_email:
+                                                    all_contact_emails.add(recipient_email)
+                                                    logger.debug(f"[BACKFILL] Added recipient email: {recipient_email}")
+                                    
+                                    # Convert back to list
+                                    all_contact_emails = list(all_contact_emails)
+                                    logger.info(f"[BACKFILL] All contact emails extracted: {all_contact_emails} (from tracked: {tracked_emails}, thread: {thread_id})")
+                                    
+                                    # Count if new relationships were tracked (old collection)
+                                    if tracked_emails:
                                         # Relationship was created or updated (we'll count at the end by comparing counts)
                                         pass
                                     
@@ -772,6 +822,7 @@ def backfill_comprehensive():
                                     from uuid import uuid4
                                     projects_col = get_projects_collection()
                                     
+                                    project_name = None
                                     if projects_col and thread_id:
                                         subject = email_data.get('subject', '')
                                         # Check if thread already linked to project
@@ -780,7 +831,13 @@ def backfill_comprehensive():
                                             "related_threads": thread_id
                                         })
                                         
-                                        if not existing_project:
+                                        if existing_project:
+                                            # Project already exists for this thread - use it
+                                            project_name = existing_project.get("name")
+                                            logger.info(f"[BACKFILL] Found existing project '{project_name}' for thread {thread_id}")
+                                        else:
+                                            logger.debug(f"[BACKFILL] No existing project found for thread {thread_id}")
+                                            # Check if subject suggests a project
                                             # Check if subject suggests a project
                                             project_keywords = ["project", "launch", "initiative", "campaign", "feature", "release", "sprint", "milestone"]
                                             subject_lower = subject.lower()
@@ -809,12 +866,49 @@ def backfill_comprehensive():
                                                     },
                                                     upsert=True
                                                 )
+                                                stats["projects_created"] += 1
                                                 
-                                                # Link recipient(s) to project if we have relationships
-                                                recipient_emails = relationship_result.get("tracked_emails", [])
-                                                if recipient_emails:
-                                                    for recipient_email in recipient_emails:
+                                                # Link recipient(s) to project if we have relationships (old collection)
+                                                if tracked_emails:
+                                                    for recipient_email in tracked_emails:
                                                         relationships_service.link_project(user_id, recipient_email, project_name)
+                                    # Note: project_name is already set above if existing_project was found
+                                    if not project_name:
+                                        # Check if project already exists (might be created in a previous email)
+                                        if projects_col and thread_id:
+                                            existing = projects_col.find_one({
+                                                "user_id": user_id,
+                                                "related_threads": thread_id
+                                            })
+                                            if existing:
+                                                project_name = existing.get("name")
+                                                logger.debug(f"[BACKFILL] Found existing project '{project_name}' for thread {thread_id} (fallback check)")
+                                    
+                                    # Create relationships in NEW collection (project_contact_relationships)
+                                    # Create relationships even if we have contacts OR projects (or both)
+                                    if all_contact_emails or project_name:
+                                        try:
+                                            # Use msg_id from the loop scope, or thread_id as fallback
+                                            source_message_id = f"{thread_id}_{msg_id}" if msg_id else thread_id
+                                            
+                                            # Log what we're about to create
+                                            logger.debug(f"[BACKFILL] Creating relationship: project_name='{project_name}', contacts={all_contact_emails}, thread={thread_id}")
+                                            
+                                            # Create relationship in new collection
+                                            rel_result = contacts_agent.create_or_update_relationship(
+                                                user_id=user_id,
+                                                projects=[project_name] if project_name else None,
+                                                contacts=all_contact_emails if all_contact_emails else None,
+                                                source_message_id=source_message_id,
+                                                source="email",
+                                            )
+                                            if rel_result:
+                                                logger.info(f"[BACKFILL] Created/updated relationship: projects={[project_name] if project_name else []}, contacts={all_contact_emails}, thread_id={thread_id}")
+                                            else:
+                                                logger.warning(f"[BACKFILL] Failed to create relationship: projects={[project_name] if project_name else []}, contacts={all_contact_emails}")
+                                        except Exception as e:
+                                            logger.warning(f"[BACKFILL] Failed to create relationship in new collection: {e}")
+                                    
                                 except Exception as e:
                                     logger.warning(f"Relationship/project extraction failed for thread {thread_id}: {e}")
                                 
@@ -842,116 +936,8 @@ def backfill_comprehensive():
                     except Exception as e:
                         logger.error(f"Gmail backfill failed: {e}")
                 
-                # ===== 2. BACKFILL FROM CHAT MESSAGES =====
-                messages_col = get_messages_collection()
-                if messages_col:
-                    logger.info(f"[BACKFILL] Processing up to {max_messages} chat messages (user: {user_id})")
-                    
-                    # Get recent incoming messages
-                    recent_messages = list(messages_col.find(
-                        {
-                            "user_id": user_id,
-                            "direction": "in"  # Only incoming messages
-                        }
-                    ).sort("ts", -1).limit(max_messages))
-                    
-                    ingestion_service = get_ingestion_service()
-                    
-                    for msg in recent_messages:
-                        try:
-                            text = msg.get("text", "").strip()
-                            if not text or len(text) < 10:  # Skip very short messages
-                                continue
-                            
-                            thread_id = msg.get("thread_id", f"chat_{msg.get('_id')}")
-                            
-                            # Ingest message to extract facts
-                            ingestion_service.ingest_message(
-                                user_id=user_id,
-                                thread_id=thread_id,
-                                channel=msg.get("channel", "web_chat"),
-                                direction=MessageDirection.INCOMING,
-                                text=text,
-                                extract_facts=True,
-                            )
-                            
-                            stats["messages_processed"] += 1
-                            
-                            # Extract tasks from message if it contains task keywords
-                            task_keywords = ["todo", "task", "remind me", "need to", "should", "must", "have to"]
-                            if any(keyword in text.lower() for keyword in task_keywords):
-                                try:
-                                    from app.memory.models import get_tasks_collection
-                                    from app.services.llm_service import get_llm_service
-                                    from uuid import uuid4
-                                    import json
-                                    import re
-                                    
-                                    llm_service = get_llm_service()
-                                    task_prompt = f"""Extract any actionable tasks from this message. Return JSON:
-{{
-    "tasks": [
-        {{"title": "Task description", "priority": "high|medium|low"}}
-    ]
-}}
-
-Message: {text}
-
-If no clear task, return {{"tasks": []}}"""
-                                    
-                                    task_response = llm_service.chat_completion_text(
-                                        messages=[
-                                            {"role": "system", "content": "Extract tasks from messages. Return only JSON."},
-                                            {"role": "user", "content": task_prompt}
-                                        ],
-                                        temperature=0.1,
-                                        max_tokens=200
-                                    )
-                                    
-                                    task_data = {}
-                                    try:
-                                        task_data = json.loads(task_response)
-                                    except json.JSONDecodeError:
-                                        json_match = re.search(r'\{[\s\S]*\}', task_response)
-                                        if json_match:
-                                            task_data = json.loads(json_match.group(0))
-                                    
-                                    tasks_col = get_tasks_collection()
-                                    if tasks_col and task_data.get("tasks"):
-                                        for task_item in task_data["tasks"]:
-                                            task_title = task_item.get("title", "").strip()
-                                            if not task_title:
-                                                continue
-                                            
-                                            # Check if task already exists
-                                            existing = tasks_col.find_one({
-                                                "user_id": user_id,
-                                                "title": task_title[:200],
-                                                "status": {"$ne": "completed"}
-                                            })
-                                            
-                                            if not existing:
-                                                task = {
-                                                    "_id": str(uuid4()),
-                                                    "user_id": user_id,
-                                                    "title": task_title[:200],
-                                                    "status": "pending",
-                                                    "priority": task_item.get("priority", "medium"),
-                                                    "source": "chat",
-                                                    "source_ref": thread_id,
-                                                    "created_at": datetime.utcnow(),
-                                                    "updated_at": datetime.utcnow()
-                                                }
-                                                tasks_col.insert_one(task)
-                                                stats["tasks_extracted"] += 1
-                                except Exception as e:
-                                    logger.warning(f"Task extraction from message failed: {e}")
-                            
-                        except Exception as e:
-                            logger.warning(f"Error processing message {msg.get('_id')}: {e}")
-                            continue
-                    
-                    logger.info(f"[BACKFILL] Processed {stats['messages_processed']} messages")
+                # Note: Chat messages are NOT backfilled - only new messages are processed on-the-fly
+                # as they arrive. This keeps the memory system focused on current conversations.
                 
                 # Wait for background threads to complete (facts extraction)
                 # Wait time scales with number of emails processed
@@ -962,16 +948,19 @@ If no clear task, return {{"tasks": []}}"""
                 # Calculate final stats
                 final_facts_count = facts_col.count_documents({"user_id": user_id}) if facts_col else 0
                 final_relationships_count = relationships_col.count_documents({"user_id": user_id}) if relationships_col else 0
+                final_project_relationships_count = project_relationships_col.count_documents({"user_id": user_id}) if project_relationships_col else 0
                 final_projects_count = projects_col.count_documents({"user_id": user_id}) if projects_col else 0
                 
                 stats["facts_extracted"] = max(0, final_facts_count - initial_facts_count)
                 stats["relationships_updated"] = max(0, final_relationships_count - initial_relationships_count)
+                stats["project_relationships_created"] = max(0, final_project_relationships_count - initial_project_relationships_count)
                 stats["projects_created"] = max(0, final_projects_count - initial_projects_count)
                 
                 logger.info(f"[BACKFILL] Comprehensive backfill completed for user {user_id}")
                 logger.info(f"[BACKFILL] Stats: {stats}")
                 logger.info(f"[BACKFILL] Total facts: {final_facts_count} (new: {stats['facts_extracted']})")
-                logger.info(f"[BACKFILL] Total relationships: {final_relationships_count} (new: {stats['relationships_updated']})")
+                logger.info(f"[BACKFILL] Total relationships (old): {final_relationships_count} (new: {stats['relationships_updated']})")
+                logger.info(f"[BACKFILL] Total project-contact relationships (new): {final_project_relationships_count} (new: {stats['project_relationships_created']})")
                 logger.info(f"[BACKFILL] Total projects: {final_projects_count} (new: {stats['projects_created']})")
                 logger.info(f"[BACKFILL] Emails processed: {stats['emails_processed']}, skipped: {stats.get('emails_skipped', 0)}")
                 if stats.get("skipped_categories"):
@@ -988,8 +977,7 @@ If no clear task, return {{"tasks": []}}"""
             "success": True,
             "message": "Comprehensive backfill started in background",
             "user_id": user_id,
-            "max_emails": max_emails,
-            "max_messages": max_messages
+            "max_emails": max_emails
         })
         
     except Exception as e:

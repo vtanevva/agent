@@ -1164,8 +1164,7 @@ def google_callback():
                         "http://localhost:10000/memory/admin/backfill-comprehensive",
                         json={
                             "user_id": state,
-                            "max_emails": 20,  # Process last 100 emails
-                            "max_messages": 20  # Process last 50 chat messages
+                            "max_emails": 20  # Process last 20 emails
                         },
                         timeout=600  # 10 minutes timeout
                     )

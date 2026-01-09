@@ -136,11 +136,20 @@ def get_truth_ledger_collection():
 
 
 def get_relationships_collection():
-    """Get relationships collection"""
+    """Get relationships collection (legacy - contact-centric structure)"""
     from app.database import get_db
     db = get_db()
     if db.is_connected and db.db is not None:
         return db.db["relationships"]
+    return None
+
+
+def get_project_contact_relationships_collection():
+    """Get project-contact relationships collection (new structure)"""
+    from app.database import get_db
+    db = get_db()
+    if db.is_connected and db.db is not None:
+        return db.db["project_contact_relationships"]
     return None
 
 
@@ -214,12 +223,20 @@ def ensure_indexes():
         truth_ledger.create_index([("user_id", 1), ("changed_at", -1)])
         truth_ledger.create_index([("reason", 1)])
         
-        # Relationships collection
+        # Relationships collection (legacy)
         relationships = db.db["relationships"]
         relationships.create_index([("user_id", 1), ("contact_email", 1)], unique=True)
         relationships.create_index([("user_id", 1), ("importance", 1)])
         relationships.create_index([("user_id", 1), ("last_contact", -1)])
         relationships.create_index([("relationship_type", 1)])
+        
+        # Project-Contact Relationships collection (new structure)
+        project_contact_relationships = db.db["project_contact_relationships"]
+        project_contact_relationships.create_index([("user_id", 1)])
+        project_contact_relationships.create_index([("user_id", 1), ("projects", 1)])
+        project_contact_relationships.create_index([("user_id", 1), ("contacts", 1)])
+        project_contact_relationships.create_index([("user_id", 1), ("sources", 1)])
+        project_contact_relationships.create_index([("source_message_ids", 1)])
         
         logger.info("✅ Memory system indexes created successfully")
         
@@ -368,6 +385,19 @@ RELATIONSHIP_SCHEMA = {
     "related_tasks": List[str],  # Task IDs this contact is associated with
     "related_facts": List[str],  # Fact IDs related to this contact
     "related_threads": List[str],  # Email thread IDs involving this contact
+    "created_at": datetime,
+    "updated_at": datetime,
+}
+
+PROJECT_CONTACT_RELATIONSHIP_SCHEMA = {
+    "_id": str,  # relationship_id
+    "user_id": str,
+    "projects": List[str],  # Project IDs or names
+    "contacts": List[str],  # Contact emails
+    "source_message_ids": List[str],  # Source message IDs that created this relationship
+    "sources": List[str],  # Source types: "email", "chat", "calendar", "manual", etc.
+    "notes": List[str],  # Notes about this relationship
+    "description": Optional[str],  # Description of the relationship
     "created_at": datetime,
     "updated_at": datetime,
 }

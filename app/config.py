@@ -40,6 +40,7 @@ class Config:
     # LLM Configuration
     # ═══════════════════════════════════════════════════════════════════
     
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai")  # openai | anthropic | azure
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     OPENAI_TEMPERATURE: float = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))
@@ -76,7 +77,8 @@ class Config:
         "https://www.googleapis.com/auth/calendar.readonly",
     ]
     
-    # Frontend base URL (used for some redirects / links)
+    # OAuth redirect URLs
+    OAUTH_REDIRECT_URI: Optional[str] = os.getenv("OAUTH_REDIRECT_URI")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
     
     # ═══════════════════════════════════════════════════════════════════
@@ -94,6 +96,14 @@ class Config:
     ]
     
     # ═══════════════════════════════════════════════════════════════════
+    # Instagram/Facebook OAuth
+    # ═══════════════════════════════════════════════════════════════════
+    
+    IG_APP_ID: Optional[str] = os.getenv("IG_APP_ID")
+    IG_APP_SECRET: Optional[str] = os.getenv("IG_APP_SECRET")
+    IG_SCOPES = ["instagram_basic", "instagram_manage_messages", "pages_show_list", "pages_messaging"]
+    
+    # ═══════════════════════════════════════════════════════════════════
     # Rate Limiting
     # ═══════════════════════════════════════════════════════════════════
     
@@ -105,6 +115,8 @@ class Config:
     # ═══════════════════════════════════════════════════════════════════
     
     ENABLE_MEMORY: bool = os.getenv("ENABLE_MEMORY", "true").lower() in ("true", "1", "yes")
+    ENABLE_RAG: bool = os.getenv("ENABLE_RAG", "false").lower() in ("true", "1", "yes")
+    ENABLE_AUTOGEN: bool = os.getenv("ENABLE_AUTOGEN", "false").lower() in ("true", "1", "yes")
     
     # ═══════════════════════════════════════════════════════════════════
     # Helper Methods
@@ -137,6 +149,9 @@ class Config:
             if not cls.MONGO_URI:
                 missing.append("MONGO_URI (production)")
             
+            if not cls.OAUTH_REDIRECT_URI:
+                missing.append("OAUTH_REDIRECT_URI (production)")
+        
         return missing
     
     @classmethod
@@ -160,6 +175,7 @@ class Config:
         print(f"Environment: {cls.APP_ENV}")
         print(f"Debug Mode: {cls.DEBUG}")
         print(f"Log Level: {cls.LOG_LEVEL}")
+        print(f"LLM Provider: {cls.LLM_PROVIDER}")
         print(f"LLM Model: {cls.OPENAI_MODEL}")
         print(f"MongoDB: {'Connected' if cls.MONGO_URI else 'Not configured'}")
         print(f"Pinecone: {'Enabled' if cls.PINECONE_API_KEY else 'Disabled'}")

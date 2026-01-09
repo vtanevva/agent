@@ -247,7 +247,6 @@ def chat():
             from app.memory.models import get_tasks_collection
             from app.services.llm_service import get_llm_service
             from uuid import uuid4
-            import json
             
             # Check if message contains task-like language
             task_keywords = ["todo", "task", "remind me", "need to", "should", "must", "have to", "don't forget"]
