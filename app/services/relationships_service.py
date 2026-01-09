@@ -144,7 +144,6 @@ class RelationshipsService:
                             "contact_email": recipient_email,
                             "importance": "medium",
                             "relationship_type": "contact",
-                            "related_threads": [thread_id],
                             "related_projects": [],
                             "related_tasks": [],
                             "related_facts": [],

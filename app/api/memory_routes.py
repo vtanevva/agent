@@ -611,7 +611,7 @@ def backfill_comprehensive():
     Expected JSON body:
     {
         "user_id": "user123",  // required
-        "max_emails": 100      // optional - default: 100
+        "max_emails": 20      // optional - default: 20
     }
     
     Returns:
@@ -631,7 +631,7 @@ def backfill_comprehensive():
                 "error": "user_id required"
             }), 400
         
-        max_emails = int(data.get('max_emails', 100))
+        max_emails = int(data.get('max_emails', 20))
         
         from app.services.gmail_service import extract_facts_from_email, extract_todos_from_thread
         from app.tools.email import _extract_plain_text
@@ -770,28 +770,28 @@ def backfill_comprehensive():
                                     relationship_result = relationships_service.process_email(user_id, email_data)
                                     tracked_emails = relationship_result.get("tracked_emails", [])
                                     
-                                    # Also extract sender/recipient emails directly from email_data for project-contact relationships
-                                    # This ensures we capture contacts even if they weren't tracked in the old collection
-                                    all_contact_emails = set(tracked_emails)  # Start with tracked emails
+                                    # Extract sender/recipient emails directly from email_data for project-contact relationships
+                                    # Only include contacts with bidirectional communication (both sent and received)
+                                    potential_contacts = set()
                                     
                                     # Log email data for debugging
                                     sender = email_data.get('from', '')
                                     recipients = email_data.get('to', '')
-                                    logger.debug(f"[BACKFILL] Email data - from: '{sender}', to: '{recipients}', tracked: {tracked_emails}")
+                                    email_sent_by_user = relationship_result.get("email_sent_by_user", False)
                                     
-                                    # Extract sender email
-                                    if sender:
+                                    logger.debug(f"[BACKFILL] Email data - from: '{sender}', to: '{recipients}', sent_by_user: {email_sent_by_user}, tracked: {tracked_emails}")
+                                    
+                                    # Extract sender email (for received emails)
+                                    if sender and not email_sent_by_user:
                                         sender_email = relationships_service._extract_email_from_string(sender)
                                         if sender_email:
                                             is_user_email = relationships_service._is_email_from_user(user_id, sender_email)
-                                            logger.debug(f"[BACKFILL] Sender email extracted: '{sender_email}', is_user: {is_user_email}")
                                             if not is_user_email:
-                                                # It's a received email from someone else - add sender as contact
-                                                all_contact_emails.add(sender_email)
-                                                logger.debug(f"[BACKFILL] Added sender email: {sender_email}")
+                                                potential_contacts.add(('received', sender_email))
+                                                logger.debug(f"[BACKFILL] Received email from: {sender_email}")
                                     
                                     # Extract recipient emails (for sent emails)
-                                    if recipients:
+                                    if recipients and email_sent_by_user:
                                         if isinstance(recipients, str):
                                             recipient_list = [recipients]
                                         elif isinstance(recipients, list):
@@ -803,14 +803,84 @@ def backfill_comprehensive():
                                             recipient_email = relationships_service._extract_email_from_string(recipient)
                                             if recipient_email:
                                                 is_user_email = relationships_service._is_email_from_user(user_id, recipient_email)
-                                                logger.debug(f"[BACKFILL] Recipient email extracted: '{recipient_email}', is_user: {is_user_email}")
                                                 if not is_user_email:
-                                                    all_contact_emails.add(recipient_email)
-                                                    logger.debug(f"[BACKFILL] Added recipient email: {recipient_email}")
+                                                    potential_contacts.add(('sent', recipient_email))
+                                                    logger.debug(f"[BACKFILL] Sent email to: {recipient_email}")
                                     
-                                    # Convert back to list
-                                    all_contact_emails = list(all_contact_emails)
-                                    logger.info(f"[BACKFILL] All contact emails extracted: {all_contact_emails} (from tracked: {tracked_emails}, thread: {thread_id})")
+                                    # Check for bidirectional communication
+                                    # Only include contacts where user has both sent AND received emails
+                                    from app.memory.models import get_relationships_collection
+                                    old_relationships_col = get_relationships_collection()
+                                    
+                                    all_contact_emails = []
+                                    
+                                    # Group potential contacts by email and direction
+                                    contact_sent = set()  # Emails we sent to
+                                    contact_received = set()  # Emails we received from
+                                    
+                                    for direction, email in potential_contacts:
+                                        if direction == 'sent':
+                                            contact_sent.add(email)
+                                        elif direction == 'received':
+                                            contact_received.add(email)
+                                    
+                                    # Check each potential contact for bidirectional communication
+                                    # Use old relationships collection which tracks both sent and received interactions
+                                    if old_relationships_col:
+                                        # First, check if any contacts were just tracked (meaning relationship was created/updated)
+                                        tracked_emails_lower = {e.lower() for e in tracked_emails}
+                                        
+                                        for contact_email in contact_sent | contact_received:
+                                            contact_email_lower = contact_email.lower()
+                                            
+                                            # If this contact was just tracked, it means we have a relationship
+                                            if contact_email_lower in tracked_emails_lower:
+                                                # Relationship was just created/updated - check if it has contact_count > 0
+                                                relationship = old_relationships_col.find_one({
+                                                    "user_id": user_id,
+                                                    "contact_email": contact_email_lower
+                                                })
+                                                
+                                                if relationship:
+                                                    contact_count = relationship.get("contact_count", 0)
+                                                    if contact_count > 0:
+                                                        all_contact_emails.append(contact_email)
+                                                        logger.info(f"[BACKFILL] Bidirectional contact confirmed (just tracked): {contact_email} (interactions: {contact_count})")
+                                                    else:
+                                                        logger.debug(f"[BACKFILL] Skipping contact with no interaction count: {contact_email}")
+                                                else:
+                                                    logger.debug(f"[BACKFILL] Contact was tracked but relationship not found in DB: {contact_email}")
+                                            else:
+                                                # Check if relationship exists from previous interactions
+                                                relationship = old_relationships_col.find_one({
+                                                    "user_id": user_id,
+                                                    "contact_email": contact_email_lower
+                                                })
+                                                
+                                                if relationship:
+                                                    # Relationship exists - this means we've had bidirectional communication
+                                                    # (relationships are only created/updated when there's real email exchange)
+                                                    contact_count = relationship.get("contact_count", 0)
+                                                    if contact_count > 0:
+                                                        all_contact_emails.append(contact_email)
+                                                        logger.info(f"[BACKFILL] Bidirectional contact confirmed (existing relationship): {contact_email} (interactions: {contact_count})")
+                                                    else:
+                                                        logger.debug(f"[BACKFILL] Skipping contact with no interaction count: {contact_email}")
+                                                else:
+                                                    # No relationship exists yet - skip this contact
+                                                    # We only want contacts with real bidirectional communication
+                                                    logger.debug(f"[BACKFILL] Skipping contact without existing relationship (no bidirectional communication yet): {contact_email}")
+                                    else:
+                                        # Fallback: if relationships collection not available, 
+                                        # only include if contact appears in both sent and received in current batch
+                                        # (This is a weaker check but better than nothing)
+                                        all_contact_emails = list(contact_sent & contact_received)
+                                        if all_contact_emails:
+                                            logger.warning(f"[BACKFILL] Relationships collection not available, using fallback: {all_contact_emails}")
+                                        else:
+                                            logger.warning(f"[BACKFILL] Relationships collection not available and no bidirectional contacts in current batch")
+                                    
+                                    logger.info(f"[BACKFILL] Bidirectional contacts extracted: {all_contact_emails} (from potential: {len(potential_contacts)}, thread: {thread_id})")
                                     
                                     # Count if new relationships were tracked (old collection)
                                     if tracked_emails:
@@ -993,7 +1063,7 @@ def backfill_email_facts():
     Expected JSON body:
     {
         "user_id": "user123",  // required
-        "max_emails": 100      // optional - default: 100
+        "max_emails": 20      // optional - default: 20
     }
     
     Returns:
@@ -1001,7 +1071,7 @@ def backfill_email_facts():
         "success": true,
         "message": "Backfill started",
         "user_id": "user123",
-        "max_emails": 100
+        "max_emails": 20
     }
     """
     try:
@@ -1014,7 +1084,7 @@ def backfill_email_facts():
                 "error": "user_id required"
             }), 400
         
-        max_emails = int(data.get('max_emails', 100))
+        max_emails = int(data.get('max_emails', 20))
         
         # Extract facts directly from emails (no classification needed)
         from app.services.gmail_service import extract_facts_from_email
@@ -1033,11 +1103,11 @@ def backfill_email_facts():
                 
                 service = build("gmail", "v1", credentials=creds)
                 
-                # Fetch recent emails from inbox
+                # Fetch recent emails from inbox and sent
                 logger.info(f"Fetching up to {max_emails} emails for fact extraction (user: {user_id})")
                 resp = service.users().messages().list(
                     userId="me",
-                    q="in:inbox -from:me",
+                    q="in:inbox OR in:sent",  # Include both received and sent emails
                     maxResults=max_emails * 2,  # Fetch more to account for threads
                 ).execute()
                 

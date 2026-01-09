@@ -64,51 +64,67 @@ def contacts_with_relationships():
             logger.info(f"[CONTACTS API] First relationship: projects={relationships[0].get('projects')}, contacts={relationships[0].get('contacts')}")
         
         # Format relationships - expand project-contact combinations
+        # Show ALL relationships: with projects, with contacts, or both
         project_contact_rels = []
         for rel in relationships:
             rel_projects = [p for p in (rel.get("projects", []) or []) if p and str(p).strip()]
             rel_contacts = [c for c in (rel.get("contacts", []) or []) if c and str(c).strip()]
             
-            # Show relationships even if contacts is empty (project without contacts assigned)
-            if rel_projects:
+            created_at = rel.get("created_at")
+            updated_at = rel.get("updated_at")
+            if isinstance(created_at, datetime):
+                created_at = created_at.isoformat()
+            if isinstance(updated_at, datetime):
+                updated_at = updated_at.isoformat()
+            
+            # If we have both projects and contacts, create entries for each combination
+            if rel_projects and rel_contacts:
                 for project in rel_projects:
-                    # If no contacts, show project with empty contact
-                    if rel_contacts:
-                        for contact_email in rel_contacts:
-                            created_at = rel.get("created_at")
-                            updated_at = rel.get("updated_at")
-                            if isinstance(created_at, datetime):
-                                created_at = created_at.isoformat()
-                            if isinstance(updated_at, datetime):
-                                updated_at = updated_at.isoformat()
-                            
-                            project_contact_rels.append({
-                                "project": project,
-                                "contact_email": contact_email,
-                                "description": rel.get("description"),
-                                "notes": rel.get("notes", []),
-                                "sources": rel.get("sources", []),
-                                "created_at": created_at,
-                                "updated_at": updated_at
-                            })
-                    else:
-                        # Project exists but no contacts assigned
-                        created_at = rel.get("created_at")
-                        updated_at = rel.get("updated_at")
-                        if isinstance(created_at, datetime):
-                            created_at = created_at.isoformat()
-                        if isinstance(updated_at, datetime):
-                            updated_at = updated_at.isoformat()
-                        
+                    for contact_email in rel_contacts:
                         project_contact_rels.append({
                             "project": project,
-                            "contact_email": "(No contacts assigned)",
+                            "contact_email": contact_email,
                             "description": rel.get("description"),
                             "notes": rel.get("notes", []),
                             "sources": rel.get("sources", []),
                             "created_at": created_at,
                             "updated_at": updated_at
                         })
+            # If we have projects but no contacts
+            elif rel_projects:
+                for project in rel_projects:
+                    project_contact_rels.append({
+                        "project": project,
+                        "contact_email": "(No contacts assigned)",
+                        "description": rel.get("description"),
+                        "notes": rel.get("notes", []),
+                        "sources": rel.get("sources", []),
+                        "created_at": created_at,
+                        "updated_at": updated_at
+                    })
+            # If we have contacts but no projects
+            elif rel_contacts:
+                for contact_email in rel_contacts:
+                    project_contact_rels.append({
+                        "project": "(No project assigned)",
+                        "contact_email": contact_email,
+                        "description": rel.get("description"),
+                        "notes": rel.get("notes", []),
+                        "sources": rel.get("sources", []),
+                        "created_at": created_at,
+                        "updated_at": updated_at
+                    })
+            # If we have neither (shouldn't happen, but handle it)
+            else:
+                project_contact_rels.append({
+                    "project": "(No project assigned)",
+                    "contact_email": "(No contacts assigned)",
+                    "description": rel.get("description"),
+                    "notes": rel.get("notes", []),
+                    "sources": rel.get("sources", []),
+                    "created_at": created_at,
+                    "updated_at": updated_at
+                })
         
         return jsonify({
             "success": True,
