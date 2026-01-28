@@ -31,14 +31,8 @@ export default function ChatPage() {
   const navigation = useNavigation();
   const {userId, sessionId} = route.params || {};
   
-  // Redirect to Login if params are missing
-  useEffect(() => {
-    if (!userId || !sessionId) {
-      console.warn('ChatPage: Missing userId or sessionId, redirecting to Login');
-      navigation.replace('Login');
-    }
-  }, [userId, sessionId, navigation]);
-  
+  // All state declarations first (React hooks rules)
+  const [isParamsReady, setIsParamsReady] = useState(false);
   const [chat, setChat] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -63,7 +57,10 @@ export default function ChatPage() {
   const chatRef = useRef(null);
   const lastUserMessage = useRef('');
   const sidebarAnim = useRef(new Animated.Value(-280)).current;
-
+  const hasCheckedParams = useRef(false);
+  
+  // ========== ALL HOOKS MUST BE CALLED BEFORE ANY CONDITIONAL RETURNS ==========
+  
   // Animate sidebar
   useEffect(() => {
     Animated.timing(sidebarAnim, {
@@ -71,7 +68,7 @@ export default function ChatPage() {
       duration: 300,
       useNativeDriver: true,
     }).start();
-  }, [showSidebar]);
+  }, [showSidebar, sidebarAnim]);
 
   // Load chat history
   const loadSessionChat = useCallback(async (sessionId) => {
@@ -411,6 +408,34 @@ export default function ChatPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [emailChoices, currentEmailIndex]);
 
+  // Wait for params to be ready (handles OAuth redirect timing) - MUST BE LAST HOOK
+  useEffect(() => {
+    console.log('ChatPage useEffect - checking params:', {userId, sessionId, hasChecked: hasCheckedParams.current});
+    
+    // Only check params once on mount (prevents re-checking when switching sessions)
+    if (hasCheckedParams.current) {
+      console.log('ChatPage: Already checked params, skipping');
+      return;
+    }
+    
+    // Give React Navigation time to populate params from URL (for OAuth redirects)
+    const timer = setTimeout(() => {
+      hasCheckedParams.current = true;
+      setIsParamsReady(true);
+      console.log('ChatPage: Params ready after delay', {userId, sessionId});
+      if (!userId || !sessionId) {
+        console.warn('ChatPage: Missing userId or sessionId after delay, redirecting to Login');
+        navigation.replace('Login');
+      } else {
+        console.log('ChatPage: Params valid, rendering chat interface');
+      }
+    }, 150);
+    
+    return () => clearTimeout(timer);
+  }, [userId, sessionId, navigation]);
+
+  // ========== ALL HOOKS COMPLETE - NOW REGULAR FUNCTIONS ==========
+
   const handleNewChat = () => {
     const newSessionId = `${userId}-${Math.random().toString(36).substring(2, 8)}`;
     setChat([]);
@@ -443,6 +468,22 @@ export default function ChatPage() {
   const handleCheckCalendar = async () => {
     await handleSend('Show my calendar events');
   };
+
+  // Show loading while waiting for params (prevents white screen during OAuth redirect)
+  if (!isParamsReady || !userId || !sessionId) {
+    console.log('ChatPage: Showing loading screen', {isParamsReady, userId, sessionId});
+    return (
+      <SafeAreaView style={[styles.container, {justifyContent: 'center', alignItems: 'center'}]}>
+        <LinearGradient
+          colors={[colors.primary[50], colors.primary[100]]}
+          style={{flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center'}}>
+          <Text style={{color: colors.primary[900], fontSize: 16}}>Loading...</Text>
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
+  
+  console.log('ChatPage: Rendering main chat interface', {userId, sessionId});
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -549,7 +590,7 @@ export default function ChatPage() {
               
               {/* Gmail Connection */}
               <View style={{marginBottom: 12}}>
-                <Text style={{fontSize: 14, fontWeight: '600', marginBottom: 6, color: colors.text.primary}}>Gmail</Text>
+                <Text style={{fontSize: 14, fontWeight: '600', marginBottom: 6, color: colors.primary[900]}}>Gmail</Text>
                 {googleConnected ? (
                   <View style={styles.connectionStatus}>
                     <Text style={styles.connectionText}>
@@ -583,7 +624,7 @@ export default function ChatPage() {
               
               {/* Outlook Connection */}
               <View>
-                <Text style={{fontSize: 14, fontWeight: '600', marginBottom: 6, color: colors.text.primary}}>Outlook</Text>
+                <Text style={{fontSize: 14, fontWeight: '600', marginBottom: 6, color: colors.primary[900]}}>Outlook</Text>
                 {outlookConnected ? (
                   <View style={styles.connectionStatus}>
                     <Text style={styles.connectionText}>
@@ -1005,6 +1046,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: 'hidden',
     ...commonStyles.shadowMd,
+  },
+  buttonGradient: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+  },
+  buttonText: {
+    color: colors.primary[50],
+    fontSize: 14,
+    fontWeight: '600',
   },
   chatArea: {
     flex: 1,

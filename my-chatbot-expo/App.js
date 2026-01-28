@@ -70,7 +70,13 @@ export default function App() {
             screens: {
               Waitlist: 'waitlist',
               Login: '',
-              // Don't include Chat here - LoginPage will handle /chat navigation manually
+              Chat: {
+                path: 'chat',
+                parse: {
+                  userId: (userId) => userId,
+                  sessionId: (sessionId) => sessionId,
+                },
+              },
             },
           },
         }}>
