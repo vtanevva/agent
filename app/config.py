@@ -91,6 +91,8 @@ class Config:
     MICROSOFT_SCOPES = [
         "Calendars.ReadWrite",
         "Calendars.ReadWrite.Shared",
+        "Mail.ReadWrite",  # Read and write mail
+        "Mail.Send",  # Send mail
         "User.Read",
         "offline_access",  # For refresh tokens
     ]

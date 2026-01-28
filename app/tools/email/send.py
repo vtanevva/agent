@@ -1,42 +1,40 @@
-﻿"""Tool: send_email â€” send a fresh Gmail message."""
+﻿"""Tool: send_email — send a fresh email message (Gmail or Outlook)."""
 
-import json
-import base64
-from email.mime.text import MIMEText
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-from google.oauth2.credentials import Credentials
+from typing import Optional
 
-# Tool registry removed - agents call functions directly now
 from app.utils.tool_registry import register, ToolSchema
-from app.utils.google_api_helpers import get_gmail_service
+from app.services.email.unified_service import send_email as unified_send_email
 
 
-def send_email(user_id: str, to: str, subject: str | None = None, body: str | None = None):
+def send_email(
+    user_id: str,
+    to: str,
+    subject: Optional[str] = None,
+    body: Optional[str] = None,
+    provider: Optional[str] = None,
+):
+    """
+    Send an email using the user's default or specified email provider.
+    
+    Uses unified email service to support both Gmail and Outlook.
+    """
     subject = subject or "(No subject)"
     body = body or "Hello,\n\nBest regards"
+    
     try:
-        svc = get_gmail_service(user_id)
-    except Exception as e:
-        return f"Error: Gmail service unavailable - {e}"
-
-    try:
-        mime = MIMEText(body)
-        mime["to"] = to
-        mime["subject"] = subject
-
-        raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
-        message = {"raw": raw}
-        svc.users().messages().send(userId="me", body=message).execute()
-
-        return f"Email sent to {to}."
-    except HttpError as e:
-        error_msg = f"Gmail API error: {e}"
-        if e.resp.status == 403:
-            return f"Error: Permission denied. Please check Gmail API permissions. {error_msg}"
-        elif e.resp.status == 400:
-            return f"Error: Invalid request. Please check recipient email address. {error_msg}"
-        return f"Error: {error_msg}"
+        result = unified_send_email(
+            user_id=user_id,
+            to=to,
+            subject=subject,
+            body=body,
+            provider=provider,
+        )
+        
+        if result.get("success"):
+            return f"Email sent to {to}."
+        else:
+            return f"Error: {result.get('error', 'Failed to send email')}"
+            
     except Exception as e:
         return f"Error: Failed to send email - {str(e)}"
 
@@ -46,7 +44,7 @@ register(
     send_email,
     ToolSchema(
         name="send_email",
-        description="Send an email via the user's Gmail account.",
+        description="Send an email via the user's email account (Gmail or Outlook).",
         parameters={
             "type": "object",
             "properties": {

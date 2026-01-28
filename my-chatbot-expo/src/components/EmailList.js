@@ -47,6 +47,16 @@ export default function EmailList({emails, onSelect, onArchive, onDone, hiddenTh
                     <Text style={styles.emailFrom} numberOfLines={1}>
                       {email.from?.replace(/<[^>]*>/g, '').trim() || 'Unknown'}
                     </Text>
+                    {email.source && (
+                      <View style={[
+                        styles.providerBadge,
+                        email.source === 'gmail' ? styles.gmailBadge : styles.outlookBadge
+                      ]}>
+                        <Text style={styles.providerBadgeText}>
+                          {email.source === 'gmail' ? 'G' : 'O'}
+                        </Text>
+                      </View>
+                    )}
                     {email.idx && (
                       <View style={styles.badge}>
                         <Text style={styles.badgeText}>#{email.idx}</Text>
@@ -154,6 +164,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: colors.primary[900],
+  },
+  providerBadge: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 4,
+  },
+  gmailBadge: {
+    backgroundColor: '#EA4335',
+  },
+  outlookBadge: {
+    backgroundColor: '#0078d4',
+  },
+  providerBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   badge: {
     backgroundColor: colors.primary[200] + '80',

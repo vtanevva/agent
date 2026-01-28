@@ -401,4 +401,3 @@ PROJECT_CONTACT_RELATIONSHIP_SCHEMA = {
     "created_at": datetime,
     "updated_at": datetime,
 }
-

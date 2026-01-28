@@ -927,6 +927,59 @@ def google_profile():
         return jsonify({"email": None}), 200
 
 
+@app.route("/api/email-connections", methods=["POST"])
+def email_connections():
+    """Return email provider connection status for a given user_id."""
+    from app.services.email.unified_service import check_user_email_connections
+    from app.utils.oauth_utils import get_outlook_profile, load_outlook_token
+    from app.utils.oauth_utils import load_google_credentials
+    
+    data = request.get_json(force=True) or {}
+    user_id = data.get("user_id")
+    
+    try:
+        connections = check_user_email_connections(user_id)
+        
+        # Get email addresses
+        gmail_email = None
+        outlook_email = None
+        
+        if connections.get("gmail_connected"):
+            try:
+                creds = load_google_credentials(user_id)
+                if creds:
+                    service = build("gmail", "v1", credentials=creds)
+                    profile = service.users().getProfile(userId="me").execute()
+                    gmail_email = profile.get("emailAddress")
+            except Exception:
+                pass
+        
+        if connections.get("outlook_connected"):
+            try:
+                token_data = load_outlook_token(user_id)
+                if token_data:
+                    outlook_email = get_outlook_profile(token_data.get("access_token"))
+            except Exception:
+                pass
+        
+        return jsonify({
+            "gmail_connected": connections.get("gmail_connected", False),
+            "gmail_email": gmail_email,
+            "outlook_connected": connections.get("outlook_connected", False),
+            "outlook_email": outlook_email,
+            "default_provider": connections.get("default_provider", "gmail"),
+        }), 200
+    except Exception as e:
+        logger.error(f"Error checking email connections: {e}", exc_info=True)
+        return jsonify({
+            "gmail_connected": False,
+            "gmail_email": None,
+            "outlook_connected": False,
+            "outlook_email": None,
+            "default_provider": "gmail",
+        }), 200
+
+
 @app.route("/api/sessions-log", methods=["POST"])
 def sessions_log():
     """Get session list and memory for a user."""
@@ -1068,6 +1121,7 @@ def google_callback():
             """), 400
 
         state, expo_app, expo_redirect = parse_expo_state(state_raw)
+        logger.info(f"🔍 Parsed OAuth state - user_id: {state}, expo_app: {expo_app}, expo_redirect: {expo_redirect}")
 
         if error:
             return render_template_string("""
@@ -1329,20 +1383,293 @@ def google_callback():
         clean_base_url = f"{scheme}://{host}"
     
     # Redirect to chat page with both userId and sessionId (same format as guest login)
+    # IMPORTANT: When expo_app is true, ALWAYS use expo_redirect if provided (this is what frontend expects)
     if expo_app:
         # Check if expo_redirect is a web URL (starts with http)
         if expo_redirect and (expo_redirect.startswith('http://') or expo_redirect.startswith('https://')):
-            # Web app accessing via Expo - redirect to chat page with userId and sessionId
-            redirect_url = f"{clean_base_url}/chat?userId={user_id}&sessionId={session_id}"
-            return redirect(redirect_url)
+            # Web app accessing via Expo - ALWAYS use expo_redirect (ignore clean_base_url and FORCE_LOCAL_OAUTH)
+            # Strip trailing slash from expo_redirect to avoid double slashes
+            # Ensure we have a clean absolute URL
+            base_url = expo_redirect.rstrip('/')
+            redirect_url = f"{base_url}/chat?userId={user_id}&sessionId={session_id}"
+            logger.info(f"🔄 Redirecting Google OAuth to Expo web app: {redirect_url}")
+            logger.info(f"   - expo_app: {expo_app}, expo_redirect: {expo_redirect}")
+            logger.info(f"   - user_id: {user_id}, session_id: {session_id}")
+            # Use redirect with code 302 to ensure it's a proper redirect
+            return redirect(redirect_url, code=302)
         else:
-            # Mobile Expo app - show success page
+            # Mobile Expo app (no web redirect) - show success page
             display_email = str(user_email) if user_email else str(state)
+            logger.info(f"🔄 Showing success page for mobile Expo app (no web redirect)")
             return render_template_string(_get_success_page_template(display_email))
 
-    # Web app redirect - redirect to chat page with userId and sessionId
-    redirect_url = f"{clean_base_url}/chat?userId={user_id}&sessionId={session_id}"
-    return redirect(redirect_url)
+    # Web app redirect (non-Expo) - use clean_base_url or fallback
+    # If FORCE_LOCAL_OAUTH is set, clean_base_url should already be set to localhost:8081
+    if not clean_base_url:
+        force_local = os.getenv("FORCE_LOCAL_OAUTH", "false").lower() == "true"
+        clean_base_url = "http://localhost:8081" if force_local else request.url_root.rstrip("/")
+    redirect_url = f"{clean_base_url.rstrip('/')}/chat?userId={user_id}&sessionId={session_id}"
+    logger.info(f"🔄 Redirecting Google OAuth to web app (non-Expo): {redirect_url}")
+    logger.info(f"   - expo_app: {expo_app}, clean_base_url: {clean_base_url}")
+    logger.info(f"   - user_id: {user_id}, session_id: {session_id}")
+    # Use redirect with code 302 to ensure it's a proper redirect
+    return redirect(redirect_url, code=302)
+
+
+# ──────────────────────────────────────────────────────────────────
+# Outlook OAuth Endpoints
+# ──────────────────────────────────────────────────────────────────
+
+def _get_outlook_redirect_uri():
+    """Get the appropriate redirect URI for Outlook OAuth."""
+    force_local = os.getenv("FORCE_LOCAL_OAUTH", "false").lower() == "true"
+    if force_local:
+        logger.info("🏠 Forcing localhost OAuth redirect (FORCE_LOCAL_OAUTH=true)")
+        return "http://localhost:10000/outlook/oauth2callback"
+    
+    railway_url = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
+    production_url = os.getenv("PRODUCTION_URL")
+    
+    if production_url:
+        base_url = production_url if production_url.startswith("http") else f"https://{production_url}"
+        return f"{base_url}/outlook/oauth2callback"
+    
+    try:
+        forwarded_proto = request.headers.get("X-Forwarded-Proto")
+        scheme = "https" if (request.is_secure or forwarded_proto == "https") else "http"
+        
+        forwarded_host = request.headers.get("X-Forwarded-Host")
+        if forwarded_host and forwarded_host not in ["localhost", "127.0.0.1"]:
+            return f"{scheme}://{forwarded_host}/outlook/oauth2callback"
+        
+        host = request.host
+        if host and not any(h in host for h in ["localhost", "127.0.0.1", "192.168.", "10."]):
+            return f"{scheme}://{host}/outlook/oauth2callback"
+    except Exception:
+        pass
+    
+    if railway_url:
+        base_url = railway_url if railway_url.startswith("http") else f"https://{railway_url}"
+        return f"{base_url}/outlook/oauth2callback"
+    
+    return "http://localhost:10000/outlook/oauth2callback"
+
+
+@app.get("/outlook/auth/<user_id>")
+def outlook_auth(user_id):
+    """Redirect browser to Outlook OAuth consent screen."""
+    try:
+        from app.utils.oauth_utils import build_outlook_auth_url, parse_expo_state
+        
+        expo_app = request.args.get('expo_app', 'false').lower() == 'true'
+        expo_redirect = request.args.get('expo_redirect', 'http://localhost:8081')
+        redirect_uri = _get_outlook_redirect_uri()
+        
+        state_with_expo = f"{user_id}|expo:{expo_app}|redirect:{expo_redirect}" if expo_app else user_id
+        
+        auth_url = build_outlook_auth_url(redirect_uri, state_with_expo)
+        
+        return redirect(auth_url)
+    except Exception as e:
+        logger.error(f"Outlook OAuth error: {e}", exc_info=True)
+        return render_template_string("""
+        <!doctype html>
+        <html>
+          <head><title>OAuth Error</title></head>
+          <body>
+            <h1>OAuth Error</h1>
+            <p>Error: {{ error }}</p>
+            <a href="/">Back to App</a>
+          </body>
+        </html>
+        """, error=str(e))
+
+
+@app.route("/outlook/oauth2callback", methods=["GET", "POST"])
+def outlook_callback():
+    """Outlook OAuth callback endpoint."""
+    try:
+        from app.utils.oauth_utils import (
+            parse_expo_state,
+            save_outlook_token,
+            get_outlook_profile,
+            refresh_outlook_token,
+        )
+        from app.config import Config
+        
+        state_raw = request.args.get("state")
+        error = request.args.get("error")
+        code = request.args.get("code")
+        
+        if not state_raw:
+            return render_template_string("""
+            <!doctype html>
+            <html>
+              <head><title>OAuth Error</title></head>
+              <body>
+                <h1>OAuth Error</h1>
+                <p>Missing state parameter</p>
+                <a href="/">Back to App</a>
+              </body>
+            </html>
+            """), 400
+        
+        state, expo_app, expo_redirect = parse_expo_state(state_raw)
+        user_id = state
+        
+        if error:
+            return render_template_string("""
+            <!doctype html>
+            <html>
+              <head><title>OAuth Error</title></head>
+              <body>
+                <h1>OAuth Error</h1>
+                <p>Error: {{ error }}</p>
+                <a href="/">Back to App</a>
+              </body>
+            </html>
+            """, error=error)
+        
+        if not code:
+            return render_template_string("""
+            <!doctype html>
+            <html>
+              <head><title>OAuth Error</title></head>
+              <body>
+                <h1>OAuth Error</h1>
+                <p>Missing authorization code</p>
+                <a href="/">Back to App</a>
+              </body>
+            </html>
+            """), 400
+        
+        # Exchange code for token
+        redirect_uri = _get_outlook_redirect_uri()
+        tenant_id = Config.MICROSOFT_TENANT_ID
+        client_id = Config.MICROSOFT_CLIENT_ID
+        client_secret = Config.MICROSOFT_CLIENT_SECRET
+        
+        if not client_id or not client_secret:
+            return render_template_string("""
+            <!doctype html>
+            <html>
+              <head><title>OAuth Error</title></head>
+              <body>
+                <h1>Configuration Error</h1>
+                <p>Microsoft OAuth credentials not configured</p>
+                <a href="/">Back to App</a>
+              </body>
+            </html>
+            """), 500
+        
+        token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+        
+        token_data = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "grant_type": "authorization_code",
+            "scope": " ".join(Config.MICROSOFT_SCOPES),
+        }
+        
+        try:
+            response = requests.post(token_url, data=token_data, timeout=30)
+            if response.status_code != 200:
+                error_text = response.text
+                return render_template_string("""
+                <!doctype html>
+                <html>
+                  <head><title>OAuth Token Error</title></head>
+                  <body>
+                    <h1>Authentication Error</h1>
+                    <p>Error: {{ error }}</p>
+                    <a href="/">Back to App</a>
+                  </body>
+                </html>
+                """, error=error_text)
+            
+            token_response = response.json()
+            
+        except Exception as token_error:
+            return render_template_string("""
+            <!doctype html>
+            <html>
+              <head><title>OAuth Token Error</title></head>
+              <body>
+                <h1>Authentication Error</h1>
+                <p>Error: {{ error }}</p>
+                <a href="/">Back to App</a>
+              </body>
+            </html>
+            """, error=str(token_error))
+        
+        # Get user's email from Microsoft Graph
+        access_token = token_response.get("access_token")
+        user_email = get_outlook_profile(access_token) if access_token else None
+        if not user_email:
+            user_email = user_id
+        
+        # Save token
+        save_outlook_token(user_id, token_response, user_email)
+        
+        # Generate session ID
+        session_id = str(uuid.uuid4())
+        
+        # Get base URL for redirect
+        try:
+            forwarded_proto = request.headers.get("X-Forwarded-Proto", "http")
+            forwarded_host = request.headers.get("X-Forwarded-Host") or request.host
+            scheme = "https" if (request.is_secure or forwarded_proto == "https") else "http"
+            host = forwarded_host if forwarded_host not in ["localhost", "127.0.0.1"] else request.host
+            clean_base_url = f"{scheme}://{host}"
+        except Exception:
+            clean_base_url = request.url_root.rstrip("/")
+        
+        # Redirect to chat page
+        if expo_app:
+            if expo_redirect and (expo_redirect.startswith('http://') or expo_redirect.startswith('https://')):
+                # Web app accessing via Expo - ALWAYS use expo_redirect (ignore clean_base_url)
+                # Strip trailing slash from expo_redirect to avoid double slashes
+                base_url = expo_redirect.rstrip('/')
+                redirect_url = f"{base_url}/chat?userId={user_id}&sessionId={session_id}"
+                logger.info(f"🔄 Redirecting Outlook OAuth to Expo web app: {redirect_url}")
+                logger.info(f"   - expo_app: {expo_app}, expo_redirect: {expo_redirect}")
+                logger.info(f"   - user_id: {user_id}, session_id: {session_id}")
+                return redirect(redirect_url, code=302)
+            else:
+                # Mobile Expo app - show success page
+                display_email = str(user_email) if user_email else str(user_id)
+                logger.info(f"🔄 Showing success page for mobile Expo app (Outlook OAuth)")
+                return render_template_string(_get_success_page_template(display_email))
+        
+        # Web app redirect (non-Expo) - use clean_base_url or fallback
+        if not clean_base_url:
+            # Fallback for non-Expo web app
+            force_local = os.getenv("FORCE_LOCAL_OAUTH", "false").lower() == "true"
+            if force_local:
+                clean_base_url = "http://localhost:8081"
+            else:
+                clean_base_url = request.url_root.rstrip("/")
+        redirect_url = f"{clean_base_url.rstrip('/')}/chat?userId={user_id}&sessionId={session_id}"
+        logger.info(f"🔄 Redirecting Outlook OAuth to web app (non-Expo): {redirect_url}")
+        logger.info(f"   - expo_app: {expo_app}, clean_base_url: {clean_base_url}")
+        logger.info(f"   - user_id: {user_id}, session_id: {session_id}")
+        return redirect(redirect_url, code=302)
+        
+    except Exception as e:
+        logger.error(f"Outlook OAuth callback error: {e}", exc_info=True)
+        return render_template_string("""
+        <!doctype html>
+        <html>
+          <head><title>OAuth Error</title></head>
+          <body>
+            <h1>OAuth Error</h1>
+            <p>Error: {{ error }}</p>
+            <a href="/">Back to App</a>
+          </body>
+        </html>
+        """, error=str(e))
 
 
 # ──────────────────────────────────────────────────────────────────

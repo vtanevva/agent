@@ -49,6 +49,8 @@ export default function ChatPage() {
   const [showSidebar, setShowSidebar] = useState(false);
   const [googleConnected, setGoogleConnected] = useState(false);
   const [googleEmail, setGoogleEmail] = useState(null);
+  const [outlookConnected, setOutlookConnected] = useState(false);
+  const [outlookEmail, setOutlookEmail] = useState(null);
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyThreadId, setReplyThreadId] = useState(null);
   const [replyTo, setReplyTo] = useState(null);
@@ -114,52 +116,49 @@ export default function ChatPage() {
     }
   }, [userId]);
 
-  // Check Google connection status
-  const checkGoogleConnection = useCallback(async () => {
+  // Check email provider connections (Gmail and Outlook)
+  const checkEmailConnections = useCallback(async () => {
     if (!userId) return;
     
     try {
-      const url = `${API_BASE_URL}/api/google-profile`;
-      console.log('Checking Google connection for:', userId);
-      console.log('API URL:', url);
-      
+      const url = `${API_BASE_URL}/api/email-connections`;
       const r = await fetch(url, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({user_id: userId}),
       });
       
-      console.log('Google profile response status:', r.status);
-      
       if (!r.ok) {
-        const errorText = await r.text();
-        console.error('Google profile error response:', errorText);
         throw new Error(`HTTP error! status: ${r.status}`);
       }
       
       const data = await r.json();
-      console.log('Google profile data:', data);
-      if (data.email) {
-        setGoogleConnected(true);
-        setGoogleEmail(data.email);
-      } else {
-        setGoogleConnected(false);
-        setGoogleEmail(null);
-      }
+      
+      // Update Gmail status
+      setGoogleConnected(data.gmail_connected || false);
+      setGoogleEmail(data.gmail_email || null);
+      
+      // Update Outlook status
+      setOutlookConnected(data.outlook_connected || false);
+      setOutlookEmail(data.outlook_email || null);
     } catch (e) {
-      console.error('Error checking Google connection:', e);
-      console.error('Error details:', e.message);
+      console.error('Error checking email connections:', e);
       setGoogleConnected(false);
       setGoogleEmail(null);
+      setOutlookConnected(false);
+      setOutlookEmail(null);
     }
   }, [userId]);
+
+  // Legacy function for backward compatibility
+  const checkGoogleConnection = checkEmailConnections;
 
   useEffect(() => {
     if (userId) {
       fetchSessions();
-      checkGoogleConnection();
+      checkEmailConnections();
     }
-  }, [userId, fetchSessions, checkGoogleConnection]);
+  }, [userId, fetchSessions, checkEmailConnections]);
 
   // Auto-sync contacts once Google is connected (server skips if already initialized)
   useEffect(() => {
@@ -544,40 +543,77 @@ export default function ChatPage() {
               </View>
             </View>
 
-            {/* Google Connection Status */}
+            {/* Email Provider Connections */}
             <View style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>Google Account</Text>
-              {googleConnected ? (
-                <View style={styles.connectionStatus}>
-                  <Text style={styles.connectionText}>
-                     {googleEmail || 'Gmail'}
-                  </Text>
-                </View>
-              ) : (
-                <TouchableOpacity
-                  onPress={async () => {
-                    // Get the current Expo web URL (for web platform)
-                    const expoRedirect = Platform.OS === 'web' 
-                      ? (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8081')
-                      : 'exp://localhost:8081';
-                    const authUrl = `${API_BASE_URL}/google/auth/${encodeURIComponent(userId)}?expo_app=true&expo_redirect=${encodeURIComponent(expoRedirect)}`;
-                    const canOpen = await Linking.canOpenURL(authUrl);
-                    if (canOpen) {
-                      await Linking.openURL(authUrl);
-                      // Check connection status after a delay
-                      setTimeout(() => {
-                        checkGoogleConnection();
-                      }, 2000);
-                    }
-                  }}
-                  style={styles.connectButton}>
-                  <LinearGradient
-                    colors={[colors.accent[500], colors.accent[600]]}
-                    style={styles.buttonGradient}>
-                    <Text style={styles.buttonText}>Connect Google</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-              )}
+              <Text style={styles.sectionTitle}>Email Accounts</Text>
+              
+              {/* Gmail Connection */}
+              <View style={{marginBottom: 12}}>
+                <Text style={{fontSize: 14, fontWeight: '600', marginBottom: 6, color: colors.text.primary}}>Gmail</Text>
+                {googleConnected ? (
+                  <View style={styles.connectionStatus}>
+                    <Text style={styles.connectionText}>
+                      {googleEmail || 'Gmail'} ✓
+                    </Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    onPress={async () => {
+                      const expoRedirect = Platform.OS === 'web' 
+                        ? (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8081')
+                        : 'exp://localhost:8081';
+                      const authUrl = `${API_BASE_URL}/google/auth/${encodeURIComponent(userId)}?expo_app=true&expo_redirect=${encodeURIComponent(expoRedirect)}`;
+                      const canOpen = await Linking.canOpenURL(authUrl);
+                      if (canOpen) {
+                        await Linking.openURL(authUrl);
+                        setTimeout(() => {
+                          checkEmailConnections();
+                        }, 2000);
+                      }
+                    }}
+                    style={styles.connectButton}>
+                    <LinearGradient
+                      colors={[colors.accent[500], colors.accent[600]]}
+                      style={styles.buttonGradient}>
+                      <Text style={styles.buttonText}>Connect Gmail</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                )}
+              </View>
+              
+              {/* Outlook Connection */}
+              <View>
+                <Text style={{fontSize: 14, fontWeight: '600', marginBottom: 6, color: colors.text.primary}}>Outlook</Text>
+                {outlookConnected ? (
+                  <View style={styles.connectionStatus}>
+                    <Text style={styles.connectionText}>
+                      {outlookEmail || 'Outlook'} ✓
+                    </Text>
+                  </View>
+                ) : (
+                  <TouchableOpacity
+                    onPress={async () => {
+                      const expoRedirect = Platform.OS === 'web' 
+                        ? (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8081')
+                        : 'exp://localhost:8081';
+                      const authUrl = `${API_BASE_URL}/outlook/auth/${encodeURIComponent(userId)}?expo_app=true&expo_redirect=${encodeURIComponent(expoRedirect)}`;
+                      const canOpen = await Linking.canOpenURL(authUrl);
+                      if (canOpen) {
+                        await Linking.openURL(authUrl);
+                        setTimeout(() => {
+                          checkEmailConnections();
+                        }, 2000);
+                      }
+                    }}
+                    style={styles.connectButton}>
+                    <LinearGradient
+                      colors={['#0078d4', '#106ebe']}
+                      style={styles.buttonGradient}>
+                      <Text style={styles.buttonText}>Connect Outlook</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
 
             {/* Quick Actions */}

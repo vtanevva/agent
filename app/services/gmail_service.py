@@ -820,13 +820,14 @@ def classify_single_email(
                 emails_col = db.db.get_collection("emails") if (db.is_connected and db.db is not None) else None
                 if emails_col is not None:
                     emails_col.update_one(
-                        {"user_id": user_id, "thread_id": thread_id},
+                        {"user_id": user_id, "thread_id": thread_id, "source": "gmail"},
                         {
                             "$set": {
                                 "category": classification["category"],
                                 "scores": classification["scores"],
                                 "classified_at": datetime.utcnow().isoformat(),
                                 "classification_version": CLASSIFICATION_VERSION,
+                                "source": "gmail",  # Add source field
                             }
                         },
                         upsert=True,
@@ -1081,12 +1082,13 @@ def classify_background(user_id: str, max_emails: int = 20) -> Dict[str, Any]:
                     # Store in database
                     if emails_col is not None:
                         emails_col.update_one(
-                            {"user_id": user_id, "thread_id": thread_id},
+                            {"user_id": user_id, "thread_id": thread_id, "source": "gmail"},
                             {
                                 "$set": {
                                     "user_id": user_id,
                                     "thread_id": thread_id,
                                     "from": headers.get("From", ""),
+                                    "source": "gmail",  # Add source field
                                     "subject": headers.get("Subject", "(No subject)"),
                                     "snippet": full_msg.get("snippet", "")[:200],
                                     "category": classification["category"],

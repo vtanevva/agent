@@ -1,82 +1,42 @@
-"""Tool: reply_email — reply inside an existing Gmail thread or by messageId."""
+"""Tool: reply_email — reply inside an existing email thread (Gmail or Outlook)."""
 
-import json
-import base64
-from email.mime.text import MIMEText
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-from google.oauth2.credentials import Credentials
+from typing import Optional
 
 from app.utils.tool_registry import register, ToolSchema
-from app.utils.google_api_helpers import get_gmail_service
+from app.services.email.unified_service import reply_email as unified_reply_email
 
 
 def reply_email(
     user_id: str,
-    thread_id: str,        # may be a messageId; we auto‑resolve
+    thread_id: str,
     to: str,
     body: str,
     subj_prefix: str = "Re:",
+    provider: Optional[str] = None,
 ):
+    """
+    Reply to an email thread using the user's email provider.
+    
+    Uses unified email service to support both Gmail and Outlook.
+    Automatically detects provider from stored email metadata if not specified.
+    """
     try:
-        svc = get_gmail_service(user_id)
-    except Exception as e:
-        return f"Error: Gmail service unavailable - {e}"
-
-    # 1 – resolve messageId → threadId (and get Subject)
-    try:
-        msg_meta = (
-            svc.users()
-            .messages()
-            .get(
-                userId="me",
-                id=thread_id,
-                format="metadata",
-                metadataHeaders=["Subject", "Message-ID"],
-            )
-            .execute()
+        result = unified_reply_email(
+            user_id=user_id,
+            thread_id=thread_id,
+            to=to,
+            body=body,
+            subj_prefix=subj_prefix,
+            provider=provider,
         )
-        real_thread_id = msg_meta.get("threadId", thread_id)
-        subj = next(
-            (h["value"] for h in msg_meta["payload"]["headers"] if h["name"] == "Subject"),
-            "(No subject)"
-        )
-    except HttpError as e:
-        if e.resp.status in (400, 404):
-            # assume we already had a threadId; fetch the thread instead
-            thread_resp = (
-                svc.users()
-                .threads()
-                .get(userId="me", id=thread_id, format="metadata")
-                .execute()
-            )
-            real_thread_id = thread_id
-            first_msg = thread_resp["messages"][0]
-            subj = next(
-                (h["value"] for h in first_msg["payload"]["headers"] if h["name"] == "Subject"),
-                "(No subject)"
-            )
-            msg_meta = first_msg
+        
+        if result.get("success"):
+            return f"Reply sent in thread {thread_id}."
         else:
-            raise
-
-    # 2 – build MIME reply
-    mime = MIMEText(body)
-    mime["to"] = to
-    mime["subject"] = subj if subj_prefix in subj else f"{subj_prefix} {subj}"
-    # Use Message-ID header if available for threading
-    msg_id = next((h["value"] for h in msg_meta["payload"]["headers"] if h["name"] in ("Message-ID", "Message-Id")), None)
-    if msg_id:
-        mime["In-Reply-To"] = msg_id
-        mime["References"] = msg_id
-
-    raw = base64.urlsafe_b64encode(mime.as_bytes()).decode()
-    svc.users().messages().send(
-        userId="me",
-        body={"raw": raw, "threadId": real_thread_id},
-    ).execute()
-
-    return f"Reply sent in thread {real_thread_id}."
+            return f"Error: {result.get('error', 'Failed to send reply')}"
+            
+    except Exception as e:
+        return f"Error: Failed to send reply - {str(e)}"
 
 
 # Register the tool
@@ -84,7 +44,7 @@ register(
     reply_email,
     ToolSchema(
         name="reply_email",
-        description="Send a reply inside an existing Gmail thread (accepts threadId or messageId).",
+        description="Send a reply inside an existing email thread (accepts threadId or messageId). Works with Gmail and Outlook.",
         parameters={
             "type": "object",
             "properties": {

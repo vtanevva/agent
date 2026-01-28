@@ -59,8 +59,12 @@ class DatabaseManager:
             emails_col = self.db.get_collection("emails")
             # Compound index: user_id + classified_at (descending) for fast sorted queries
             emails_col.create_index([("user_id", 1), ("classified_at", -1)])
+            # Compound index: user_id + thread_id + source (for provider-specific lookups)
+            emails_col.create_index([("user_id", 1), ("thread_id", 1), ("source", 1)])
             # Index on thread_id for lookups
             emails_col.create_index("thread_id")
+            # Index on source for filtering by provider
+            emails_col.create_index("source")
             logger.info("Created indexes on emails collection")
         except Exception as e:
             logger.warning(f"Failed to create indexes (may already exist): {e}")

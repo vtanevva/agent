@@ -189,7 +189,7 @@ def _strip_leading_subject(text: str, subject: str) -> str:
         return "\n".join(kept).lstrip("\n")
     return text
 
-def get_thread_detail(user_id: str, thread_id: str) -> str:
+def get_thread_detail(user_id: str, thread_id: str, provider: str = None) -> str:
     """
     Return JSON with details for the selected email/thread:
     {
@@ -199,52 +199,33 @@ def get_thread_detail(user_id: str, thread_id: str) -> str:
       "date": "...",
       "body": "plain text body"
     }
+    
+    Uses unified email service to support both Gmail and Outlook.
     """
     try:
-        svc = get_gmail_service(user_id)
+        from app.services.email.unified_service import get_thread_detail as unified_get_thread_detail
+        
+        result = unified_get_thread_detail(
+            user_id=user_id,
+            thread_id=thread_id,
+            provider=provider,
+        )
+        
+        if result.get("success"):
+            return json.dumps({
+                "success": True,
+                "subject": result.get("subject", "(No subject)"),
+                "from": result.get("from", ""),
+                "date": result.get("date", ""),
+                "body": result.get("body", ""),
+            })
+        else:
+            return json.dumps({
+                "success": False,
+                "error": result.get("error", "Failed to get thread detail"),
+            })
+            
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)})
-
-    # Try as message first for convenience
-    try:
-        msg = (
-            svc.users()
-            .messages()
-            .get(userId="me", id=thread_id, format="full")
-            .execute()
-        )
-        payload = msg.get("payload", {})
-        headers = payload.get("headers", [])
-        header_map = {h["name"].lower(): h["value"] for h in headers}
-        subject = header_map.get("subject", "(No subject)")
-        sender = header_map.get("from", "")
-        date = header_map.get("date", "")
-        body = _clean_text(_extract_plain_text(payload).strip())
-        body = _strip_leading_subject(body, subject)
-        return json.dumps({"success": True, "subject": subject, "from": sender, "date": date, "body": body})
-    except Exception:
-        # Fallback to thread; use the last message in the thread
-        try:
-            th = (
-                svc.users()
-                .threads()
-                .get(userId="me", id=thread_id, format="full")
-                .execute()
-            )
-            messages = th.get("messages", [])
-            if not messages:
-                return json.dumps({"success": False, "error": "Thread has no messages"})
-            last = messages[-1]
-            payload = last.get("payload", {})
-            headers = payload.get("headers", [])
-            header_map = {h["name"].lower(): h["value"] for h in headers}
-            subject = header_map.get("subject", "(No subject)")
-            sender = header_map.get("from", "")
-            date = header_map.get("date", "")
-            body = _clean_text(_extract_plain_text(payload).strip())
-            body = _strip_leading_subject(body, subject)
-            return json.dumps({"success": True, "subject": subject, "from": sender, "date": date, "body": body})
-        except Exception as e2:
-            return json.dumps({"success": False, "error": str(e2)})
 
 

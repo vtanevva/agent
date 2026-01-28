@@ -1,9 +1,11 @@
-"""OAuth utilities for Google and Instagram authentication"""
+"""OAuth utilities for Google, Outlook, and Instagram authentication"""
 
 import os
 import json
-from typing import Optional
-from urllib.parse import unquote
+import requests
+from typing import Optional, Dict, Any
+from urllib.parse import unquote, urlencode
+from datetime import datetime, timedelta
 
 from flask import url_for, jsonify
 from google_auth_oauthlib.flow import Flow
@@ -151,6 +153,9 @@ def require_google_auth(user_id: str):
 
 def parse_expo_state(state: str) -> tuple[str, bool, Optional[str]]:
     """Parse Expo app state from OAuth state parameter"""
+    if not state:
+        return state, False, None
+    
     state_decoded = unquote(state) if state else state
     
     expo_app = False
@@ -165,7 +170,301 @@ def parse_expo_state(state: str) -> tuple[str, bool, Optional[str]]:
                 expo_value = part.split(":", 1)[1].strip().lower()
                 expo_app = expo_value == "true"
             elif part.startswith("redirect:"):
-                expo_redirect = part.split(":", 1)[1]
+                # Extract everything after "redirect:" - this handles URLs with colons correctly
+                redirect_value = part.split(":", 1)[1]
+                # Strip whitespace and ensure it's a valid URL
+                expo_redirect = redirect_value.strip()
+                # Double-decode in case it's double-encoded
+                if "%" in expo_redirect:
+                    expo_redirect = unquote(expo_redirect)
     
     return user_id, expo_app, expo_redirect
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Outlook/Microsoft OAuth Functions
+# ──────────────────────────────────────────────────────────────────────
+
+
+def load_outlook_token(user_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Load Outlook access token from database.
+    Automatically refreshes if expired.
+    
+    Returns
+    -------
+    dict or None
+        Token dict with access_token, refresh_token, expires_at, etc.
+    """
+    tokens = get_tokens_collection()
+    if tokens is None:
+        return None
+    
+    try:
+        token_doc = tokens.find_one({
+            "user_id": user_id,
+            "provider": "outlook"
+        })
+        
+        if not token_doc:
+            return None
+        
+        # Check if token is expired
+        expires_at = token_doc.get("expires_at")
+        if expires_at:
+            try:
+                if isinstance(expires_at, str):
+                    expires_at = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                elif isinstance(expires_at, datetime):
+                    pass  # Already datetime
+                else:
+                    expires_at = None
+                
+                # Refresh if expired or expiring soon (within 5 minutes)
+                if expires_at and expires_at < (datetime.utcnow() + timedelta(minutes=5)):
+                    return refresh_outlook_token(user_id, token_doc.get("refresh_token"))
+            except Exception as e:
+                print(f"[WARNING] Error checking token expiry: {e}", flush=True)
+        
+        return {
+            "access_token": token_doc.get("access_token"),
+            "refresh_token": token_doc.get("refresh_token"),
+            "expires_at": token_doc.get("expires_at"),
+            "token_type": token_doc.get("token_type", "Bearer"),
+        }
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to load Outlook token: {e}", flush=True)
+        return None
+
+
+def refresh_outlook_token(user_id: str, refresh_token: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Refresh Outlook access token using refresh token.
+    
+    Parameters
+    ----------
+    user_id : str
+        User identifier
+    refresh_token : str, optional
+        Refresh token. If not provided, loads from database.
+        
+    Returns
+    -------
+    dict or None
+        New token dict with access_token, refresh_token, expires_at
+    """
+    if not refresh_token:
+        token_doc = load_outlook_token(user_id)
+        if not token_doc:
+            return None
+        refresh_token = token_doc.get("refresh_token")
+    
+    if not refresh_token:
+        return None
+    
+    try:
+        client_id = Config.MICROSOFT_CLIENT_ID
+        client_secret = Config.MICROSOFT_CLIENT_SECRET
+        tenant_id = Config.MICROSOFT_TENANT_ID
+        
+        if not client_id or not client_secret:
+            print("[ERROR] Microsoft OAuth credentials not configured", flush=True)
+            return None
+        
+        token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+        
+        data = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+            "scope": " ".join(Config.MICROSOFT_SCOPES),
+        }
+        
+        response = requests.post(token_url, data=data, timeout=30)
+        
+        if response.status_code != 200:
+            print(f"[ERROR] Failed to refresh Outlook token: {response.text}", flush=True)
+            return None
+        
+        token_data = response.json()
+        
+        # Calculate expiry time
+        expires_in = token_data.get("expires_in", 3600)  # Default 1 hour
+        expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+        
+        # Save to database
+        tokens = get_tokens_collection()
+        if tokens:
+            tokens.update_one(
+                {"user_id": user_id, "provider": "outlook"},
+                {
+                    "$set": {
+                        "access_token": token_data.get("access_token"),
+                        "refresh_token": token_data.get("refresh_token", refresh_token),  # Keep old if not provided
+                        "expires_at": expires_at.isoformat(),
+                        "token_type": token_data.get("token_type", "Bearer"),
+                        "updated_at": datetime.utcnow().isoformat(),
+                    }
+                },
+                upsert=True,
+            )
+        
+        return {
+            "access_token": token_data.get("access_token"),
+            "refresh_token": token_data.get("refresh_token", refresh_token),
+            "expires_at": expires_at.isoformat(),
+            "token_type": token_data.get("token_type", "Bearer"),
+        }
+        
+    except Exception as e:
+        print(f"[ERROR] Error refreshing Outlook token: {e}", flush=True)
+        return None
+
+
+def save_outlook_token(user_id: str, token_data: Dict[str, Any], real_email: Optional[str] = None) -> bool:
+    """
+    Save Outlook OAuth token to MongoDB.
+    
+    Parameters
+    ----------
+    user_id : str
+        User identifier
+    token_data : dict
+        Token data from Microsoft OAuth response
+    real_email : str, optional
+        User's actual email address
+        
+    Returns
+    -------
+    bool
+        True if saved successfully
+    """
+    tokens = get_tokens_collection()
+    if tokens is None:
+        print("[WARNING] Cannot save Outlook token - MongoDB not available", flush=True)
+        return False
+    
+    try:
+        expires_in = token_data.get("expires_in", 3600)
+        expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+        
+        token_doc = {
+            "user_id": user_id,
+            "provider": "outlook",
+            "access_token": token_data.get("access_token"),
+            "refresh_token": token_data.get("refresh_token"),
+            "expires_at": expires_at.isoformat(),
+            "token_type": token_data.get("token_type", "Bearer"),
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+        
+        tokens.update_one(
+            {"user_id": user_id, "provider": "outlook"},
+            {"$set": token_doc},
+            upsert=True,
+        )
+        
+        # Also save under real email if different
+        if real_email and real_email != user_id:
+            tokens.update_one(
+                {"user_id": real_email, "provider": "outlook"},
+                {"$set": token_doc},
+                upsert=True,
+            )
+        
+        return True
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to save Outlook token: {e}", flush=True)
+        return False
+
+
+def build_outlook_auth_url(redirect_uri: str, state: str) -> str:
+    """
+    Build Outlook OAuth authorization URL.
+    
+    Parameters
+    ----------
+    redirect_uri : str
+        OAuth redirect URI
+    state : str
+        State parameter (user_id or with expo info)
+        
+    Returns
+    -------
+    str
+        Authorization URL
+    """
+    client_id = Config.MICROSOFT_CLIENT_ID
+    tenant_id = Config.MICROSOFT_TENANT_ID
+    scopes = " ".join(Config.MICROSOFT_SCOPES)
+    
+    if not client_id:
+        raise ValueError("MICROSOFT_CLIENT_ID not configured")
+    
+    auth_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/authorize"
+    
+    params = {
+        "client_id": client_id,
+        "response_type": "code",
+        "redirect_uri": redirect_uri,
+        "response_mode": "query",
+        "scope": scopes,
+        "state": state,
+        "prompt": "consent",  # Force consent to get refresh token
+    }
+    
+    return f"{auth_url}?{urlencode(params)}"
+
+
+def get_outlook_profile(access_token: str) -> Optional[str]:
+    """
+    Get the user's Outlook email address from Microsoft Graph API.
+    
+    Parameters
+    ----------
+    access_token : str
+        Outlook access token
+        
+    Returns
+    -------
+    str or None
+        User's email address
+    """
+    try:
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
+        
+        response = requests.get(
+            "https://graph.microsoft.com/v1.0/me",
+            headers=headers,
+            timeout=30,
+        )
+        
+        if response.status_code == 200:
+            profile = response.json()
+            return profile.get("mail") or profile.get("userPrincipalName")
+        else:
+            print(f"❌ Error getting Outlook profile: {response.text}", flush=True)
+            return None
+            
+    except Exception as e:
+        print(f"❌ Error getting Outlook profile: {e}", flush=True)
+        return None
+
+
+def require_outlook_auth(user_id: str):
+    """Check if user has Outlook credentials, return auth redirect if not"""
+    token = load_outlook_token(user_id)
+    if not token:
+        return jsonify({
+            "action": "connect_outlook",
+            "connect_url": url_for("outlook_auth", user_id=user_id, _external=True)
+        })
+    return None
 
