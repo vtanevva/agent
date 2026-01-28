@@ -64,6 +64,7 @@ from app.api.gmail_routes import gmail_bp
 from app.api.contacts_routes import contacts_bp
 from app.api.calendar_routes import calendar_bp
 from app.api.files_routes import files_bp
+from app.api.tasks_routes import tasks_bp
 
 # Initialize logger after logging is configured
 logger = get_logger(__name__)
@@ -104,6 +105,14 @@ def create_app():
             logger.info("✅ Memory system indexes initialized")
         except Exception as e:
             logger.warning(f"Failed to initialize memory indexes: {e}")
+        
+        # Initialize task pipeline indexes
+        try:
+            from app.memory.task_models import ensure_task_pipeline_indexes
+            ensure_task_pipeline_indexes()
+            logger.info("✅ Task pipeline indexes initialized")
+        except Exception as e:
+            logger.warning(f"Failed to initialize task pipeline indexes: {e}")
     else:
         logger.warning("MongoDB not connected - running in offline mode")
 
@@ -113,12 +122,13 @@ def create_app():
     app.register_blueprint(contacts_bp)
     app.register_blueprint(calendar_bp)
     app.register_blueprint(files_bp)
+    app.register_blueprint(tasks_bp)
     
     # Register memory system blueprint
     from app.api.memory_routes import memory_bp
     app.register_blueprint(memory_bp)
     
-    logger.info("Registered API blueprints: chat, gmail, contacts, calendar, files, memory")
+    logger.info("Registered API blueprints: chat, gmail, contacts, calendar, files, tasks, memory")
     
     # Add request logging
     @app.before_request
