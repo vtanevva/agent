@@ -33,8 +33,8 @@ export default function TasksPage() {
     setLoading(true);
     setError('');
     try {
-      // Use new unified tasks API
-      const r = await fetch(`${API_BASE_URL}/memory/tasks?user_id=${userId}&limit=200`, {
+      // NEW: Use task pipeline API with priorities (NOW/SOON/LATER)
+      const r = await fetch(`${API_BASE_URL}/api/tasks?user_id=${userId}&limit=200`, {
         method: 'GET',
         headers: {'Content-Type': 'application/json'},
       });
@@ -42,20 +42,24 @@ export default function TasksPage() {
       if (!r.ok || !data?.success) {
         throw new Error(data?.error || `HTTP ${r.status}`);
       }
-      // Map tasks to local format
+      // Map pipeline tasks to local format
       const mapped = (data.tasks || []).map((task) => ({
         id: task._id || uid(),
         text: task.title || '',
         status: task.status === 'completed' ? 'done' : task.status === 'in_progress' ? 'in_progress' : 'todo',
-        priority: task.priority || 'medium',
-        impact: task.priority === 'high' ? 4 : task.priority === 'medium' ? 3 : 2,
+        // NEW: Store pipeline priority (NOW/SOON/LATER)
+        priority: task.priority || 'LATER',
+        priorityScore: task.priority_score || 0,
+        reason: task.reason || '',
+        impact: task.priority_score || 2,
         effort: 2,
-        source: task.source || 'manual',
+        source: task.source || 'email',
         meta: {
-          description: task.description || '',
-          due_date: task.due_date || null,
-          source_ref: task.source_ref || '',
+          description: task.reason || '',
+          due_date: task.due_datetime || null,
+          source_ref: task.source_event || '',
           created_at: task.created_at || '',
+          actions: task.actions || [],
         },
         // Store full task for API updates
         _taskData: task,
@@ -74,20 +78,24 @@ export default function TasksPage() {
     setSyncing(true);
     setError('');
     try {
-      // Trigger email todo extraction (this will create tasks automatically)
-      const r = await fetch(`${API_BASE_URL}/api/gmail/extract-todos-recent`, {
+      // Trigger background email processing (ingest + workers)
+      const r = await fetch(`${API_BASE_URL}/api/tasks/ingest`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({user_id: userId, max_threads: 5}),
+        body: JSON.stringify({user_id: userId, max_emails: 20}),
       });
       const data = await r.json();
       if (!r.ok || !data?.success) {
         throw new Error(data?.error || `HTTP ${r.status}`);
       }
-      // Reload tasks from unified API
+      // Show status message (processing is async)
+      alert(`✅ Started email processing${data.job_id ? ` (job: ${data.job_id})` : ''}. Refresh in a few seconds.`);
+
+      // Best-effort refresh shortly after starting
+      await new Promise((res) => setTimeout(res, 2500));
       await loadTasks();
     } catch (e) {
-      setError(e?.message || 'Failed to sync from Gmail');
+      setError(e?.message || 'Failed to process emails');
     } finally {
       setSyncing(false);
     }
@@ -96,6 +104,22 @@ export default function TasksPage() {
   useEffect(() => {
     if (userId) loadTasks();
   }, [userId]);
+
+  // NEW: Group by pipeline priority (NOW/SOON/LATER)
+  const priorityGroups = useMemo(() => {
+    const groups = {NOW: [], SOON: [], LATER: []};
+    for (const t of todos) {
+      if (t.status !== 'done') {
+        const priority = t.priority || 'LATER';
+        if (groups[priority]) {
+          groups[priority].push(t);
+        } else {
+          groups.LATER.push(t);
+        }
+      }
+    }
+    return groups;
+  }, [todos]);
 
   const columns = useMemo(() => {
     const groups = {todo: [], in_progress: [], done: []};
@@ -159,6 +183,28 @@ export default function TasksPage() {
     }
   };
 
+  const markTaskDone = async (id) => {
+    if (!userId) return;
+    
+    try {
+      // NEW: Use pipeline complete endpoint
+      const r = await fetch(`${API_BASE_URL}/api/tasks/${id}/complete`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({user_id: userId}),
+      });
+      const data = await r.json();
+      if (!r.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to complete task');
+      }
+      
+      // Reload tasks
+      await loadTasks();
+    } catch (e) {
+      setError(e?.message || 'Failed to complete task');
+    }
+  };
+
   const cycleStatus = async (id) => {
     if (!userId) return;
     
@@ -182,7 +228,7 @@ export default function TasksPage() {
     const apiStatus = statusMap[nextStatus] || 'pending';
     
     try {
-      // Update task via API
+      // Use legacy endpoint for status cycling (fallback for old tasks)
       const r = await fetch(`${API_BASE_URL}/memory/tasks/${id}`, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
@@ -220,10 +266,10 @@ export default function TasksPage() {
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Todos */}
+        {/* NEW: Priority Groups (NOW/SOON/LATER) */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Todos</Text>
-          <Text style={styles.cardHint}>Tap a task to move it: Todo → In progress → Done.</Text>
+          <Text style={styles.cardTitle}>📋 Prioritized Tasks</Text>
+          <Text style={styles.cardHint}>Auto-prioritized by urgency, sender VIP, and deadline. Tap to mark done.</Text>
 
           {!userId ? (
             <View style={styles.banner}>
@@ -235,7 +281,7 @@ export default function TasksPage() {
                 onPress={syncFromGmail}
                 disabled={syncing || loading}
                 style={[styles.controlButton, (syncing || loading) && styles.controlButtonDisabled]}>
-                <Text style={styles.controlButtonText}>{syncing ? 'Syncing…' : 'Sync from Gmail'}</Text>
+                <Text style={styles.controlButtonText}>{syncing ? 'Processing…' : '🚀 Process Emails'}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={loadTasks}
@@ -267,6 +313,40 @@ export default function TasksPage() {
             </TouchableOpacity>
           </View>
 
+          {/* Priority Groups */}
+          <View style={styles.priorityGroups}>
+            <PriorityGroup
+              title="🔴 NOW"
+              subtitle="Urgent"
+              count={priorityGroups.NOW.length}
+              items={priorityGroups.NOW}
+              onPressItem={markTaskDone}
+              color="#EF4444"
+            />
+            <PriorityGroup
+              title="🟡 SOON"
+              subtitle="Important"
+              count={priorityGroups.SOON.length}
+              items={priorityGroups.SOON}
+              onPressItem={markTaskDone}
+              color="#F59E0B"
+            />
+            <PriorityGroup
+              title="⚪ LATER"
+              subtitle="Low priority"
+              count={priorityGroups.LATER.length}
+              items={priorityGroups.LATER}
+              onPressItem={markTaskDone}
+              color="#9CA3AF"
+            />
+          </View>
+        </View>
+
+        {/* Traditional Status View (Legacy) */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Status View</Text>
+          <Text style={styles.cardHint}>Traditional Kanban view. Tap to move status.</Text>
+          
           <View style={styles.todoColumns}>
             <TodoColumn
               title="To do"
@@ -319,6 +399,60 @@ export default function TasksPage() {
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function PriorityGroup({title, subtitle, count, items, onPressItem, color}) {
+  return (
+    <View style={styles.priorityGroup}>
+      <View style={styles.priorityHeader}>
+        <View>
+          <Text style={styles.priorityTitle}>{title}</Text>
+          <Text style={styles.prioritySubtitle}>{subtitle}</Text>
+        </View>
+        <View style={[styles.priorityBadge, {backgroundColor: color + '20'}]}>
+          <Text style={[styles.priorityCount, {color: color}]}>{count}</Text>
+        </View>
+      </View>
+      {items.length === 0 ? (
+        <Text style={styles.todoEmpty}>No tasks</Text>
+      ) : (
+        items.map((t) => (
+          <TouchableOpacity key={t.id} onPress={() => onPressItem(t.id)} style={[styles.priorityItem, {borderLeftColor: color}]}>
+            <View style={styles.priorityItemHeader}>
+              <Text style={styles.priorityItemText} numberOfLines={2}>
+                {t.text}
+              </Text>
+              {t.priorityScore !== undefined && (
+                <View style={[styles.scoreBadge, {backgroundColor: color + '15'}]}>
+                  <Text style={[styles.scoreText, {color: color}]}>{t.priorityScore}</Text>
+                </View>
+              )}
+            </View>
+            {!!t.reason && (
+              <Text style={styles.reasonText} numberOfLines={2}>
+                💡 {t.reason}
+              </Text>
+            )}
+            {!!t?.meta?.due_date && (
+              <Text style={styles.dueText} numberOfLines={1}>
+                ⏰ {new Date(t.meta.due_date).toLocaleString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}
+              </Text>
+            )}
+            {!!t?.meta?.actions && t.meta.actions.length > 0 && (
+              <Text style={styles.actionsText} numberOfLines={1}>
+                Actions: {t.meta.actions.join(', ')}
+              </Text>
+            )}
+          </TouchableOpacity>
+        ))
+      )}
+    </View>
   );
 }
 
@@ -653,6 +787,95 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.primary[900] + '70',
     textAlign: 'center',
+  },
+  // NEW: Priority Groups Styles
+  priorityGroups: {
+    gap: 12,
+  },
+  priorityGroup: {
+    backgroundColor: colors.primary[50],
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.dark[500] + '10',
+    padding: 12,
+    marginBottom: 12,
+  },
+  priorityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  priorityTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.primary[900],
+  },
+  prioritySubtitle: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.primary[900] + '60',
+    marginTop: 2,
+  },
+  priorityBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  priorityCount: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  priorityItem: {
+    backgroundColor: colors.primary[100] + '40',
+    borderLeftWidth: 3,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    marginBottom: 8,
+  },
+  priorityItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  priorityItemText: {
+    flex: 1,
+    color: colors.primary[900],
+    fontSize: 14,
+    fontWeight: '700',
+    marginRight: 8,
+  },
+  scoreBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    minWidth: 28,
+    alignItems: 'center',
+  },
+  scoreText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  reasonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.secondary[700],
+    marginBottom: 4,
+    lineHeight: 16,
+  },
+  dueText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.primary[900] + '70',
+    marginTop: 4,
+  },
+  actionsText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: colors.accent[600],
+    marginTop: 4,
   },
 });
 

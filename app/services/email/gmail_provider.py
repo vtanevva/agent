@@ -329,6 +329,8 @@ class GmailProvider(EmailProvider):
                     .get(userId="me", id=thread_id, format="full")
                     .execute()
                 )
+                msg_id = msg.get("id", thread_id)
+                real_thread_id = msg.get("threadId", thread_id)
                 payload = msg.get("payload", {})
                 headers = payload.get("headers", [])
                 header_map = {h["name"].lower(): h["value"] for h in headers}
@@ -340,6 +342,8 @@ class GmailProvider(EmailProvider):
                 
                 return {
                     "success": True,
+                    "message_id": msg_id,
+                    "thread_id": real_thread_id,
                     "subject": subject,
                     "from": sender,
                     "date": date,
@@ -354,6 +358,7 @@ class GmailProvider(EmailProvider):
                     .get(userId="me", id=thread_id, format="full")
                     .execute()
                 )
+                real_thread_id = th.get("id", thread_id)
                 messages = th.get("messages", [])
                 if not messages:
                     return {
@@ -363,6 +368,7 @@ class GmailProvider(EmailProvider):
                     }
                 
                 last = messages[-1]
+                msg_id = last.get("id", "")
                 payload = last.get("payload", {})
                 headers = payload.get("headers", [])
                 header_map = {h["name"].lower(): h["value"] for h in headers}
@@ -374,6 +380,8 @@ class GmailProvider(EmailProvider):
                 
                 return {
                     "success": True,
+                    "message_id": msg_id or real_thread_id,
+                    "thread_id": real_thread_id,
                     "subject": subject,
                     "from": sender,
                     "date": date,

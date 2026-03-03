@@ -154,7 +154,9 @@ def get_job_queue() -> BackgroundJobQueue:
     """Get singleton job queue instance"""
     global _job_queue
     if _job_queue is None:
-        _job_queue = BackgroundJobQueue(num_workers=2)
+        # We run multiple independent pipelines (facts, relationships, tasks, linking)
+        # and want them to execute concurrently.
+        _job_queue = BackgroundJobQueue(num_workers=6)
         _job_queue.start()
     return _job_queue
 

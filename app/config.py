@@ -80,6 +80,17 @@ class Config:
     # OAuth redirect URLs
     OAUTH_REDIRECT_URI: Optional[str] = os.getenv("OAUTH_REDIRECT_URI")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Gmail Pub/Sub Watch (push notifications)
+    # ═══════════════════════════════════════════════════════════════════
+    #
+    # `GMAIL_PUBSUB_TOPIC` example:
+    #   projects/<gcp-project-id>/topics/<topic-name>
+    #
+    GMAIL_PUBSUB_TOPIC: str = os.getenv("GMAIL_PUBSUB_TOPIC", "")
+    # Shared secret for webhook endpoint (MVP). Prefer Pub/Sub OIDC verification in production.
+    GMAIL_PUBSUB_WEBHOOK_SECRET: str = os.getenv("GMAIL_PUBSUB_WEBHOOK_SECRET", "")
     
     # ═══════════════════════════════════════════════════════════════════
     # Microsoft/Outlook OAuth

@@ -130,7 +130,7 @@ class MemoryService:
             from app.memory.models import get_users_collection
             users_col = get_users_collection()
             
-            if users_col:
+            if users_col is not None:
                 user = users_col.find_one({"user_id": user_id})
                 if user and "memory_namespace" in user:
                     namespace = user["memory_namespace"]

@@ -36,12 +36,10 @@ class ActionType(str, Enum):
 
 
 class TaskPriority(str, Enum):
-    """Task priority levels for Aivis UI"""
-    NOW = "NOW"          # Urgent, due soon, from VIP
-    TODAY = "TODAY"      # Due today, important but not urgent
-    THIS_WEEK = "THIS_WEEK"  # Due this week
-    LATER = "LATER"      # No deadline or low priority
-    SOMEDAY = "SOMEDAY"  # Nice to have, no urgency
+    """Task priority levels for Aivis UI (MVP: 3 levels)"""
+    NOW = "NOW"          # Score ≥ 6: Urgent, due soon, from VIP
+    SOON = "SOON"        # Score 3-5: Important but not urgent
+    LATER = "LATER"      # Score ≤ 2: No deadline or low priority
 
 
 class StakeType(str, Enum):
@@ -107,10 +105,8 @@ TASK_CANDIDATE_SCHEMA = {
     "user_id": str,
     "event_id": str,  # Links to events._id
     "title": str,
-    "action_type": str,  # ActionType
-    "due_datetime": Optional[datetime],
-    "stake": str,  # StakeType
-    "confidence": float,  # 0.0 to 1.0
+    "action_type": str,  # ActionType (reply, schedule, call, review, complete, delegate)
+    "due_datetime": Optional[datetime],  # null if no deadline mentioned
     "extracted_at": datetime,
     "llm_model": str,  # Which model extracted this
     "raw_llm_output": Optional[Dict[str, Any]],  # For debugging
@@ -119,9 +115,10 @@ TASK_CANDIDATE_SCHEMA = {
 AIVIS_TASK_SCHEMA = {
     "_id": str,  # task_id (e.g., "aivis_1")
     "user_id": str,
-    "priority": str,  # TaskPriority (NOW, TODAY, THIS_WEEK, LATER, SOMEDAY)
+    "priority": str,  # TaskPriority (NOW, SOON, LATER)
+    "priority_score": int,  # Deterministic score (0-10+)
     "title": str,
-    "reason": str,  # Why this priority? (e.g., "Due tomorrow + from Sam (VIP)")
+    "reason": str,  # Human sentence explaining priority (e.g., "Due in 6h + from VIP + reply needed")
     "due_datetime": Optional[datetime],
     "source_event": str,  # event_id
     "task_candidate": str,  # candidate_id
@@ -199,14 +196,16 @@ EXAMPLE_TASK_CANDIDATE = {
     "title": "Confirm meeting with Sam",
     "action_type": "reply",
     "due_datetime": datetime(2026, 1, 29, 10, 0),  # Tomorrow morning
-    "stake": "relationship",
-    "confidence": 0.86,
     "extracted_at": datetime.utcnow(),
     "llm_model": "gpt-4o-mini",
     "raw_llm_output": {
-        "reasoning": "Sam is asking for confirmation about tomorrow's meeting and inquiring about deliverables",
-        "urgency": "high",
-        "context": "Meeting scheduled, deck preparation mentioned",
+        "tasks": [
+            {
+                "title": "Confirm meeting with Sam",
+                "action_type": "reply",
+                "due_datetime": "2026-01-29T10:00:00"
+            }
+        ]
     },
 }
 
@@ -214,8 +213,9 @@ EXAMPLE_AIVIS_TASK = {
     "_id": "aivis_1",
     "user_id": "user_123",
     "priority": "NOW",
+    "priority_score": 9,  # 4 (due <24h) + 3 (VIP) + 2 (reply needed) = 9
     "title": "Confirm meeting with Sam",
-    "reason": "Due tomorrow + from Sam (VIP) + deliverable mentioned",
+    "reason": "Due in 18h + from Sam Chen (VIP) + reply needed",
     "due_datetime": datetime(2026, 1, 29, 10, 0),
     "source_event": "gmail_msg_abc123",
     "task_candidate": "candidate_xyz789",

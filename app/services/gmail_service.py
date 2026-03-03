@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import threading
 import ssl
@@ -819,15 +819,25 @@ def classify_single_email(
                 db = get_db()
                 emails_col = db.db.get_collection("emails") if (db.is_connected and db.db is not None) else None
                 if emails_col is not None:
+                    # Store body temporarily for task processing
+                    body_full = email_data.get("body", "")
+                    
                     emails_col.update_one(
                         {"user_id": user_id, "thread_id": thread_id, "source": "gmail"},
                         {
                             "$set": {
+                                "user_id": user_id,
+                                "thread_id": thread_id,
+                                "from": email_data.get("from", ""),
+                                "subject": email_data.get("subject", ""),
+                                "snippet": email_data.get("snippet", "")[:200],
                                 "category": classification["category"],
                                 "scores": classification["scores"],
                                 "classified_at": datetime.utcnow().isoformat(),
                                 "classification_version": CLASSIFICATION_VERSION,
-                                "source": "gmail",  # Add source field
+                                "source": "gmail",
+                                "body_temp": body_full,  # Store full body temporarily for task extraction
+                                "processed_for_tasks": False,  # Mark as needing task processing
                             }
                         },
                         upsert=True,
@@ -1087,14 +1097,19 @@ def classify_background(user_id: str, max_emails: int = 20) -> Dict[str, Any]:
                                 "$set": {
                                     "user_id": user_id,
                                     "thread_id": thread_id,
+                                    "message_id": msg_id,  # Store message ID for reference
                                     "from": headers.get("From", ""),
                                     "source": "gmail",  # Add source field
                                     "subject": headers.get("Subject", "(No subject)"),
                                     "snippet": full_msg.get("snippet", "")[:200],
+                                    "date": headers.get("Date", ""),
                                     "category": classification["category"],
                                     "scores": classification["scores"],
                                     "classified_at": datetime.utcnow().isoformat(),
                                     "classification_version": CLASSIFICATION_VERSION,
+                                    "body_temp": body,  # Store full body temporarily for task extraction
+                                    "processed_for_tasks": False,  # Mark as needing task processing
+                                    "labels": full_msg.get("labelIds", []),  # Store labels
                                 }
                             },
                             upsert=True,

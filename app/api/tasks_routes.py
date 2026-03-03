@@ -17,6 +17,46 @@ logger = get_logger(__name__)
 tasks_bp = Blueprint("tasks", __name__, url_prefix="/api/tasks")
 
 
+@tasks_bp.route("/ingest", methods=["POST"])
+def ingest_and_process():
+    """
+    Trigger the login-style email pipeline (ingest + parallel workers).
+    
+    Request body:
+    {
+      "user_id": "user_123",
+      "max_emails": 20  // optional, default 20
+    }
+    
+    Response:
+    {
+      "success": true,
+      "job_id": "login-email-pipeline-...",
+      "message": "Email processing started"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+        
+        user_id = data.get("user_id")
+        max_emails = data.get("max_emails", 20)
+        
+        if not user_id:
+            return jsonify({"success": False, "error": "Missing user_id"}), 400
+        
+        from app.services.email_processing_pipeline import enqueue_login_email_pipeline
+
+        job_id = enqueue_login_email_pipeline(user_id=user_id, max_emails=max_emails, provider="gmail")
+        return jsonify({"success": True, "job_id": job_id, "message": "Email processing started"})
+        
+    except Exception as e:
+        logger.error(f"Error in ingest: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @tasks_bp.route("/process-email", methods=["POST"])
 def process_email():
     """

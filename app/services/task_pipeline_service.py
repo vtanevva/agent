@@ -8,7 +8,7 @@ This service implements the MVP task extraction and prioritization pipeline:
 """
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Optional
 from uuid import uuid4
 
@@ -29,10 +29,55 @@ logger = get_logger(__name__)
 
 
 class TaskPipelineService:
-    """Handles the full task pipeline from events to prioritized tasks"""
+    """
+    Handles the full task pipeline from events to prioritized tasks
+    
+    MVP Pipeline:
+    1. Ingest: Pull unread emails + calendar events
+    2. Extract: LLM extracts tasks (structured JSON only)
+    3. Score: Deterministic priority scoring
+    """
     
     def __init__(self):
         self.llm = get_llm_service()
+    
+    def ingest_and_process(self, user_id: str, max_emails: int = 20) -> Dict[str, Any]:
+        """
+        DEPRECATED (replaced by worker-based pipeline).
+
+        Use `app.services.email_processing_pipeline.enqueue_login_email_pipeline()` instead.
+        This avoids deleting `body_temp` too early and allows parallel workers
+        (facts, relationships, tasks, linking).
+        """
+        try:
+            from app.services.email_processing_pipeline import enqueue_login_email_pipeline
+
+            job_id = enqueue_login_email_pipeline(user_id=user_id, max_emails=max_emails, provider="gmail")
+            return {"success": True, "job_id": job_id}
+        except Exception as e:
+            logger.error(f"Failed to enqueue email processing: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    # NOTE: bootstrap fast-path removed in favor of worker-based pipeline.
+    
+    def _extract_name(self, email_str: str) -> str:
+        """Extract name from 'John Doe <john@example.com>' format"""
+        if not email_str:
+            return ""
+        if '<' in email_str:
+            return email_str.split('<')[0].strip()
+        return email_str.strip()
+    
+    def _empty_result(self, error: str = "") -> Dict[str, Any]:
+        """Return empty result structure"""
+        return {
+            "success": False,
+            "error": error,
+            "emails_processed": 0,
+            "calendar_events": 0,
+            "tasks_created": 0,
+            "task_ids": []
+        }
     
     def process_gmail_event(self, user_id: str, email_data: Dict[str, Any]) -> Optional[str]:
         """
@@ -86,7 +131,7 @@ class TaskPipelineService:
     def _create_event(self, user_id: str, source: str, timestamp: datetime, data: Dict[str, Any]) -> Optional[str]:
         """Create an Event document in MongoDB"""
         events_col = get_events_collection()
-        if not events_col:
+        if events_col is None:
             logger.error("Events collection not available")
             return None
         
@@ -134,56 +179,66 @@ class TaskPipelineService:
         if not body:
             return []
         
-        # LLM prompt for task extraction
-        prompt = f"""Extract actionable tasks from this email for the recipient.
+        # LLM prompt for task extraction (MVP: structured extraction only, no reasoning)
+        prompt = f"""Extract actionable tasks from this email. Output JSON only.
 
-Rules:
-- Only extract concrete, specific actions that the recipient must take
-- Do NOT create generic tasks like "Read this email" or "Handle this thread"
-- Each task must have a clear action verb (reply, schedule, prepare, send, etc.)
-- Estimate due date/time based on email content (e.g., "tomorrow" = next day)
-- Assess what's at stake: relationship, deadline, opportunity, reputation, money, or routine
-- Provide confidence score 0.0-1.0 based on how clear the task is
-- Return at most 3 tasks
+RULES:
+• If no clear action → ignore
+• If no implied deadline → mark due_datetime = null
+• Only concrete tasks (reply, schedule, call, etc.)
+• Max 3 tasks
 
-Email details:
+Email:
 From: {sender_name} <{sender}>
 Subject: {subject}
 Date: {timestamp.strftime("%Y-%m-%d %H:%M")}
 
-Body:
 {body[:3000]}
 
-Return STRICT JSON:
+OUTPUT (strict JSON):
 {{
   "tasks": [
     {{
-      "title": "Short task description (max 12 words)",
+      "title": "task description (max 12 words)",
       "action_type": "reply|schedule|call|review|complete|delegate",
-      "due_datetime": "YYYY-MM-DDTHH:MM:SS or null",
-      "stake": "relationship|deadline|opportunity|reputation|money|routine",
-      "confidence": 0.0-1.0,
-      "reasoning": "Why this is a task"
+      "due_datetime": "YYYY-MM-DDTHH:MM:SS or null"
     }}
   ]
 }}
 
-If no tasks, return {{"tasks": []}}"""
+If no clear action, return {{"tasks": []}}"""
         
         try:
             response = self.llm.chat_completion_text(
                 messages=[
-                    {"role": "system", "content": "You are a task extraction expert. Extract only clear, actionable tasks. Return strict JSON."},
+                    {"role": "system", "content": "You extract tasks from emails. Return only JSON, no explanation."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.1,
-                max_tokens=800,
+                temperature=0.0,  # Deterministic
+                max_tokens=500,
             )
             
             # Parse JSON response
             parsed = self._parse_llm_json(response)
             if not parsed or "tasks" not in parsed:
                 return []
+
+            # Log every extracted task (debuggable, no email body logged)
+            extracted_tasks = parsed.get("tasks", []) or []
+            logger.info(
+                f"🧠 Extracted {min(len(extracted_tasks), 3)} task(s) from event {event_id} "
+                f"(subject: {subject[:80]!r})"
+            )
+            for i, task_data in enumerate(extracted_tasks[:3], start=1):
+                try:
+                    logger.info(
+                        f"  [{i}] title={str(task_data.get('title', '')).strip()[:120]!r} "
+                        f"action_type={task_data.get('action_type')!r} "
+                        f"due_datetime={task_data.get('due_datetime')!r}"
+                    )
+                except Exception:
+                    # Never fail extraction because of logging issues
+                    pass
             
             # Store candidates in DB and return
             candidates = []
@@ -206,7 +261,7 @@ If no tasks, return {{"tasks": []}}"""
     def _store_task_candidate(self, user_id: str, event_id: str, task_data: Dict[str, Any], raw_output: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Store a TaskCandidate in MongoDB"""
         candidates_col = get_task_candidates_collection()
-        if not candidates_col:
+        if candidates_col is None:
             return None
         
         candidate_id = f"candidate_{uuid4()}"
@@ -220,6 +275,24 @@ If no tasks, return {{"tasks": []}}"""
             except Exception:
                 logger.warning(f"Failed to parse due_datetime: {due_str}")
         
+        # FILTER: Skip tasks that are overdue by more than X days.
+        # (We do NOT skip based on email timestamp; we skip based on task due date.)
+        OVERDUE_CUTOFF_DAYS = 2
+        if due_datetime:
+            now_utc = datetime.now(timezone.utc)
+            # Normalize due_datetime to aware UTC for safe comparisons
+            if due_datetime.tzinfo is None:
+                due_utc = due_datetime.replace(tzinfo=timezone.utc)
+            else:
+                due_utc = due_datetime.astimezone(timezone.utc)
+
+            if due_utc < (now_utc - timedelta(days=OVERDUE_CUTOFF_DAYS)):
+                logger.info(
+                    f"⏭️  Skipping overdue task (> {OVERDUE_CUTOFF_DAYS}d): "
+                    f"'{task_data.get('title', '')}' (was due {due_utc.strftime('%Y-%m-%d')})"
+                )
+                return None
+        
         candidate = {
             "_id": candidate_id,
             "user_id": user_id,
@@ -227,8 +300,6 @@ If no tasks, return {{"tasks": []}}"""
             "title": task_data.get("title", "")[:200],
             "action_type": task_data.get("action_type", "review"),
             "due_datetime": due_datetime,
-            "stake": task_data.get("stake", "routine"),
-            "confidence": float(task_data.get("confidence", 0.6)),
             "extracted_at": datetime.utcnow(),
             "llm_model": self.llm.default_model,
             "raw_llm_output": raw_output,
@@ -236,7 +307,12 @@ If no tasks, return {{"tasks": []}}"""
         
         try:
             candidates_col.insert_one(candidate)
-            logger.info(f"Created task candidate: {candidate['title'][:50]}")
+            logger.info(
+                f"✅ Stored TaskCandidate {candidate_id}: "
+                f"title={candidate.get('title','')[:80]!r} "
+                f"action_type={candidate.get('action_type')!r} "
+                f"due_datetime={candidate.get('due_datetime')}"
+            )
             return candidate
         except Exception as e:
             logger.error(f"Failed to store task candidate: {e}", exc_info=True)
@@ -247,13 +323,13 @@ If no tasks, return {{"tasks": []}}"""
         Create an AivisTask from a TaskCandidate with priority and actions
         """
         tasks_col = get_aivis_tasks_collection()
-        if not tasks_col:
+        if tasks_col is None:
             return None
         
         task_id = f"aivis_{uuid4().hex[:8]}"
         
-        # Calculate priority
-        priority, reason = self._calculate_priority(user_id, candidate, email_data)
+        # Calculate priority using deterministic scoring
+        priority, score, reason = self._calculate_priority(user_id, candidate, email_data)
         
         # Generate actions
         actions, action_metadata = self._generate_actions(candidate, email_data)
@@ -262,6 +338,7 @@ If no tasks, return {{"tasks": []}}"""
             "_id": task_id,
             "user_id": user_id,
             "priority": priority,
+            "priority_score": score,
             "title": candidate["title"],
             "reason": reason,
             "due_datetime": candidate.get("due_datetime"),
@@ -277,68 +354,101 @@ If no tasks, return {{"tasks": []}}"""
         
         try:
             tasks_col.insert_one(task)
-            logger.info(f"✅ Created AivisTask [{priority}]: {task['title'][:50]}")
+            logger.info(f"✅ Created AivisTask [{priority}] (score: {score}): {task['title'][:50]}")
             return task_id
         except Exception as e:
             logger.error(f"Failed to create AivisTask: {e}", exc_info=True)
             return None
     
-    def _calculate_priority(self, user_id: str, candidate: Dict[str, Any], email_data: Dict[str, Any]) -> tuple[str, str]:
+    def _calculate_priority(self, user_id: str, candidate: Dict[str, Any], email_data: Dict[str, Any]) -> tuple[str, int, str]:
         """
-        Calculate task priority (NOW, TODAY, THIS_WEEK, LATER, SOMEDAY) with reasoning
+        Calculate task priority using deterministic scoring (MVP logic)
         
-        Priority rules:
-        - NOW: Due within 24h + from VIP, OR high confidence + relationship stake
-        - TODAY: Due today, OR high confidence + deadline stake
-        - THIS_WEEK: Due this week
-        - LATER: Due after this week
-        - SOMEDAY: No deadline
+        Scoring weights:
+        - Due <24h: +4 points
+        - Due 1-3 days: +2 points
+        - Sender VIP: +3 points
+        - Action required (reply/confirm): +2 points
+        - Calendar conflict: +1 point
+        
+        Buckets:
+        - score ≥ 6 → NOW
+        - score 3-5 → SOON
+        - score ≤ 2 → LATER
+        
+        Returns: (priority, score, reason_sentence)
         """
+        score = 0
+        reason_parts = []
+        
         due = candidate.get("due_datetime")
-        confidence = candidate.get("confidence", 0.0)
-        stake = candidate.get("stake", "routine")
+        action_type = candidate.get("action_type", "")
         sender = email_data.get("sender", "")
+        sender_name = email_data.get("sender_name", sender)
         
-        # Check if sender is VIP
-        is_vip = self._is_vip_contact(user_id, sender)
+        now = datetime.now(timezone.utc)
         
-        now = datetime.utcnow()
-        reasons = []
-        
-        # Due date urgency
+        # 1. Due date scoring
         if due:
-            hours_until_due = (due - now).total_seconds() / 3600
-            
-            if hours_until_due < 24:
-                reasons.append("due within 24h")
-                if is_vip or stake in ["relationship", "deadline"]:
-                    return TaskPriority.NOW, f"Due within 24h + {stake} stake" + (" + VIP sender" if is_vip else "")
+            # Normalize due to aware UTC to avoid naive/aware comparison errors
+            if isinstance(due, datetime):
+                if due.tzinfo is None:
+                    due_utc = due.replace(tzinfo=timezone.utc)
                 else:
-                    return TaskPriority.TODAY, "Due within 24h"
-            
-            elif hours_until_due < 24 * 7:
-                days = int(hours_until_due / 24)
-                return TaskPriority.THIS_WEEK, f"Due in {days} days"
-            
+                    due_utc = due.astimezone(timezone.utc)
             else:
-                return TaskPriority.LATER, "Due after this week"
+                due_utc = None
+
+            if due_utc is not None:
+                hours_until_due = (due_utc - now).total_seconds() / 3600
+            
+                if hours_until_due < 24:
+                    score += 4
+                    hours = int(hours_until_due)
+                    reason_parts.append(f"due in {hours}h")
+                elif hours_until_due < 72:  # 1-3 days
+                    score += 2
+                    days = int(hours_until_due / 24)
+                    reason_parts.append(f"due in {days}d")
         
-        # No due date - assess by confidence and stake
-        if confidence >= 0.8 and stake == "relationship" and is_vip:
-            return TaskPriority.NOW, f"High confidence + relationship stake + VIP ({sender})"
+        # 2. VIP sender scoring
+        is_vip = self._is_vip_contact(user_id, sender)
+        if is_vip:
+            score += 3
+            reason_parts.append(f"from {sender_name} (VIP)")
         
-        if confidence >= 0.7 and stake in ["relationship", "deadline", "opportunity"]:
-            return TaskPriority.TODAY, f"High confidence + {stake} stake"
+        # 3. Action required scoring
+        if action_type in ["reply", "schedule", "call"]:
+            score += 2
+            reason_parts.append(f"{action_type} needed")
         
-        if confidence >= 0.6:
-            return TaskPriority.THIS_WEEK, "Medium confidence"
+        # 4. Calendar conflict (check if task time conflicts with existing events)
+        if due:
+            has_conflict = self._check_calendar_conflict(user_id, due)
+            if has_conflict:
+                score += 1
+                reason_parts.append("calendar conflict")
         
-        return TaskPriority.SOMEDAY, "Low confidence or routine"
+        # Determine priority bucket
+        if score >= 6:
+            priority = TaskPriority.NOW
+        elif score >= 3:
+            priority = TaskPriority.SOON
+        else:
+            priority = TaskPriority.LATER
+        
+        # Generate human-readable reason
+        if reason_parts:
+            reason = " + ".join(reason_parts).capitalize()
+        else:
+            reason = "No urgency signals"
+        
+        return priority, score, reason
     
     def _is_vip_contact(self, user_id: str, email: str) -> bool:
         """Check if a contact is marked as VIP (high importance)"""
         relationships_col = get_relationships_collection()
-        if not relationships_col:
+        if relationships_col is None:
             return False
         
         try:
@@ -349,6 +459,47 @@ If no tasks, return {{"tasks": []}}"""
             })
             return relationship is not None
         except Exception:
+            return False
+    
+    def _check_calendar_conflict(self, user_id: str, task_due: datetime) -> bool:
+        """
+        Check if task due time conflicts with calendar events
+        
+        Returns True if there's an event within ±30 minutes of the task time
+        """
+        try:
+            from app.db.collections import get_calendar_events_collection
+            
+            cal_col = get_calendar_events_collection()
+            if cal_col is None:
+                return False
+            
+            # Check for events within ±30 minutes of task due time
+            time_window_start = task_due - timedelta(minutes=30)
+            time_window_end = task_due + timedelta(minutes=30)
+            
+            conflict = cal_col.find_one({
+                "user_id": user_id,
+                "$or": [
+                    {
+                        "start_time": {
+                            "$gte": time_window_start,
+                            "$lt": time_window_end
+                        }
+                    },
+                    {
+                        "end_time": {
+                            "$gt": time_window_start,
+                            "$lte": time_window_end
+                        }
+                    }
+                ]
+            })
+            
+            return conflict is not None
+            
+        except Exception as e:
+            logger.warning(f"Calendar conflict check failed: {e}")
             return False
     
     def _generate_actions(self, candidate: Dict[str, Any], email_data: Dict[str, Any]) -> tuple[List[str], Dict[str, Any]]:
@@ -435,10 +586,10 @@ If no tasks, return {{"tasks": []}}"""
         """
         Get AivisTasks for a user, optionally filtered by priority
         
-        Returns tasks sorted by priority order (NOW first, then TODAY, etc.)
+        Returns tasks sorted by priority order (NOW first, then SOON, etc.)
         """
         tasks_col = get_aivis_tasks_collection()
-        if not tasks_col:
+        if tasks_col is None:
             return []
         
         query = {
@@ -450,14 +601,25 @@ If no tasks, return {{"tasks": []}}"""
             query["priority"] = priority
         
         try:
-            # Define priority order
-            priority_order = ["NOW", "TODAY", "THIS_WEEK", "LATER", "SOMEDAY"]
+            # Define priority order (MVP: 3 levels)
+            priority_order = ["NOW", "SOON", "LATER"]
             
             tasks = list(tasks_col.find(query).limit(limit))
             
-            # Sort by priority order
+            # Sort by priority order, then by score (descending), then by created_at
+            # Handle old priority values gracefully (map to LATER)
+            def get_priority_index(task):
+                priority = task.get("priority", "LATER")
+                try:
+                    return priority_order.index(priority)
+                except ValueError:
+                    # Old priority values (TODAY, THIS_WEEK, SOMEDAY) -> map to LATER
+                    logger.warning(f"Unknown priority '{priority}' for task {task.get('_id')}, treating as LATER")
+                    return len(priority_order)  # Put at end
+            
             tasks.sort(key=lambda t: (
-                priority_order.index(t.get("priority", "SOMEDAY")),
+                get_priority_index(t),
+                -t.get("priority_score", 0),  # Higher score first within same priority
                 t.get("created_at", datetime.min)
             ))
             
@@ -470,7 +632,7 @@ If no tasks, return {{"tasks": []}}"""
     def mark_task_done(self, user_id: str, task_id: str) -> bool:
         """Mark an AivisTask as completed"""
         tasks_col = get_aivis_tasks_collection()
-        if not tasks_col:
+        if tasks_col is None:
             return False
         
         try:

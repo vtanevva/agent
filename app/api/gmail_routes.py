@@ -20,12 +20,14 @@ from app.services.gmail_service import (
     send_new_email,
     rewrite_email_text,
 )
+from app.services.gmail_watch_service import start_gmail_watch, stop_gmail_watch
 from app.tools.email import analyze_email_style, generate_reply_draft, generate_forward_draft
 from app.utils.oauth_utils import require_google_auth
 from app.utils.rate_limiter import enforce_rate_limit, get_rate_limit_key, RateLimitExceeded
 from app.utils.logging_utils import get_logger
 from app.config import Config
 from app.db.collections import get_contacts_collection
+from app.utils.google_api_helpers import get_gmail_service
 
 logger = get_logger(__name__)
 
@@ -574,6 +576,57 @@ def gmail_classify_background():
         user_id=user_id,
         max_emails=max_emails
     )
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
+
+
+@gmail_bp.route("/watch/start", methods=["POST"])
+def gmail_watch_start():
+    """Start Gmail Pub/Sub watch for the authenticated user."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
+
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    # Optional overrides
+    topic = (data.get("topic") or data.get("topic_name") or "").strip() or None
+    label_ids = data.get("label_ids") or data.get("labels") or None
+    if label_ids is not None and not isinstance(label_ids, list):
+        return jsonify({"success": False, "error": "label_ids must be a list"}), 400
+
+    # Resolve the Gmail address for proper watch-state keying
+    try:
+        svc = get_gmail_service(user_id)
+        profile = svc.users().getProfile(userId="me").execute()
+        email_address = (profile or {}).get("emailAddress") or user_id
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Failed to load Gmail profile: {e}"}), 500
+
+    result = start_gmail_watch(
+        user_id=user_id,
+        email_address=str(email_address),
+        topic_name=topic,
+        label_ids=label_ids,
+    )
+    status = 200 if result.get("success", True) else 500
+    return jsonify(result), status
+
+
+@gmail_bp.route("/watch/stop", methods=["POST"])
+def gmail_watch_stop():
+    """Stop Gmail watch for the authenticated user."""
+    data = request.get_json(force=True, silent=True) or {}
+    user_id_raw = data.get("user_id", "")
+    user_id = _normalize_user_id(user_id_raw)
+
+    auth_response = require_google_auth(user_id)
+    if auth_response:
+        return auth_response
+
+    result = stop_gmail_watch(user_id=user_id)
     status = 200 if result.get("success", True) else 500
     return jsonify(result), status
 

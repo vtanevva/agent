@@ -1,5 +1,5 @@
 import React, {useEffect, useState, useCallback, useRef, useMemo} from 'react';
-import {View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, KeyboardAvoidingView, ActivityIndicator, Modal} from 'react-native';
+import {View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, KeyboardAvoidingView, ActivityIndicator, Modal, AppState} from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {LinearGradient} from 'expo-linear-gradient';
 import {colors} from '../styles/colors';
@@ -44,6 +44,11 @@ export default function GmailAgentPage() {
   const initialLoadRef = useRef(false);
   const fetchingRef = useRef(false);
   const lastDataHashRef = useRef(null);
+  const pollTimerRef = useRef(null);
+  const appStateRef = useRef(AppState.currentState);
+
+  // Poll interval: keeps UI updated as backend workers ingest/classify new emails (e.g. from Pub/Sub)
+  const POLL_MS = 15000;
 
   const fetchTriagedInbox = useCallback(async (category = null, showLoading = true) => {
     if (!userId || fetchingRef.current) return;
@@ -106,6 +111,34 @@ export default function GmailAgentPage() {
         }),
       }).catch(e => console.error('Background classification trigger failed:', e));
     }
+  }, [userId, fetchTriagedInbox]);
+
+  // Auto-refresh: poll triaged inbox so new pushed emails show up without manual refresh.
+  useEffect(() => {
+    if (!userId) return;
+
+    // Start polling
+    if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    pollTimerRef.current = setInterval(() => {
+      fetchTriagedInbox(null, false);
+    }, POLL_MS);
+
+    // Refresh when app returns to foreground
+    const sub = AppState.addEventListener('change', (nextAppState) => {
+      const prev = appStateRef.current;
+      appStateRef.current = nextAppState;
+      if (prev && prev.match(/inactive|background/) && nextAppState === 'active') {
+        fetchTriagedInbox(null, false);
+      }
+    });
+
+    return () => {
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+      sub?.remove?.();
+    };
   }, [userId, fetchTriagedInbox]);
 
   // Don't refetch when category changes - just use existing data

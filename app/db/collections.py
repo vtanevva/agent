@@ -47,3 +47,11 @@ def get_email_todos_collection() -> Optional[Collection]:
         return db_manager.db["email_todos"]
     return None
 
+
+def get_gmail_watch_state_collection() -> Optional[Collection]:
+    """Get the gmail_watch_state collection (historyId baselines for Pub/Sub watch)."""
+    db_manager = get_db()
+    if db_manager.is_connected and db_manager.db is not None:
+        return db_manager.db["gmail_watch_state"]
+    return None
+

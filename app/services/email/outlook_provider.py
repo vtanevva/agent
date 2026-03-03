@@ -320,6 +320,8 @@ class OutlookProvider(EmailProvider):
         
         return {
             "success": True,
+            "message_id": thread_id,
+            "thread_id": thread_id,
             "subject": subject,
             "from": from_address,
             "date": date,

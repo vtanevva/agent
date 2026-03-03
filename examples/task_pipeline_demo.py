@@ -11,6 +11,14 @@ import sys
 import os
 from datetime import datetime, timedelta
 
+# Fix Windows console encoding for emoji support
+if sys.platform.startswith('win'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -100,7 +108,7 @@ Sam""",
     print("AIVIS TASK (User-Facing)")
     print("="*80)
     print(f"\n📋 Title: {task['title']}")
-    print(f"🚦 Priority: {task['priority']}")
+    print(f"🚦 Priority: {task['priority']} (score: {task.get('priority_score', 0)})")
     print(f"💡 Reason: {task['reason']}")
     print(f"⏰ Due: {task.get('due_datetime', 'No deadline')}")
     print(f"📍 Status: {task['status']}")
@@ -124,12 +132,13 @@ Sam""",
     print("ALL TASKS (Grouped by Priority)")
     print("="*80)
     
-    for priority in ["NOW", "TODAY", "THIS_WEEK", "LATER", "SOMEDAY"]:
+    for priority in ["NOW", "SOON", "LATER"]:
         priority_tasks = pipeline.get_tasks_by_priority(user_id, priority=priority)
         if priority_tasks:
             print(f"\n🚦 {priority} ({len(priority_tasks)} tasks)")
             for t in priority_tasks:
-                print(f"   • {t['title'][:60]}")
+                score = t.get('priority_score', 0)
+                print(f"   • [{score}] {t['title'][:60]}")
                 print(f"     Reason: {t['reason']}")
     
     print("\n" + "="*80)
@@ -203,13 +212,12 @@ def demo_multiple_emails():
     for task in all_tasks:
         emoji = {
             "NOW": "🔴",
-            "TODAY": "🟡",
-            "THIS_WEEK": "🟢",
-            "LATER": "🔵",
-            "SOMEDAY": "⚪"
+            "SOON": "🟡",
+            "LATER": "⚪"
         }.get(task['priority'], "⚪")
         
-        print(f"\n{emoji} [{task['priority']}] {task['title']}")
+        score = task.get('priority_score', 0)
+        print(f"\n{emoji} [{task['priority']}] (score: {score}) {task['title']}")
         print(f"   {task['reason']}")
         print(f"   Actions: {', '.join(task['actions'])}")
     

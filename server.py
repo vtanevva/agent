@@ -65,6 +65,7 @@ from app.api.contacts_routes import contacts_bp
 from app.api.calendar_routes import calendar_bp
 from app.api.files_routes import files_bp
 from app.api.tasks_routes import tasks_bp
+from app.api.webhooks_routes import webhooks_bp
 
 # Initialize logger after logging is configured
 logger = get_logger(__name__)
@@ -123,12 +124,13 @@ def create_app():
     app.register_blueprint(calendar_bp)
     app.register_blueprint(files_bp)
     app.register_blueprint(tasks_bp)
+    app.register_blueprint(webhooks_bp)
     
     # Register memory system blueprint
     from app.api.memory_routes import memory_bp
     app.register_blueprint(memory_bp)
     
-    logger.info("Registered API blueprints: chat, gmail, contacts, calendar, files, tasks, memory")
+    logger.info("Registered API blueprints: chat, gmail, contacts, calendar, files, tasks, webhooks, memory")
     
     # Add request logging
     @app.before_request
@@ -1176,155 +1178,38 @@ def google_callback():
 
         save_google_credentials(state, creds, real_email)
         
-        # 🎯 BACKFILL FACTS: User just connected their account
-        # Trigger background backfill of their Gmail messages to extract facts
+        # 🚀 LOGIN EMAIL PIPELINE (NEW):
+        # 1) Ingest latest N emails to Mongo (with body_temp)
+        # 2) Run independent workers in parallel:
+        #    - facts extraction
+        #    - relationship entity updates
+        #    - tasks extraction
+        #    - linking (attach facts/tasks to relationships once available)
+        #
+        # Privacy: body_temp is deleted only after all jobs finish.
         try:
-            from app.memory.background_jobs import get_job_queue
-            from app.memory.models import get_messages_collection
-            
-            # Check if user has existing messages in DB
-            messages_col = get_messages_collection()
-            if messages_col:
-                message_count = messages_col.count_documents({"user_id": state})
-                
-                if message_count > 0:
-                    logger.info(f"🔄 Triggering backfill for user {state} ({message_count} messages)")
-                    
-                    # Enqueue backfill job (non-blocking)
-                    def backfill_for_new_user():
-                        import requests
-                        try:
-                            requests.post(
-                                "http://localhost:10000/memory/admin/backfill-facts",
-                                json={"user_id": state, "limit": 20},  # Last 50 messages
-                                timeout=300  # 5 minutes timeout
-                            )
-                            logger.info(f"✅ Backfill completed for user {state}")
-                        except Exception as e:
-                            logger.error(f"❌ Backfill failed for user {state}: {e}")
-                    
-                    job_queue = get_job_queue()
-                    job_queue.enqueue(
-                        backfill_for_new_user,
-                        job_id=f"backfill-oauth-{state}"
-                    )
+            from app.services.email_processing_pipeline import enqueue_login_email_pipeline
+
+            job_id = enqueue_login_email_pipeline(user_id=state, max_emails=20, provider="gmail")
+            logger.info(f"✅ Enqueued login email pipeline for {state} (job: {job_id})")
+        except Exception as e:
+            # Don't fail OAuth if background processing fails
+            logger.warning(f"⚠️ Could not start login email pipeline for user {state}: {e}")
+
+        # 🔔 Start Gmail Pub/Sub watch (optional, if configured)
+        try:
+            from app.services.gmail_watch_service import start_gmail_watch
+
+            if Config.GMAIL_PUBSUB_TOPIC:
+                watch_res = start_gmail_watch(user_id=state, email_address=str(real_email or state))
+                if watch_res.get("success"):
+                    logger.info(f"✅ Gmail watch enabled for {real_email or state} (topic configured)")
                 else:
-                    logger.info(f"ℹ️ No messages to backfill for new user {state}")
+                    logger.warning(f"⚠️ Gmail watch not started: {watch_res.get('error')}")
+            else:
+                logger.info("ℹ️ Gmail Pub/Sub watch not started (GMAIL_PUBSUB_TOPIC not set)")
         except Exception as e:
-            # Don't fail OAuth if backfill fails
-            logger.warning(f"⚠️ Could not trigger backfill for user {state}: {e}")
-        
-        # 🎯 COMPREHENSIVE BACKFILL: Extract facts, tasks, relationships, and projects from past data
-        # This processes both emails and chat messages to build complete memory
-        try:
-            from app.memory.background_jobs import get_job_queue
-            
-            # Enqueue comprehensive backfill job (non-blocking)
-            def comprehensive_backfill_for_new_user():
-                import requests
-                try:
-                    logger.info(f"🔄 Starting comprehensive backfill for user {state}")
-                    response = requests.post(
-                        "http://localhost:10000/memory/admin/backfill-comprehensive",
-                        json={
-                            "user_id": state,
-                            "max_emails": 20  # Process last 20 emails
-                        },
-                        timeout=600  # 10 minutes timeout
-                    )
-                    if response.status_code == 200:
-                        logger.info(f"✅ Comprehensive backfill completed for user {state}")
-                    else:
-                        logger.error(f"❌ Comprehensive backfill failed for user {state}: HTTP {response.status_code}")
-                except Exception as e:
-                    logger.error(f"❌ Comprehensive backfill failed for user {state}: {e}")
-            
-            job_queue = get_job_queue()
-            job_queue.enqueue(
-                comprehensive_backfill_for_new_user,
-                job_id=f"comprehensive-backfill-oauth-{state}"
-            )
-        except Exception as e:
-            # Don't fail OAuth if backfill fails
-            logger.warning(f"⚠️ Could not trigger comprehensive backfill for user {state}: {e}")
-        
-        # 📧 EMAIL CLASSIFICATION: Classify existing emails on first login
-        # Uses the existing classify_background endpoint (v3.0 classification only, no fact extraction)
-        try:
-            import threading
-            from app.database import get_db
-            
-            db = get_db()
-            if db.is_connected and db.db is not None:
-                users_col = db.db["users"]
-                emails_col = db.db["emails"]
-                
-                # Check if user has been processed
-                user_doc = users_col.find_one({"user_id": state})
-                email_count = emails_col.count_documents({"user_id": state})
-                
-                # Only trigger if: has emails AND not yet classified
-                if email_count > 0 and (not user_doc or not user_doc.get("initial_email_classification_done")):
-                    logger.info(f"📧 New user {state} - classifying {email_count} emails with v3.0")
-                    
-                    # Mark as in-progress
-                    users_col.update_one(
-                        {"user_id": state},
-                        {
-                            "$set": {
-                                "user_id": state,
-                                "initial_email_classification_done": False,
-                                "email_classification_started_at": datetime.utcnow().isoformat(),
-                            }
-                        },
-                        upsert=True
-                    )
-                    
-                    # Trigger classification in background
-                    def classify_user_emails():
-                        import requests
-                        try:
-                            logger.info(f"🔄 Starting email classification for user {state}")
-                            
-                            # Use existing classify_background endpoint (v3.0 classification only, no fact extraction)
-                            # Fact extraction happens separately via backfill-email-facts endpoint
-                            response = requests.post(
-                                "http://localhost:10000/api/gmail/classify-background",
-                                json={"user_id": state, "max_emails": 20},
-                                timeout=600
-                            )
-                            
-                            if response.status_code == 200:
-                                logger.info(f"✅ Email classification completed for user {state}")
-                                users_col.update_one(
-                                    {"user_id": state},
-                                    {
-                                        "$set": {
-                                            "initial_email_classification_done": True,
-                                            "email_classification_completed_at": datetime.utcnow().isoformat(),
-                                        }
-                                    }
-                                )
-                            else:
-                                logger.error(f"❌ Email classification failed for user {state}: HTTP {response.status_code}")
-                                
-                        except Exception as e:
-                            logger.error(f"❌ Email classification error for user {state}: {e}")
-                    
-                    # Run in background thread (non-blocking)
-                    thread = threading.Thread(target=classify_user_emails, daemon=True)
-                    thread.start()
-                    
-                    logger.info(f"📧 Email classification started in background for user {state}")
-                else:
-                    if email_count == 0:
-                        logger.info(f"ℹ️ No emails to classify for user {state}")
-                    else:
-                        logger.info(f"✅ User {state} emails already classified")
-                        
-        except Exception as e:
-            # Don't fail OAuth if classification fails
-            logger.warning(f"⚠️ Could not trigger email classification for user {state}: {e}")
+            logger.warning(f"⚠️ Gmail watch start failed (non-fatal): {e}")
 
     except Exception as e:
         logger.error(f"OAuth callback error: {e}", exc_info=True)
