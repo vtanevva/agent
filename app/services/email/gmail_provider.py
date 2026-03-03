@@ -39,6 +39,7 @@ class GmailProvider(EmailProvider):
         max_results: int = 5,
         from_email: Optional[str] = None,
         contact_name: Optional[str] = None,
+        force_refresh: bool = False,
     ) -> Dict[str, Any]:
         """List recent emails from Gmail inbox"""
         try:
@@ -66,18 +67,19 @@ class GmailProvider(EmailProvider):
                 email_list = " OR ".join(contact_emails)
                 query = f"{query} from:({email_list})"
         
-        # Check cache
-        cached_result = get_cached_email_list(self.user_id, query, max_results)
-        if cached_result:
-            # Add source to cached results
-            for item in cached_result:
-                item["source"] = self.provider_name
-            return {
-                "success": True,
-                "emails": cached_result,
-                "count": len(cached_result),
-                "provider": self.provider_name,
-            }
+        # Check cache (unless force_refresh requested)
+        if not force_refresh:
+            cached_result = get_cached_email_list(self.user_id, query, max_results)
+            if cached_result:
+                # Add source to cached results
+                for item in cached_result:
+                    item["source"] = self.provider_name
+                return {
+                    "success": True,
+                    "emails": cached_result,
+                    "count": len(cached_result),
+                    "provider": self.provider_name,
+                }
         
         # Fetch from Gmail API
         try:

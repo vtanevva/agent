@@ -21,6 +21,7 @@ from googleapiclient.errors import HttpError
 from app.db.collections import get_gmail_watch_state_collection
 from app.memory.background_jobs import get_job_queue
 from app.services.email_processing_pipeline import enqueue_thread_email_pipeline
+from app.services.cache_service import cache_clear_pattern
 from app.utils.google_api_helpers import get_gmail_service
 from app.utils.logging_utils import get_logger
 
@@ -241,6 +242,13 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> None:
     try:
         job_id = enqueue_thread_email_pipeline(user_id=app_user_id, thread_ids=sorted(thread_ids), provider="gmail")
         logger.info(f"[GMAIL PUSH] Enqueued ingest for {email_address}: {len(thread_ids)} thread(s) (job={job_id})")
+        # Invalidate cached email lists so the next "list emails" reflects the new inbox state.
+        try:
+            cache_clear_pattern(f"email_list:*{app_user_id}*")
+            if app_user_id != email_address:
+                cache_clear_pattern(f"email_list:*{email_address}*")
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"[GMAIL PUSH] Failed to enqueue ingest for {email_address}: {e}", exc_info=True)
 

@@ -255,11 +255,12 @@ class GmailAgent:
                     result = list_recent_emails(
                         user_id=user_id,
                         max_results=5,
-                        contact_name=contact_name
+                        contact_name=contact_name,
+                        force_refresh=True,
                     )
                 else:
                     logger.info("Listing recent emails (no filter)")
-                    result = list_recent_emails(user_id=user_id, max_results=5)
+                    result = list_recent_emails(user_id=user_id, max_results=5, force_refresh=True)
                 
                 # Return raw JSON for UI to parse
                 return result

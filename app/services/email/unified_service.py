@@ -201,6 +201,7 @@ def list_recent_emails(
     contact_name: Optional[str] = None,
     provider: Optional[str] = None,
     unified: bool = False,
+    force_refresh: bool = False,
 ) -> Dict[str, Any]:
     """
     List recent emails from one or all providers.
@@ -236,6 +237,7 @@ def list_recent_emails(
                     max_results=max_results,
                     from_email=from_email,
                     contact_name=contact_name,
+                    force_refresh=force_refresh,
                 )
                 
                 if result.get("success"):
@@ -263,6 +265,7 @@ def list_recent_emails(
                 max_results=max_results,
                 from_email=from_email,
                 contact_name=contact_name,
+                force_refresh=force_refresh,
             )
             
     except Exception as e:

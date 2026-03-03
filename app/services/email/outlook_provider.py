@@ -118,6 +118,7 @@ class OutlookProvider(EmailProvider):
         max_results: int = 5,
         from_email: Optional[str] = None,
         contact_name: Optional[str] = None,
+        force_refresh: bool = False,
     ) -> Dict[str, Any]:
         """List recent emails from Outlook inbox"""
         # Look up contact emails if contact_name provided

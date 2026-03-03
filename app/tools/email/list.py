@@ -25,6 +25,7 @@ def list_recent_emails(
     from_email: Optional[str] = None,
     contact_name: Optional[str] = None,
     provider: Optional[str] = None,
+    force_refresh: bool = False,
 ):
     """
     List recent emails from user's email provider(s).
@@ -38,6 +39,7 @@ def list_recent_emails(
             from_email=from_email,
             contact_name=contact_name,
             provider=provider,
+            force_refresh=force_refresh,
         )
         
         if not result.get("success"):
@@ -70,6 +72,7 @@ register(
                 "max_results": {"type": "integer", "minimum": 1, "maximum": 20},
                 "from_email": {"type": "string", "description": "Optional: Filter emails by sender email address"},
                 "contact_name": {"type": "string", "description": "Optional: Filter emails by contact name (will look up their email from contacts)"},
+                "force_refresh": {"type": "boolean", "description": "Optional: If true, bypass provider caching for freshest results"},
             },
             "required": ["user_id"],
         },
