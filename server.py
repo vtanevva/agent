@@ -56,6 +56,7 @@ from app.utils.oauth_utils import (
     GOOGLE_SCOPES, OAUTH_BASE, TOKEN_URL
 )
 from app.utils.email_resend import send_waitlist_welcome_email
+from app.services.cache_service import cache_get, cache_set, cache_delete
 from app.config import Config
 
 # Import new blueprints
@@ -311,6 +312,10 @@ def _get_redirect_uri():
     if force_local:
         logger.info("🏠 Forcing localhost OAuth redirect (FORCE_LOCAL_OAUTH=true)")
         return "http://localhost:10000/google/oauth2callback"
+
+    # Prefer explicit redirect URI if configured (most reliable in production)
+    if Config.OAUTH_REDIRECT_URI:
+        return Config.OAUTH_REDIRECT_URI.strip()
     
     # Check for Railway or other production URL from environment
     railway_url = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
@@ -1090,6 +1095,30 @@ def google_auth(user_id):
             access_type="offline",
             state=state_with_expo,
         )
+
+        # Cache PKCE verifier + redirect_uri in Mongo-backed cache so production
+        # deployments don't rely on sticky cookies/same-host routing.
+        pkce_key = f"google_pkce:{state_with_expo}"
+        try:
+            cache_set(
+                pkce_key,
+                {
+                    "code_verifier": getattr(flow, "code_verifier", None),
+                    "redirect_uri": redirect_uri,
+                },
+                ttl=15 * 60,
+            )
+        except Exception as e:
+            logger.warning(f"Could not cache OAuth PKCE verifier: {e}")
+
+        # Persist PKCE verifier across the redirect so token exchange succeeds.
+        # Without this, google-auth-oauthlib will exchange the code without `code_verifier`,
+        # resulting in: invalid_grant "Missing code verifier".
+        try:
+            session["google_oauth_state"] = state_with_expo
+            session["google_oauth_code_verifier"] = getattr(flow, "code_verifier", None)
+        except Exception as e:
+            logger.warning(f"Could not persist OAuth PKCE verifier in session: {e}")
         
         if "?" in auth_url:
             auth_url += "&user_agent=web"
@@ -1148,10 +1177,49 @@ def google_callback():
             </html>
             """, error=error)
 
-        redirect_uri = _get_redirect_uri()
+        # Try to restore redirect_uri + PKCE verifier from cache first (prod-safe).
+        cached = None
+        try:
+            cached = cache_get(f"google_pkce:{state_raw}")
+        except Exception:
+            cached = None
+
+        redirect_uri = (cached or {}).get("redirect_uri") or _get_redirect_uri()
         flow = _build_flow(redirect_uri, state=state_raw)
         try:
-            flow.fetch_token(authorization_response=request.url)
+            # Restore PKCE verifier (required if auth request used PKCE).
+            code_verifier = (cached or {}).get("code_verifier") or None
+            try:
+                if session.get("google_oauth_state") == state_raw:
+                    code_verifier = code_verifier or session.get("google_oauth_code_verifier")
+            except Exception:
+                code_verifier = None
+
+            if code_verifier:
+                try:
+                    # Some versions expect this on the flow; some accept kwarg.
+                    flow.code_verifier = code_verifier
+                except Exception:
+                    pass
+                try:
+                    flow.fetch_token(authorization_response=request.url, code_verifier=code_verifier)
+                except TypeError:
+                    flow.fetch_token(authorization_response=request.url)
+            else:
+                flow.fetch_token(authorization_response=request.url)
+
+            # Clear one-time PKCE state from session after success.
+            try:
+                session.pop("google_oauth_state", None)
+                session.pop("google_oauth_code_verifier", None)
+            except Exception:
+                pass
+
+            # Clear cached PKCE state after success.
+            try:
+                cache_delete(f"google_pkce:{state_raw}")
+            except Exception:
+                pass
         except Exception as token_error:
             return render_template_string("""
             <!doctype html>
@@ -1165,6 +1233,7 @@ def google_callback():
                   <li>Authorization code expired (try again)</li>
                   <li>Authorization code already used</li>
                   <li>Clock synchronization issue</li>
+                  <li>PKCE code verifier missing (try again from the app)</li>
                 </ul>
                 <a href="/">Back to App</a>
               </body>
