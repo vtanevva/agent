@@ -60,7 +60,7 @@ class ContactsAgent:
         dict or None
             Created/updated relationship document or None if failed
         """
-        if not self.relationships_col:
+        if self.relationships_col is None:
             logger.warning("Project-contact relationships collection not available")
             return None
         
@@ -167,7 +167,7 @@ class ContactsAgent:
         list of dict
             List of relationship documents
         """
-        if not self.relationships_col:
+        if self.relationships_col is None:
             return []
         
         try:
@@ -219,7 +219,7 @@ class ContactsAgent:
         bool
             True if updated successfully, False otherwise
         """
-        if not self.relationships_col:
+        if self.relationships_col is None:
             return False
         
         try:

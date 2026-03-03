@@ -97,7 +97,7 @@ class RelationshipsService:
         Returns:
             List of recipient emails that were tracked
         """
-        if not self.relationships_col:
+        if self.relationships_col is None:
             logger.warning("Relationships collection not available")
             return []
         
@@ -179,7 +179,7 @@ class RelationshipsService:
         Returns:
             True if relationship was updated, False if no relationship exists
         """
-        if not self.relationships_col:
+        if self.relationships_col is None:
             logger.warning("Relationships collection not available")
             return False
         
@@ -241,7 +241,7 @@ class RelationshipsService:
         Returns:
             True if linked successfully, False otherwise
         """
-        if not self.relationships_col:
+        if self.relationships_col is None:
             return False
         
         try:
@@ -277,7 +277,7 @@ class RelationshipsService:
         Returns:
             True if linked successfully, False otherwise
         """
-        if not self.relationships_col or not task_ids:
+        if self.relationships_col is None or not task_ids:
             return False
         
         try:
@@ -313,7 +313,7 @@ class RelationshipsService:
         Returns:
             True if linked successfully, False otherwise
         """
-        if not self.relationships_col or not fact_ids:
+        if self.relationships_col is None or not fact_ids:
             return False
         
         try:
@@ -346,7 +346,7 @@ class RelationshipsService:
         Returns:
             Contact document or None if collection unavailable
         """
-        if not self.contacts_col:
+        if self.contacts_col is None:
             return None
         
         try:
@@ -392,7 +392,7 @@ class RelationshipsService:
         Returns:
             Relationship document with merged contact info
         """
-        if not self.contacts_col:
+        if self.contacts_col is None:
             return relationship_doc
         
         try:
@@ -424,7 +424,7 @@ class RelationshipsService:
         Returns:
             Relationship document with contact info merged, or None if not found
         """
-        if not self.relationships_col:
+        if self.relationships_col is None:
             return None
         
         try:
@@ -481,7 +481,7 @@ class RelationshipsService:
         Returns:
             True if updated, False otherwise
         """
-        if not self.contacts_col or not self.relationships_col:
+        if self.contacts_col is None or self.relationships_col is None:
             return False
         
         try:

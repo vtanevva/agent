@@ -287,7 +287,7 @@ If no clear task, return {{"tasks": []}}"""
                     
                     tasks_col = get_tasks_collection()
                     
-                    if tasks_col and task_data.get("tasks"):
+                    if tasks_col is not None and task_data.get("tasks"):
                         for task_item in task_data["tasks"]:
                             task_title = task_item.get("title", "").strip()
                             if not task_title:

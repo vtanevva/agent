@@ -172,7 +172,7 @@ class IngestionService:
             from .models import get_memory_facts_collection
             facts_col = get_memory_facts_collection()
             
-            if facts_col:
+            if facts_col is not None:
                 existing_facts = list(facts_col.find(
                     {"user_id": user_id, "is_active": True},
                     {"text": 1}
@@ -222,7 +222,7 @@ class IngestionService:
             messages_col = get_messages_collection()
             summaries_col = get_thread_summaries_collection()
             
-            if not messages_col or not summaries_col:
+            if messages_col is None or summaries_col is None:
                 return
             
             # Check message count since last summary
@@ -263,7 +263,7 @@ class IngestionService:
             messages_col = get_messages_collection()
             summaries_col = get_thread_summaries_collection()
             
-            if not messages_col or not summaries_col:
+            if messages_col is None or summaries_col is None:
                 return False
             
             # Get summary doc

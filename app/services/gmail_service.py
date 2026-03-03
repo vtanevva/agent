@@ -66,7 +66,7 @@ def extract_facts_from_email(user_id: str, email_data: Dict[str, Any]) -> None:
             from app.memory.models import get_memory_facts_collection
             facts_col = get_memory_facts_collection()
             
-            if facts_col:
+            if facts_col is not None:
                 # Check if facts already exist for this thread
                 existing_facts_for_thread = facts_col.find_one({
                     "user_id": user_id,
@@ -110,7 +110,7 @@ def extract_facts_from_email(user_id: str, email_data: Dict[str, Any]) -> None:
             if candidate_facts:
                 # Get existing facts for deduplication
                 # facts_col already defined above
-                if facts_col:
+                if facts_col is not None:
                     existing_facts = list(facts_col.find({
                         "user_id": user_id,
                         "is_active": True
@@ -126,7 +126,7 @@ def extract_facts_from_email(user_id: str, email_data: Dict[str, Any]) -> None:
                         
                         if stored_count > 0:
                             # Get fact IDs that were just stored (by source_ref)
-                            if facts_col:
+                            if facts_col is not None:
                                 stored_facts = list(facts_col.find({
                                     "user_id": user_id,
                                     "source_ref": source_ref,
@@ -189,7 +189,7 @@ def extract_facts_from_email(user_id: str, email_data: Dict[str, Any]) -> None:
                 if thread_id:
                     # Find tasks created from this thread
                     tasks_col = get_tasks_collection()
-                    if tasks_col:
+                    if tasks_col is not None:
                         thread_tasks = list(tasks_col.find({
                             "user_id": user_id,
                             "source": "email",
@@ -221,7 +221,7 @@ def extract_facts_from_email(user_id: str, email_data: Dict[str, Any]) -> None:
                 
                 relationships_service = get_relationships_service()
                 
-                if thread_id and facts_col:
+                if thread_id and facts_col is not None:
                     # Find facts created from this thread
                     source_ref = f"email:{thread_id}"
                     thread_facts = list(facts_col.find({
@@ -258,7 +258,7 @@ def extract_facts_from_email(user_id: str, email_data: Dict[str, Any]) -> None:
                 thread_id = email_data.get('thread_id')
                 subject = email_data.get('subject', '')
                 
-                if projects_col and thread_id:
+                if projects_col is not None and thread_id:
                     # Check if thread already linked to project
                     existing_project = projects_col.find_one({
                         "user_id": user_id,
@@ -382,7 +382,7 @@ def list_email_todos(user_id: str, limit: int = 100) -> Dict[str, Any]:
     try:
         # First, try to read from unified tasks collection
         tasks_col = get_tasks_collection()
-        if tasks_col:
+        if tasks_col is not None:
             cursor = (
                 tasks_col.find({
                     "user_id": user_id,
@@ -740,7 +740,7 @@ def search_threads(user_id: str, query: str, max_results: int = 20) -> Dict[str,
                     
                     # Check if we have this in cache for enrichment
                     cached_data = None
-                    if emails_col:
+                    if emails_col is not None:
                         cached_data = emails_col.find_one(
                             {"user_id": user_id, "thread_id": tid},
                             {"from": 1, "subject": 1, "snippet": 1}

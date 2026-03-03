@@ -654,10 +654,10 @@ def backfill_comprehensive():
                 project_relationships_col = get_project_contact_relationships_collection()  # New collection
                 projects_col = get_projects_collection()
                 
-                initial_facts_count = facts_col.count_documents({"user_id": user_id}) if facts_col else 0
-                initial_relationships_count = relationships_col.count_documents({"user_id": user_id}) if relationships_col else 0
-                initial_project_relationships_count = project_relationships_col.count_documents({"user_id": user_id}) if project_relationships_col else 0
-                initial_projects_count = projects_col.count_documents({"user_id": user_id}) if projects_col else 0
+                initial_facts_count = facts_col.count_documents({"user_id": user_id}) if facts_col is not None else 0
+                initial_relationships_count = relationships_col.count_documents({"user_id": user_id}) if relationships_col is not None else 0
+                initial_project_relationships_count = project_relationships_col.count_documents({"user_id": user_id}) if project_relationships_col is not None else 0
+                initial_projects_count = projects_col.count_documents({"user_id": user_id}) if projects_col is not None else 0
                 
                 stats = {
                     "emails_processed": 0,
@@ -826,7 +826,7 @@ def backfill_comprehensive():
                                     
                                     # Check each potential contact for bidirectional communication
                                     # Use old relationships collection which tracks both sent and received interactions
-                                    if old_relationships_col:
+                                    if old_relationships_col is not None:
                                         # First, check if any contacts were just tracked (meaning relationship was created/updated)
                                         tracked_emails_lower = {e.lower() for e in tracked_emails}
                                         
@@ -893,7 +893,7 @@ def backfill_comprehensive():
                                     projects_col = get_projects_collection()
                                     
                                     project_name = None
-                                    if projects_col and thread_id:
+                                    if projects_col is not None and thread_id:
                                         subject = email_data.get('subject', '')
                                         # Check if thread already linked to project
                                         existing_project = projects_col.find_one({
@@ -945,7 +945,7 @@ def backfill_comprehensive():
                                     # Note: project_name is already set above if existing_project was found
                                     if not project_name:
                                         # Check if project already exists (might be created in a previous email)
-                                        if projects_col and thread_id:
+                                        if projects_col is not None and thread_id:
                                             existing = projects_col.find_one({
                                                 "user_id": user_id,
                                                 "related_threads": thread_id
@@ -1016,10 +1016,10 @@ def backfill_comprehensive():
                 time.sleep(wait_time)
                 
                 # Calculate final stats
-                final_facts_count = facts_col.count_documents({"user_id": user_id}) if facts_col else 0
-                final_relationships_count = relationships_col.count_documents({"user_id": user_id}) if relationships_col else 0
-                final_project_relationships_count = project_relationships_col.count_documents({"user_id": user_id}) if project_relationships_col else 0
-                final_projects_count = projects_col.count_documents({"user_id": user_id}) if projects_col else 0
+                final_facts_count = facts_col.count_documents({"user_id": user_id}) if facts_col is not None else 0
+                final_relationships_count = relationships_col.count_documents({"user_id": user_id}) if relationships_col is not None else 0
+                final_project_relationships_count = project_relationships_col.count_documents({"user_id": user_id}) if project_relationships_col is not None else 0
+                final_projects_count = projects_col.count_documents({"user_id": user_id}) if projects_col is not None else 0
                 
                 stats["facts_extracted"] = max(0, final_facts_count - initial_facts_count)
                 stats["relationships_updated"] = max(0, final_relationships_count - initial_relationships_count)
@@ -1210,7 +1210,7 @@ def backfill_facts():
         messages_col = get_messages_collection()
         facts_col = get_memory_facts_collection()
         
-        if not messages_col or not facts_col:
+        if messages_col is None or facts_col is None:
             return jsonify({
                 "success": False,
                 "error": "Database not available"
@@ -1367,7 +1367,7 @@ def list_tasks():
         limit = int(request.args.get('limit', 50))
         
         tasks_col = get_tasks_collection()
-        if not tasks_col:
+        if tasks_col is None:
             return jsonify({"success": False, "error": "Tasks collection not available"}), 500
         
         # Build query
@@ -1447,7 +1447,7 @@ def create_task():
             return jsonify({"success": False, "error": "user_id and title are required"}), 400
         
         tasks_col = get_tasks_collection()
-        if not tasks_col:
+        if tasks_col is None:
             return jsonify({"success": False, "error": "Tasks collection not available"}), 500
         
         from uuid import uuid4
@@ -1522,7 +1522,7 @@ def update_task(task_id):
         data = request.get_json() or {}
         
         tasks_col = get_tasks_collection()
-        if not tasks_col:
+        if tasks_col is None:
             return jsonify({"success": False, "error": "Tasks collection not available"}), 500
         
         # Find task
@@ -1596,7 +1596,7 @@ def delete_task(task_id):
     """
     try:
         tasks_col = get_tasks_collection()
-        if not tasks_col:
+        if tasks_col is None:
             return jsonify({"success": False, "error": "Tasks collection not available"}), 500
         
         result = tasks_col.delete_one({"_id": task_id})

@@ -134,7 +134,7 @@ class RetrievalService:
         """
         try:
             tasks_col = get_tasks_collection()
-            if not tasks_col:
+            if tasks_col is None:
                 return []
             
             # Get pending tasks, sorted by priority and due date
@@ -281,7 +281,7 @@ class RetrievalService:
             # First, get current thread summary if available
             if thread_id:
                 summaries_col = get_thread_summaries_collection()
-                if summaries_col:
+                if summaries_col is not None:
                     current_summary = summaries_col.find_one({
                         "user_id": user_id,
                         "thread_id": thread_id

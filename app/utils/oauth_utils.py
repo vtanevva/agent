@@ -11,6 +11,8 @@ from flask import url_for, jsonify
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+from google.auth.exceptions import RefreshError
 from requests_oauthlib import OAuth2Session
 
 from app.config import Config
@@ -44,11 +46,37 @@ def load_google_credentials(user_id: str) -> Optional[Credentials]:
     if tokens is None:
         return None
     
+    def _clear_google_credentials():
+        try:
+            tokens.update_one({"user_id": user_id}, {"$unset": {"google": ""}})
+        except Exception as e:
+            print(f"[ERROR] Failed to clear Google credentials for {user_id}: {e}", flush=True)
+
     try:
         doc = tokens.find_one({"user_id": user_id}, {"google": 1})
         if not doc or "google" not in doc:
             return None
-        return Credentials.from_authorized_user_info(doc["google"])
+
+        creds = Credentials.from_authorized_user_info(doc["google"])
+
+        # Proactively refresh if needed so we can handle invalid_grant cleanly.
+        if not creds.valid and creds.refresh_token:
+            try:
+                creds.refresh(Request())
+                save_google_credentials(user_id, creds)
+            except RefreshError as e:
+                # Common cause: refresh token revoked/expired => invalid_grant
+                err = str(e)
+                print(f"❌ Google credentials refresh failed for {user_id}: {err}", flush=True)
+                if "invalid_grant" in err.lower():
+                    _clear_google_credentials()
+                return None
+
+        if not creds.valid and not creds.refresh_token:
+            # No way to refresh; treat as disconnected.
+            return None
+
+        return creds
     except Exception as e:
         print(f"[ERROR] Failed to load Google credentials: {e}", flush=True)
         return None
@@ -296,7 +324,7 @@ def refresh_outlook_token(user_id: str, refresh_token: Optional[str] = None) -> 
         
         # Save to database
         tokens = get_tokens_collection()
-        if tokens:
+        if tokens is not None:
             tokens.update_one(
                 {"user_id": user_id, "provider": "outlook"},
                 {

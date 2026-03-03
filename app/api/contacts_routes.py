@@ -30,7 +30,7 @@ def contacts_with_relationships():
     
     relationships_col = get_project_contact_relationships_collection()
     
-    if not relationships_col:
+    if relationships_col is None:
         return jsonify({"success": False, "error": "Database not connected"}), 500
     
     try:

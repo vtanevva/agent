@@ -265,7 +265,7 @@ def extract_todos_from_thread(user_id: str, thread_id: str) -> str:
     # Also store in unified tasks collection
     tasks_col = get_tasks_collection()
     tasks_stored_count = 0
-    if tasks_col and todos:
+    if tasks_col is not None and todos:
         try:
             now = datetime.utcnow()
             for todo_item in todos:
@@ -332,7 +332,7 @@ def extract_todos_from_thread(user_id: str, thread_id: str) -> str:
                         from app.memory.models import get_relationships_collection
                         relationships_col = get_relationships_collection()
                         
-                        if relationships_col:
+                        if relationships_col is not None:
                             # Try to extract contact from email data
                             # We need to link task to relationship based on thread
                             # Relationship will be updated when email is processed in extract_facts_from_email
