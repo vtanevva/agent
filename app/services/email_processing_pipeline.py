@@ -820,6 +820,7 @@ def run_calendar_worker(
 
     # Deterministic parsing helpers
     from app.tools.calendar.detect_requests import detect_calendar_requests, parse_datetime_from_text
+    from app.utils.timezone_utils import get_effective_user_timezone
 
     SKIP_CATEGORIES = {"notifications", "social", "promotional", "transactional", "newsletters"}
     MEETING_HINTS = [
@@ -950,6 +951,16 @@ def run_calendar_worker(
         except Exception:
             return False
 
+    def _to_utc_naive(dt: datetime) -> datetime:
+        try:
+            from datetime import timezone as _tz
+
+            if getattr(dt, "tzinfo", None) is not None:
+                return dt.astimezone(_tz.utc).replace(tzinfo=None)
+        except Exception:
+            pass
+        return dt.replace(tzinfo=None)
+
     def _best_effort_extract(text: str, subject_fallback: str) -> tuple[Optional[str], Optional[datetime], Optional[datetime], str]:
         """
         Returns (summary, start_dt, end_dt, method).
@@ -957,13 +968,13 @@ def run_calendar_worker(
         reqs = detect_calendar_requests(text or "")
         if reqs:
             req = reqs[0]
-            start_dt, end_dt = parse_datetime_from_text(req.get("full_match", "") or "")
+            start_dt, end_dt = parse_datetime_from_text(req.get("full_match", "") or "", reference_dt=user_now)
             summary = (req.get("description") or subject_fallback or "Meeting").strip()
             if start_dt:
                 return summary, start_dt, end_dt, "regex"
 
         # Fallback: try parsing from subject line alone
-        start_dt, end_dt = parse_datetime_from_text(subject_fallback or "")
+        start_dt, end_dt = parse_datetime_from_text(subject_fallback or "", reference_dt=user_now)
         if start_dt:
             return (subject_fallback or "Meeting").strip(), start_dt, end_dt, "subject_parse"
 
@@ -1016,6 +1027,18 @@ Otherwise return: {{"create": true, "summary": "...", "start_time": "...", "end_
             except Exception:
                 return None
 
+    # Resolve user's timezone once per worker run.
+    try:
+        from zoneinfo import ZoneInfo
+
+        tz_name = get_effective_user_timezone(user_id)
+        user_tz = ZoneInfo(tz_name)
+    except Exception:
+        tz_name = "UTC"
+        user_tz = None
+
+    user_now = datetime.now(user_tz) if user_tz else datetime.utcnow()
+
     for _ in range(max(1, min(int(max_items or 25), 200))):
         doc = _claim_next_email(user_id=user_id, job_field="calendar", batch_id=batch_id, worker_id=worker_id)
         if not doc:
@@ -1024,13 +1047,16 @@ Otherwise return: {{"create": true, "summary": "...", "start_time": "...", "end_
         processed += 1
         try:
             # Dedupe: never create twice for same ingested email doc
-            if doc.get("calendar_event_id") or doc.get("calendar_event_created_at"):
+            current_message_id = doc.get("message_id") or ""
+            last_event_message_id = doc.get("calendar_event_message_id") or ""
+            if (doc.get("calendar_event_id") or doc.get("calendar_event_created_at")) and current_message_id and last_event_message_id == current_message_id:
                 skipped += 1
+                logger.info(f"[CAL] Skip already created message_id={current_message_id} thread={doc.get('thread_id')}")
                 _mark_job_done(
                     email_doc_id=doc["_id"],
                     job_field="calendar",
                     status=JOB_SKIPPED,
-                    extra_set={"calendar_skip_reason": "already_created"},
+                    extra_set={"calendar_skip_reason": "already_created_for_message"},
                 )
                 _maybe_delete_body_temp(doc["_id"])
                 continue
@@ -1038,6 +1064,7 @@ Otherwise return: {{"create": true, "summary": "...", "start_time": "...", "end_
             category = (doc.get("category") or "").strip().lower()
             if category in SKIP_CATEGORIES:
                 skipped += 1
+                logger.info(f"[CAL] Skip noise category={category} thread={doc.get('thread_id')}")
                 _mark_job_done(
                     email_doc_id=doc["_id"],
                     job_field="calendar",
@@ -1055,6 +1082,7 @@ Otherwise return: {{"create": true, "summary": "...", "start_time": "...", "end_
 
             if not _looks_like_meeting(combined):
                 skipped += 1
+                logger.info(f"[CAL] Skip no meeting hints thread={doc.get('thread_id')}")
                 _mark_job_done(
                     email_doc_id=doc["_id"],
                     job_field="calendar",
@@ -1076,7 +1104,7 @@ Otherwise return: {{"create": true, "summary": "...", "start_time": "...", "end_
                     location = (extracted.get("location") or "") or ""
 
                     # Parse natural language into datetimes (fallback to detect_requests parser)
-                    start_dt, end_dt = parse_datetime_from_text(start_text)
+                    start_dt, end_dt = parse_datetime_from_text(start_text, reference_dt=user_now)
                     if not start_dt:
                         # last resort: try parsing from subject/body again
                         _, start_dt, end_dt, _ = _best_effort_extract(combined, subject_fallback=subject)
@@ -1084,6 +1112,7 @@ Otherwise return: {{"create": true, "summary": "...", "start_time": "...", "end_
 
             if not start_dt:
                 skipped += 1
+                logger.info(f"[CAL] Skip could not parse datetime method={method} thread={doc.get('thread_id')}")
                 _mark_job_done(
                     email_doc_id=doc["_id"],
                     job_field="calendar",
@@ -1106,8 +1135,9 @@ Otherwise return: {{"create": true, "summary": "...", "start_time": "...", "end_
                 end_dt = start_dt + timedelta(hours=1)
 
             # Avoid creating events in the past (simple guard)
-            if start_dt < (_now() - timedelta(minutes=10)):
+            if _to_utc_naive(start_dt) < (_now() - timedelta(minutes=10)):
                 skipped += 1
+                logger.info(f"[CAL] Skip start in past start={start_dt} thread={doc.get('thread_id')}")
                 _mark_job_done(
                     email_doc_id=doc["_id"],
                     job_field="calendar",
@@ -1127,12 +1157,16 @@ Otherwise return: {{"create": true, "summary": "...", "start_time": "...", "end_
                 description=description[:1500],
                 location=(location or "")[:200],
                 attendees=None,
-                timezone="UTC",
+                timezone=tz_name,
                 provider=None,
             )
 
             if not res.get("success"):
                 skipped += 1
+                logger.warning(
+                    f"[CAL] Create failed thread={doc.get('thread_id')} message_id={current_message_id} "
+                    f"error={res.get('error', 'unknown')!r}"
+                )
                 _mark_job_done(
                     email_doc_id=doc["_id"],
                     job_field="calendar",
@@ -1143,6 +1177,10 @@ Otherwise return: {{"create": true, "summary": "...", "start_time": "...", "end_
                 continue
 
             created += 1
+            logger.info(
+                f"[CAL] Created event thread={doc.get('thread_id')} message_id={current_message_id} "
+                f"start={start_dt.isoformat()} tz={tz_name}"
+            )
             _mark_job_done(
                 email_doc_id=doc["_id"],
                 job_field="calendar",
@@ -1154,6 +1192,7 @@ Otherwise return: {{"create": true, "summary": "...", "start_time": "...", "end_
                     "calendar_event_start": res.get("start", start_dt.isoformat()),
                     "calendar_event_end": res.get("end", end_dt.isoformat()),
                     "calendar_event_created_at": _now(),
+                    "calendar_event_message_id": current_message_id,
                     "calendar_create_method": method,
                 },
             )

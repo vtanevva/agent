@@ -46,8 +46,9 @@ def detect_calendar_requests(text: str) -> List[Dict]:
                 'end_pos': match.end()
             })
     
-    # Pattern 2: "[event] [time] [date]" - e.g., "meeting tomorrow at 2pm"
-    pattern2 = r'(?:meeting|appointment|event|call|appointment|reminder)\s+(?:tomorrow|today|next\s+\w+|on\s+\w+|\d{1,2}[/-]\d{1,2})\s+(?:at\s+)?(\d{1,2}):?(\d{2})?\s*(am|pm)?(?:\s+(?:for|about)\s+(.+?))?'
+    # Pattern 2: "[event] [date] [time]" - e.g., "meeting tomorrow at 2pm", "meet next monday at 3:33"
+    # Include "meet" / "lets meet" because many users write it that way.
+    pattern2 = r'(?:lets\s+meet|let\'s\s+meet|meet|meeting|appointment|event|call|reminder)\s+(?:tomorrow|today|next\s+\w+|this\s+\w+|on\s+\w+|\d{1,2}[/-]\d{1,2})\s+(?:at\s+)?(\d{1,2}):?(\d{2})?\s*(am|pm)?(?:\s+(?:for|about)\s+(.+?))?'
     matches = re.finditer(pattern2, text_lower)
     for match in matches:
         description = match.group(4) if match.lastindex >= 4 and match.group(4) else "Meeting"
@@ -134,6 +135,7 @@ def parse_datetime_from_text(text: str, reference_dt: Optional[datetime] = None)
     """
     text_lower = text.lower().strip()
     now = reference_dt or datetime.now()
+    ref_tz = now.tzinfo
     
     # Step 1: Determine target date
     target_date = None
@@ -254,6 +256,10 @@ def parse_datetime_from_text(text: str, reference_dt: Optional[datetime] = None)
         if end_time <= start_time:
             end_time += timedelta(days=1)
         
+        if ref_tz and start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=ref_tz)
+        if ref_tz and end_time.tzinfo is None:
+            end_time = end_time.replace(tzinfo=ref_tz)
         return start_time, end_time
     elif len(times) == 1:
         # One time found - assume 1 hour duration
@@ -262,6 +268,10 @@ def parse_datetime_from_text(text: str, reference_dt: Optional[datetime] = None)
         start_time = target_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
         end_time = start_time + timedelta(hours=1)
         
+        if ref_tz and start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=ref_tz)
+        if ref_tz and end_time.tzinfo is None:
+            end_time = end_time.replace(tzinfo=ref_tz)
         return start_time, end_time
     
     # If no time found but we have a date, try to extract just the date and use default times
@@ -269,6 +279,10 @@ def parse_datetime_from_text(text: str, reference_dt: Optional[datetime] = None)
         # Default to 9am - 10am if only date is specified
         start_time = target_date.replace(hour=9, minute=0, second=0, microsecond=0)
         end_time = start_time + timedelta(hours=1)
+        if ref_tz and start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=ref_tz)
+        if ref_tz and end_time.tzinfo is None:
+            end_time = end_time.replace(tzinfo=ref_tz)
         return start_time, end_time
     
     return None, None

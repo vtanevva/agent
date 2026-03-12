@@ -24,6 +24,7 @@ from app.memory.task_models import (
 from app.services.llm_service import get_llm_service
 from app.memory.models import get_relationships_collection
 from app.utils.logging_utils import get_logger
+from app.utils.timezone_utils import get_effective_user_timezone
 
 logger = get_logger(__name__)
 
@@ -342,6 +343,22 @@ If no clear action, return {{"tasks": []}}"""
         except Exception:
             # Never fail candidate creation due to fallback parsing.
             pass
+
+        # Normalize due_datetime into UTC with an explicit timezone.
+        # This ensures frontend renders correctly regardless of device/server timezone.
+        if due_datetime:
+            try:
+                from datetime import timezone as _tz
+                from zoneinfo import ZoneInfo
+
+                tz_name = get_effective_user_timezone(user_id)
+                user_tz = ZoneInfo(tz_name) if tz_name else ZoneInfo("UTC")
+
+                if due_datetime.tzinfo is None:
+                    due_datetime = due_datetime.replace(tzinfo=user_tz)
+                due_datetime = due_datetime.astimezone(_tz.utc)
+            except Exception:
+                pass
         
         # FILTER: Skip tasks that are overdue by more than X days.
         # (We do NOT skip based on email timestamp; we skip based on task due date.)
@@ -450,9 +467,13 @@ If no clear action, return {{"tasks": []}}"""
             nonverb = [t for t in core if t not in verbs]
             return bool(verbish) and len(nonverb) <= 1
 
-        # Prefer email subject over LLM title when available (more stable wording).
         cleaned_subject = re.sub(r"^\s*(re|fwd)\s*:\s*", "", subject, flags=re.IGNORECASE).strip()
-        if cleaned_subject:
+        cleaned_subject_norm = re.sub(r"\s+", " ", cleaned_subject.lower()).strip()
+        subject_is_missing = cleaned_subject_norm in {"", "(no subject)", "no subject"}
+
+        # Prefer email subject over LLM title when it's actually useful (not empty / not "(No subject)"
+        # and not a generic meeting phrase).
+        if cleaned_subject and not subject_is_missing and not _looks_generic_meeting_phrase(cleaned_subject):
             title = cleaned_subject
 
         # Standardize meeting-ish titles to "Meeting with <sender>".

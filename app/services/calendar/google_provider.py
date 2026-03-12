@@ -27,6 +27,17 @@ class GoogleCalendarProvider(CalendarProvider):
         """Get authenticated Google Calendar service"""
         creds = load_google_credentials(self.user_id)
         return build("calendar", "v3", credentials=creds)
+
+    def get_calendar_timezone(self, calendar_id: str = "primary") -> str:
+        """
+        Fetch the calendar timezone (IANA name) from Google Calendar.
+        """
+        try:
+            service = self._get_service()
+            cal = service.calendars().get(calendarId=calendar_id).execute()
+            return str(cal.get("timeZone") or "").strip()
+        except Exception:
+            return ""
     
     def create_event(
         self,
