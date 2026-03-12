@@ -36,21 +36,18 @@ def ingest_and_process():
     }
     """
     try:
-        data = request.get_json()
-        
-        if not data:
-            return jsonify({"success": False, "error": "No data provided"}), 400
-        
-        user_id = data.get("user_id")
-        max_emails = data.get("max_emails", 20)
-        
-        if not user_id:
-            return jsonify({"success": False, "error": "Missing user_id"}), 400
-        
-        from app.services.email_processing_pipeline import enqueue_login_email_pipeline
-
-        job_id = enqueue_login_email_pipeline(user_id=user_id, max_emails=max_emails, provider="gmail")
-        return jsonify({"success": True, "job_id": job_id, "message": "Email processing started"})
+        # Disabled: we do not backfill/process recent or past emails on demand.
+        # Only new incoming emails (via Gmail Pub/Sub watch) should be ingested/processed.
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Email ingest/backfill is disabled.",
+                    "hint": "Enable Gmail watch and wait for new incoming emails.",
+                }
+            ),
+            410,
+        )
         
     except Exception as e:
         logger.error(f"Error in ingest: {e}", exc_info=True)

@@ -57,6 +57,16 @@ export default function GmailAgentPage() {
     if (showLoading) setLoading(true);
     
     try {
+      // Local/dev-friendly: ask backend to poll Gmail History deltas (no backfill).
+      // If Pub/Sub watch is configured in prod, this is harmless.
+      try {
+        await fetch(`${API_BASE_URL}/api/gmail/poll-new`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({user_id: userId}),
+        });
+      } catch {}
+
       // v3.0 Optimized: GET request for instant caching (<50ms response)
       const params = new URLSearchParams({
         user_id: userId,
@@ -100,16 +110,6 @@ export default function GmailAgentPage() {
       
       // Load cached data immediately
       fetchTriagedInbox(null, true);
-      
-      // Trigger background classification for new emails (don't wait for response)
-      fetch(`${API_BASE_URL}/api/gmail/classify-background`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          user_id: userId,
-          max_emails: 20,
-        }),
-      }).catch(e => console.error('Background classification trigger failed:', e));
     }
   }, [userId, fetchTriagedInbox]);
 

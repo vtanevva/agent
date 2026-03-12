@@ -1247,23 +1247,39 @@ def google_callback():
 
         save_google_credentials(state, creds, real_email)
         
-        # 🚀 LOGIN EMAIL PIPELINE (NEW):
-        # 1) Ingest latest N emails to Mongo (with body_temp)
-        # 2) Run independent workers in parallel:
-        #    - facts extraction
-        #    - relationship entity updates
-        #    - tasks extraction
-        #    - linking (attach facts/tasks to relationships once available)
-        #
-        # Privacy: body_temp is deleted only after all jobs finish.
-        try:
-            from app.services.email_processing_pipeline import enqueue_login_email_pipeline
+        # NOTE: We do NOT backfill/process past emails on login.
+        # Only new incoming emails (via Gmail Pub/Sub watch) are ingested/processed.
 
-            job_id = enqueue_login_email_pipeline(user_id=state, max_emails=20, provider="gmail")
-            logger.info(f"✅ Enqueued login email pipeline for {state} (job: {job_id})")
+        # Store Gmail History baseline for incremental "poll-new" (no backfill).
+        # This makes local/dev usable even when Pub/Sub watch isn't configured.
+        try:
+            from app.db.collections import get_gmail_watch_state_collection
+            from app.utils.google_api_helpers import get_gmail_service
+
+            col = get_gmail_watch_state_collection()
+            if col is not None:
+                svc = get_gmail_service(state)
+                profile = svc.users().getProfile(userId="me").execute()
+                email_address = (profile or {}).get("emailAddress") or (real_email or state)
+                history_id = int((profile or {}).get("historyId") or 0)
+                if email_address and history_id:
+                    col.update_one(
+                        {"_id": str(email_address).strip().lower()},
+                        {
+                            "$set": {
+                                "_id": str(email_address).strip().lower(),
+                                "email_address": str(email_address).strip().lower(),
+                                "app_user_id": state,
+                                "last_history_id": history_id,
+                                "updated_at": datetime.utcnow().isoformat(),
+                                "note": "baseline_from_oauth_no_backfill",
+                            }
+                        },
+                        upsert=True,
+                    )
+                    logger.info(f"✅ Gmail history baseline stored for {email_address} (historyId={history_id})")
         except Exception as e:
-            # Don't fail OAuth if background processing fails
-            logger.warning(f"⚠️ Could not start login email pipeline for user {state}: {e}")
+            logger.warning(f"⚠️ Could not store Gmail history baseline: {e}")
 
         # 🔔 Start Gmail Pub/Sub watch (optional, if configured)
         try:

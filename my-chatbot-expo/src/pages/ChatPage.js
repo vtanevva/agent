@@ -12,6 +12,7 @@ import {
   Animated,
   Platform,
   KeyboardAvoidingView,
+  ActivityIndicator,
 } from 'react-native';
 import {useRoute, useNavigation} from '@react-navigation/native';
 import {LinearGradient} from 'expo-linear-gradient';
@@ -22,6 +23,7 @@ import {commonStyles} from '../styles/commonStyles';
 import MessageList from '../components/MessageList';
 import InputBar from '../components/InputBar';
 import CalendarView from '../components/CalendarView';
+import EmailList from '../components/EmailList';
 import {API_BASE_URL} from '../config/api';
 import EmailReplyModal from '../components/EmailReplyModal';
 import ComposeEmailModal from '../components/ComposeEmailModal';
@@ -36,6 +38,10 @@ export default function ChatPage() {
   const [chat, setChat] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [viewMode, setViewMode] = useState('chat'); // "action" | "chat"
+  const [actionEmails, setActionEmails] = useState([]);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [actionError, setActionError] = useState('');
   const [sessions, setSessions] = useState([]);
   const [selectedSession, setSelectedSession] = useState(sessionId);
   const [showCalendar, setShowCalendar] = useState(false);
@@ -58,6 +64,9 @@ export default function ChatPage() {
   const lastUserMessage = useRef('');
   const sidebarAnim = useRef(new Animated.Value(-280)).current;
   const hasCheckedParams = useRef(false);
+  const ACTION_CATEGORIES = useRef(['urgent', 'action_items']).current;
+  const actionFetchInFlight = useRef(false);
+  const actionPollTimer = useRef(null);
   
   // ========== ALL HOOKS MUST BE CALLED BEFORE ANY CONDITIONAL RETURNS ==========
   
@@ -157,6 +166,82 @@ export default function ChatPage() {
     }
   }, [userId, fetchSessions, checkEmailConnections]);
 
+  const fetchActionInbox = useCallback(async (showLoading = true) => {
+    if (!userId) return;
+    if (!googleConnected) {
+      setActionEmails([]);
+      setActionError('');
+      return;
+    }
+
+    if (actionFetchInFlight.current && !showLoading) return;
+    actionFetchInFlight.current = true;
+
+    if (showLoading) setActionLoading(true);
+    setActionError('');
+
+    try {
+      const params = new URLSearchParams({
+        user_id: userId,
+        max_results: '100',
+      });
+      const r = await fetch(`${API_BASE_URL}/api/gmail/triaged-inbox?${params}`, {
+        method: 'GET',
+        headers: {'Content-Type': 'application/json'},
+      });
+      const data = await r.json();
+      if (!r.ok || !data?.success) {
+        throw new Error(data?.error || `HTTP ${r.status}`);
+      }
+
+      const cats = data?.categories || {};
+      const merged = [];
+      for (const key of ACTION_CATEGORIES) {
+        const items = cats?.[key] || [];
+        if (Array.isArray(items)) merged.push(...items);
+      }
+      setActionEmails(merged);
+    } catch (e) {
+      console.error('Error fetching action inbox:', e);
+      setActionEmails([]);
+      setActionError(e?.message || 'Failed to load action inbox');
+    } finally {
+      if (showLoading) setActionLoading(false);
+      actionFetchInFlight.current = false;
+    }
+  }, [userId, googleConnected, ACTION_CATEGORIES]);
+
+  // Auto-refresh Action Inbox (no manual refresh button needed)
+  useEffect(() => {
+    if (!userId || !googleConnected || viewMode !== 'action') return;
+    // Poll cadence: keeps UI fresh without hitting Gmail APIs
+    const POLL_MS = 8000;
+    if (actionPollTimer.current) {
+      clearInterval(actionPollTimer.current);
+      actionPollTimer.current = null;
+    }
+    actionPollTimer.current = setInterval(() => {
+      fetchActionInbox(false);
+    }, POLL_MS);
+    return () => {
+      if (actionPollTimer.current) {
+        clearInterval(actionPollTimer.current);
+        actionPollTimer.current = null;
+      }
+    };
+  }, [userId, googleConnected, viewMode, fetchActionInbox]);
+
+  // Default to Action view when Gmail is connected
+  useEffect(() => {
+    if (!userId) return;
+    if (googleConnected) {
+      setViewMode('action');
+      fetchActionInbox(true);
+    } else {
+      setViewMode('chat');
+    }
+  }, [userId, googleConnected, fetchActionInbox]);
+
   // Auto-sync contacts once Google is connected (server skips if already initialized)
   useEffect(() => {
     if (!userId || !googleConnected) return;
@@ -183,6 +268,7 @@ export default function ChatPage() {
     console.log('current input:', input);
     console.log('userId:', userId, 'sessionId:', sessionId);
     console.log('selectedImages:', selectedImages.length);
+    setViewMode('chat');
     
     if (!msg.trim() && selectedImages.length === 0) {
       console.log('Empty message and no images, returning');
@@ -462,7 +548,12 @@ export default function ChatPage() {
   };
 
   const handleCheckEmails = async () => {
-    await handleSend('Check my emails');
+    if (!googleConnected) {
+      Alert.alert('Connect Gmail', 'Please connect Gmail to view your action emails.');
+      return;
+    }
+    setViewMode('action');
+    await fetchActionInbox(true);
   };
 
   const handleCheckCalendar = async () => {
@@ -793,21 +884,80 @@ export default function ChatPage() {
               style={styles.menuButton}>
               <Text style={styles.menuIcon}>☰</Text>
             </TouchableOpacity>
-            <Text style={styles.chatTitle}>
-              Session: {sessionId?.slice(-8) || 'New'}
-            </Text>
+            <View style={{flex: 1}}>
+              <Text style={styles.chatTitle}>
+                Session: {sessionId?.slice(-8) || 'New'}
+              </Text>
+              {googleConnected && (
+                <View style={styles.modeToggle}>
+                  <TouchableOpacity
+                    onPress={() => setViewMode('action')}
+                    style={[
+                      styles.modeBtn,
+                      viewMode === 'action' && styles.modeBtnActive,
+                    ]}>
+                    <Text style={[
+                      styles.modeBtnText,
+                      viewMode === 'action' && styles.modeBtnTextActive,
+                    ]}>
+                      Action Inbox
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setViewMode('chat')}
+                    style={[
+                      styles.modeBtn,
+                      viewMode === 'chat' && styles.modeBtnActive,
+                    ]}>
+                    <Text style={[
+                      styles.modeBtnText,
+                      viewMode === 'chat' && styles.modeBtnTextActive,
+                    ]}>
+                      Chat
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
           </View>
 
           {/* Messages Container */}
           <View style={styles.messagesContainer}>
-            <MessageList
-              chat={chat}
-              loading={loading}
-              onEmailSelect={handleEmailSelect}
-            onArchive={archiveThreadOptimistic}
-            onDone={markHandledOptimistic}
-            hiddenThreadIds={hiddenThreads}
-            />
+            {googleConnected && viewMode === 'action' ? (
+              <View style={{flex: 1}}>
+                {actionLoading ? (
+                  <View style={styles.actionLoading}>
+                    <ActivityIndicator size="large" color={colors.secondary[500]} />
+                    <Text style={styles.actionLoadingText}>Loading action emails…</Text>
+                  </View>
+                ) : actionError ? (
+                  <View style={styles.actionEmpty}>
+                    <Text style={styles.actionEmptyTitle}>Couldn’t load action emails</Text>
+                    <Text style={styles.actionEmptyText}>{actionError}</Text>
+                    <TouchableOpacity onPress={() => fetchActionInbox(true)} style={styles.actionRetryBtn}>
+                      <Text style={styles.actionRetryText}>Try again</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <EmailList
+                    emails={actionEmails}
+                    onSelect={handleEmailSelect}
+                    onArchive={archiveThreadOptimistic}
+                    onDone={markHandledOptimistic}
+                    hiddenThreadIds={hiddenThreads}
+                  />
+                )}
+              </View>
+            ) : (
+              <MessageList
+                chat={chat}
+                loading={loading}
+                onEmailSelect={handleEmailSelect}
+                onArchive={archiveThreadOptimistic}
+                onDone={markHandledOptimistic}
+                hiddenThreadIds={hiddenThreads}
+              />
+            )}
           </View>
 
           {/* Input */}
@@ -1071,8 +1221,81 @@ const styles = StyleSheet.create({
     padding: 16,
     backgroundColor: colors.primary[50],
   },
+  modeToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    flexWrap: 'wrap',
+  },
+  modeBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: colors.primary[200] + '30',
+    borderWidth: 1,
+    borderColor: colors.dark[500] + '15',
+  },
+  modeBtnActive: {
+    backgroundColor: colors.secondary[500] + '30',
+    borderColor: colors.secondary[600] + '50',
+  },
+  modeBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primary[900] + '90',
+  },
+  modeBtnTextActive: {
+    color: colors.secondary[700],
+    fontWeight: '800',
+  },
   messagesContainer: {
     flex: 1,
+  },
+  actionLoading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    padding: 16,
+  },
+  actionLoadingText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary[900] + '80',
+  },
+  actionEmpty: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    gap: 10,
+  },
+  actionEmptyTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.primary[900],
+    textAlign: 'center',
+  },
+  actionEmptyText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primary[900] + '70',
+    textAlign: 'center',
+  },
+  actionRetryBtn: {
+    marginTop: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    backgroundColor: colors.accent[500] + '20',
+    borderWidth: 1,
+    borderColor: colors.accent[500] + '35',
+  },
+  actionRetryText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.accent[700],
   },
   menuButton: {
     marginRight: 12,

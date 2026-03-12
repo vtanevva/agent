@@ -75,30 +75,9 @@ export default function TasksPage() {
 
   const syncFromGmail = async () => {
     if (!userId) return;
-    setSyncing(true);
-    setError('');
-    try {
-      // Trigger background email processing (ingest + workers)
-      const r = await fetch(`${API_BASE_URL}/api/tasks/ingest`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({user_id: userId, max_emails: 20}),
-      });
-      const data = await r.json();
-      if (!r.ok || !data?.success) {
-        throw new Error(data?.error || `HTTP ${r.status}`);
-      }
-      // Show status message (processing is async)
-      alert(`✅ Started email processing${data.job_id ? ` (job: ${data.job_id})` : ''}. Refresh in a few seconds.`);
-
-      // Best-effort refresh shortly after starting
-      await new Promise((res) => setTimeout(res, 2500));
-      await loadTasks();
-    } catch (e) {
-      setError(e?.message || 'Failed to process emails');
-    } finally {
-      setSyncing(false);
-    }
+    alert(
+      'Processing past/recent emails is disabled.\n\nThis app only processes new incoming emails (via Gmail watch).'
+    );
   };
 
   useEffect(() => {

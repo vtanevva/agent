@@ -213,16 +213,9 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> None:
         if status == 404:
             logger.warning(
                 f"[GMAIL PUSH] History delta invalid/too old for {email_address} (start={last_history_id}). "
-                "Resetting baseline and running a small catch-up ingest."
+                "Resetting baseline and waiting for future pushes (no backfill)."
             )
-            _set_last_history_id(email_address, notif.history_id, note="history_too_old_reset")
-            try:
-                # Catch up by ingesting a few newest inbox threads (bounded cost)
-                from app.services.email_processing_pipeline import enqueue_login_email_pipeline
-
-                enqueue_login_email_pipeline(user_id=app_user_id, max_emails=20, provider="gmail")
-            except Exception:
-                pass
+            _set_last_history_id(email_address, notif.history_id, note="history_too_old_reset_no_backfill")
             return
         logger.error(f"[GMAIL PUSH] History API error for {email_address}: {e}", exc_info=True)
         return

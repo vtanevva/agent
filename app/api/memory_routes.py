@@ -622,6 +622,15 @@ def backfill_comprehensive():
     }
     """
     try:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Backfill is disabled (no past email processing).",
+                }
+            ),
+            410,
+        )
         data = request.json or {}
         
         user_id = data.get('user_id')
@@ -1075,6 +1084,15 @@ def backfill_email_facts():
     }
     """
     try:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Backfill is disabled (no past email processing).",
+                }
+            ),
+            410,
+        )
         data = request.json or {}
         
         user_id = data.get('user_id')
@@ -1196,6 +1214,15 @@ def backfill_facts():
     }
     """
     try:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Backfill is disabled.",
+                }
+            ),
+            410,
+        )
         data = request.json or {}
         
         user_id = data.get('user_id')

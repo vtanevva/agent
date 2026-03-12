@@ -21,6 +21,7 @@ from app.services.gmail_service import (
     rewrite_email_text,
 )
 from app.services.gmail_watch_service import start_gmail_watch, stop_gmail_watch
+from app.services.gmail_pubsub_service import process_gmail_history_delta, GmailPushNotification
 from app.tools.email import analyze_email_style, generate_reply_draft, generate_forward_draft
 from app.utils.oauth_utils import require_google_auth
 from app.utils.rate_limiter import enforce_rate_limit, get_rate_limit_key, RateLimitExceeded
@@ -562,22 +563,114 @@ def gmail_triaged_inbox():
 
 @gmail_bp.route("/classify-background", methods=["POST"])
 def gmail_classify_background():
-    """Trigger background classification for unclassified emails. Returns immediately."""
+    """
+    Disabled: we do not process/backfill recent/past emails.
+    Only new incoming emails should be ingested via Gmail Pub/Sub watch.
+    """
+    return (
+        jsonify(
+            {
+                "success": False,
+                "error": "Background classification is disabled (no backfill).",
+                "hint": "Enable Gmail watch and wait for new incoming emails.",
+            }
+        ),
+        410,
+    )
+
+
+@gmail_bp.route("/poll-new", methods=["POST"])
+def gmail_poll_new():
+    """
+    Incremental "new email" polling for local/dev environments without Pub/Sub push.
+
+    This is NOT a backfill: it uses Gmail History API deltas based on a stored baseline
+    (gmail_watch_state.last_history_id keyed by Gmail emailAddress).
+    It ingests ONLY newly-added messages since the last baseline and enqueues workers.
+
+    Request body:
+      { "user_id": "v" }
+
+    Response:
+      { "success": true, "enqueued": true|false, "message": "...", "history_id": 123, "job_enqueued": true|false }
+    """
     data = request.get_json(force=True, silent=True) or {}
     user_id_raw = data.get("user_id", "")
     user_id = _normalize_user_id(user_id_raw)
-    max_emails = int(data.get("max_emails", 20))
 
     auth_response = require_google_auth(user_id)
     if auth_response:
         return auth_response
 
-    result = classify_background(
-        user_id=user_id,
-        max_emails=max_emails
-    )
-    status = 200 if result.get("success", True) else 500
-    return jsonify(result), status
+    try:
+        svc = get_gmail_service(user_id)
+        profile = svc.users().getProfile(userId="me").execute()
+        email_address = (profile or {}).get("emailAddress") or user_id
+        current_history_id = int((profile or {}).get("historyId") or 0)
+    except Exception as e:
+        return jsonify({"success": False, "error": f"Failed to load Gmail profile: {e}"}), 500
+
+    # If no baseline exists, store it and do nothing (by design: no backfill).
+    from app.db.collections import get_gmail_watch_state_collection
+
+    col = get_gmail_watch_state_collection()
+    if col is None:
+        return jsonify({"success": False, "error": "Database not available"}), 500
+
+    doc = col.find_one({"_id": str(email_address).strip().lower()}, {"last_history_id": 1})
+    last = doc.get("last_history_id") if doc else None
+    try:
+        last_int = int(last) if last is not None else None
+    except Exception:
+        last_int = None
+
+    if last_int is None:
+        # Create baseline only, no ingest.
+        col.update_one(
+            {"_id": str(email_address).strip().lower()},
+            {
+                "$set": {
+                    "_id": str(email_address).strip().lower(),
+                    "email_address": str(email_address).strip().lower(),
+                    "app_user_id": user_id,
+                    "last_history_id": current_history_id,
+                    "updated_at": datetime.utcnow().isoformat(),
+                    "note": "baseline_from_poll_new_no_backfill",
+                }
+            },
+            upsert=True,
+        )
+        return jsonify(
+            {
+                "success": True,
+                "enqueued": False,
+                "message": "Baseline set. No emails ingested (no backfill). Poll again after a new email arrives.",
+                "email_address": str(email_address).strip().lower(),
+                "history_id": current_history_id,
+            }
+        )
+
+    # Process delta using existing history-delta logic.
+    try:
+        process_gmail_history_delta(
+            GmailPushNotification(
+                email_address=str(email_address).strip().lower(),
+                history_id=current_history_id,
+                pubsub_message_id="manual_poll",
+            )
+        )
+        return jsonify(
+            {
+                "success": True,
+                "enqueued": True,
+                "message": "Processed history delta (if any). Refresh triaged inbox shortly.",
+                "email_address": str(email_address).strip().lower(),
+                "history_id": current_history_id,
+            }
+        )
+    except Exception as e:
+        logger.error(f"poll-new failed: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @gmail_bp.route("/watch/start", methods=["POST"])
