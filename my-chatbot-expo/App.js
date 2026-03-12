@@ -15,6 +15,7 @@ import ContactDetailPage from './src/pages/ContactDetailPage';
 import ContactsWithRelationshipsPage from './src/pages/ContactsWithRelationshipsPage';
 import WaitlistPage from './src/pages/WaitlistPage';
 import TasksPage from './src/pages/TasksPage';
+import SchedulerPage from './src/pages/SchedulerPage';
 import {genSession} from './src/config/api';
 
 const Stack = createNativeStackNavigator();
@@ -77,6 +78,7 @@ export default function App() {
                   sessionId: (sessionId) => sessionId,
                 },
               },
+              Scheduler: 'schedule',
             },
           },
         }}>
@@ -96,6 +98,7 @@ export default function App() {
           <Stack.Screen name="ContactDetail" component={ContactDetailPage} />
           <Stack.Screen name="ContactsWithRelationships" component={ContactsWithRelationshipsPage} />
           <Stack.Screen name="Tasks" component={TasksPage} />
+          <Stack.Screen name="Scheduler" component={SchedulerPage} />
           <Stack.Screen name="Waitlist" component={WaitlistPage} />
         </Stack.Navigator>
       </NavigationContainer>
