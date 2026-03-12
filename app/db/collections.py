@@ -1,5 +1,6 @@
 """Shared database utilities for accessing MongoDB collections"""
 
+import os
 from typing import Optional
 from pymongo.collection import Collection
 from app.database import get_db
@@ -49,9 +50,22 @@ def get_email_todos_collection() -> Optional[Collection]:
 
 
 def get_gmail_watch_state_collection() -> Optional[Collection]:
-    """Get the gmail_watch_state collection (historyId baselines for Pub/Sub watch)."""
+    """
+    Get the gmail_watch_state collection (historyId baselines for Pub/Sub watch).
+
+    IMPORTANT:
+    We scope watch baselines by environment to prevent dev/prod (or multiple deployments)
+    from racing on the same `last_history_id` when they share a MongoDB.
+    """
     db_manager = get_db()
     if db_manager.is_connected and db_manager.db is not None:
-        return db_manager.db["gmail_watch_state"]
+        env = (os.getenv("APP_ENV") or os.getenv("FLASK_ENV") or "development").strip().lower()
+        # Normalize a few common values
+        if env in ("prod",):
+            env = "production"
+        if env in ("dev",):
+            env = "development"
+        safe_env = "".join(ch for ch in env if ch.isalnum() or ch in ("_", "-")) or "development"
+        return db_manager.db[f"gmail_watch_state__{safe_env}"]
     return None
 

@@ -110,7 +110,7 @@ def detect_calendar_requests(text: str) -> List[Dict]:
     return unique_events
 
 
-def parse_datetime_from_text(text: str) -> Tuple[Optional[datetime], Optional[datetime]]:
+def parse_datetime_from_text(text: str, reference_dt: Optional[datetime] = None) -> Tuple[Optional[datetime], Optional[datetime]]:
     """
     Parse datetime information from text using improved natural language parsing.
     
@@ -133,7 +133,7 @@ def parse_datetime_from_text(text: str) -> Tuple[Optional[datetime], Optional[da
         (start_time, end_time) or (None, None) if parsing fails
     """
     text_lower = text.lower().strip()
-    now = datetime.now()
+    now = reference_dt or datetime.now()
     
     # Step 1: Determine target date
     target_date = None
@@ -160,6 +160,20 @@ def parse_datetime_from_text(text: str) -> Tuple[Optional[datetime], Optional[da
                     days_ahead = 7
                 target_date = now + timedelta(days=days_ahead)
                 break
+    else:
+        # Handle "this Friday", "on Friday", or bare weekday mentions.
+        # We interpret these as the next occurrence of that weekday (including today).
+        days_of_week = {
+            "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+            "friday": 4, "saturday": 5, "sunday": 6
+        }
+        weekday_match = re.search(r"\b(?:this|on)?\s*(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", text_lower)
+        if weekday_match:
+            day_name = weekday_match.group(1)
+            day_num = days_of_week.get(day_name)
+            if day_num is not None:
+                days_ahead = (day_num - now.weekday()) % 7
+                target_date = now + timedelta(days=days_ahead)
     
     # If no relative date found, try to parse absolute date
     if target_date is None:

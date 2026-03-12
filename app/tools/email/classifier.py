@@ -339,9 +339,9 @@ def classify_email(email: Dict, user_id: str) -> Dict:
     
     # Combine scores (all categories)
     total_scores = {}
-    all_categories = ["urgent", "waiting_for_reply", "action_items", "newsletters", 
-                      "notifications", "transactional", "social", "promotional", 
-                      "invoices", "clients"]
+    all_categories = ["waiting_for_reply", "action_items", "newsletters", 
+                      "notifications", "social", "promotional", 
+                      "invoices", "clients", "alert"]
     for category in all_categories:
         total_scores[category] = (
             rules_scores.get(category, 0) +

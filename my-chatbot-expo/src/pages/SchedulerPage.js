@@ -40,6 +40,66 @@ function sameDay(a, b) {
   return a && b && a.toDateString() === b.toDateString();
 }
 
+function normalizeTitleForMatch(title) {
+  const s = String(title || '')
+    .toLowerCase()
+    .replace(/[\u2019']/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!s) return '';
+
+  // Remove common “task framing” words so task titles can match event titles.
+  const stop = new Set([
+    'attend',
+    'meeting',
+    'meet',
+    'with',
+    'call',
+    'schedule',
+    'needed',
+    'due',
+    'in',
+    'the',
+    'a',
+    'an',
+    'to',
+    'for',
+    'and',
+    'on',
+    'at',
+    'reply',
+    'follow',
+    'up',
+    'confirm',
+  ]);
+  return s
+    .split(' ')
+    .filter((w) => w && !stop.has(w))
+    .join(' ')
+    .trim();
+}
+
+function tokenSet(str) {
+  const s = normalizeTitleForMatch(str);
+  if (!s) return new Set();
+  return new Set(s.split(' ').filter(Boolean));
+}
+
+function jaccard(aSet, bSet) {
+  if (!aSet.size || !bSet.size) return 0;
+  let inter = 0;
+  for (const t of aSet) if (bSet.has(t)) inter += 1;
+  const uni = aSet.size + bSet.size - inter;
+  return uni ? inter / uni : 0;
+}
+
+function looksLikeGenericMeeting(text) {
+  const s = String(text || '').toLowerCase();
+  if (!s) return false;
+  return /\b(meet|meeting|call|sync|catch up|chat|interview|demo)\b/.test(s);
+}
+
 function getDaysInMonthGrid(monthDate) {
   const year = monthDate.getFullYear();
   const month = monthDate.getMonth();
@@ -95,13 +155,26 @@ export default function SchedulerPage() {
   const scheduleItems = useMemo(() => {
     const items = [];
 
+    // Index events by day so we can hide duplicate “meeting tasks”.
+    const eventsByDay = new Map();
+
     for (const ev of events || []) {
       const start = toDateSafe(ev.start);
       if (!start) continue;
+      const end = toDateSafe(ev.end) || start;
+      const dayKey = start.toDateString();
+      const list = eventsByDay.get(dayKey) || [];
+      list.push({
+        summary: ev.summary || '',
+        tokens: tokenSet(ev.summary || ''),
+        startMs: start.getTime(),
+        endMs: end.getTime(),
+      });
+      eventsByDay.set(dayKey, list);
       items.push({
         kind: 'event',
         start,
-        end: toDateSafe(ev.end) || start,
+        end,
         summary: ev.summary || '(Untitled event)',
         location: ev.location || '',
         description: ev.description || '',
@@ -114,6 +187,38 @@ export default function SchedulerPage() {
     for (const t of tasks || []) {
       const start = toDateSafe(t.due_datetime);
       if (!start) continue;
+
+      // If a calendar event exists for the same day and looks like the same thing,
+      // keep the calendar event card (nicer) and hide the task card to avoid duplicates.
+      const dayKey = start.toDateString();
+      const dayEvents = eventsByDay.get(dayKey) || [];
+      const taskTokens = tokenSet(t.title || '');
+      const normTask = normalizeTitleForMatch(t.title || '');
+      const taskLooksMeeting = looksLikeGenericMeeting(t.title) || looksLikeGenericMeeting(t.reason);
+      const taskStartMs = start.getTime();
+      const taskEndMs = taskStartMs + 90 * 60 * 1000; // treat tasks as ~90min window for overlap
+
+      const looksDuplicate = dayEvents.some((ev) => {
+        const startDiffMs = Math.abs((ev.startMs || 0) - taskStartMs);
+        const overlaps =
+          (ev.startMs != null && ev.endMs != null && taskStartMs < ev.endMs && taskEndMs > ev.startMs) ||
+          startDiffMs <= 15 * 60 * 1000;
+
+        const sim = jaccard(taskTokens, ev.tokens);
+        if (sim >= 0.6) return true;
+        const normEv = normalizeTitleForMatch(ev.summary || '');
+        const titleMatch = !!normTask && !!normEv && (normTask.includes(normEv) || normEv.includes(normTask));
+
+        if (overlaps) {
+          if (sim >= 0.15) return true;
+          if (titleMatch) return true;
+          if (taskLooksMeeting && looksLikeGenericMeeting(ev.summary)) return true;
+        }
+
+        return titleMatch;
+      });
+      if (looksDuplicate) continue;
+
       const end = new Date(start.getTime() + 30 * 60 * 1000);
       items.push({
         kind: 'task',

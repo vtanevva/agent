@@ -67,6 +67,23 @@ class TaskPipelineService:
         if '<' in email_str:
             return email_str.split('<')[0].strip()
         return email_str.strip()
+
+    def _display_name_from_sender(self, sender_name: str, sender_email: str) -> str:
+        """
+        Best-effort display name for meeting titles.
+        Prefers a real display name; falls back to the email username.
+        """
+        name = self._extract_name(sender_name or "").strip()
+        if name and "@" not in name:
+            return name
+        raw = (sender_email or sender_name or "").strip()
+        if "<" in raw and ">" in raw:
+            # "Name <user@example.com>"
+            inner = raw.split("<", 1)[1].split(">", 1)[0].strip()
+            raw = inner or raw
+        if "@" in raw:
+            return raw.split("@", 1)[0].strip()
+        return (name or raw).strip()
     
     def _empty_result(self, error: str = "") -> Dict[str, Any]:
         """Return empty result structure"""
@@ -187,6 +204,10 @@ RULES:
 • If no implied deadline → mark due_datetime = null
 • Only concrete tasks (reply, schedule, call, etc.)
 • Max 3 tasks
+• IMPORTANT TITLE RULES:
+  - Do NOT include dates/times in "title" (no "tomorrow at 8:30", no weekdays).
+  - If this is a meeting/scheduling/call request, set title EXACTLY to: "Meeting with {sender_name}"
+  - If you can infer a topic, include it as a separate field "topic" (max 6 words). Otherwise null.
 
 Email:
 From: {sender_name} <{sender}>
@@ -199,9 +220,10 @@ OUTPUT (strict JSON):
 {{
   "tasks": [
     {{
-      "title": "task description (max 12 words)",
+      "title": "task description (max 12 words, no dates/times)",
       "action_type": "reply|schedule|call|review|complete|delegate",
-      "due_datetime": "YYYY-MM-DDTHH:MM:SS or null"
+      "due_datetime": "YYYY-MM-DDTHH:MM:SS or null",
+      "topic": "string or null"
     }}
   ]
 }}
@@ -248,6 +270,7 @@ If no clear action, return {{"tasks": []}}"""
                     event_id=event_id,
                     task_data=task_data,
                     raw_output=parsed,
+                    email_data=email_data,
                 )
                 if candidate:
                     candidates.append(candidate)
@@ -258,7 +281,14 @@ If no clear action, return {{"tasks": []}}"""
             logger.error(f"Task extraction failed: {e}", exc_info=True)
             return []
     
-    def _store_task_candidate(self, user_id: str, event_id: str, task_data: Dict[str, Any], raw_output: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _store_task_candidate(
+        self,
+        user_id: str,
+        event_id: str,
+        task_data: Dict[str, Any],
+        raw_output: Dict[str, Any],
+        email_data: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
         """Store a TaskCandidate in MongoDB"""
         candidates_col = get_task_candidates_collection()
         if candidates_col is None:
@@ -266,7 +296,9 @@ If no clear action, return {{"tasks": []}}"""
         
         candidate_id = f"candidate_{uuid4()}"
         
-        # Parse due_datetime
+        # Parse due_datetime (LLM-provided) with a safety fallback:
+        # If the extracted due date lands *before* the email timestamp but the title implies
+        # a forward-looking relative day ("this Friday", "tomorrow", etc.), re-parse from title.
         due_datetime = None
         due_str = task_data.get("due_datetime")
         if due_str and due_str != "null":
@@ -274,6 +306,42 @@ If no clear action, return {{"tasks": []}}"""
                 due_datetime = datetime.fromisoformat(due_str.replace("Z", "+00:00"))
             except Exception:
                 logger.warning(f"Failed to parse due_datetime: {due_str}")
+
+        # Fallback parse from title if the LLM date seems obviously wrong.
+        try:
+            title = str(task_data.get("title") or "")
+            title_lower = title.lower()
+            timestamp = (email_data or {}).get("timestamp", datetime.utcnow())
+            has_relative_day = any(
+                k in title_lower
+                for k in (
+                    "tomorrow",
+                    "today",
+                    "next ",
+                    "this ",
+                    "monday",
+                    "tuesday",
+                    "wednesday",
+                    "thursday",
+                    "friday",
+                    "saturday",
+                    "sunday",
+                )
+            )
+            if due_datetime and has_relative_day:
+                # Compare in naive space to avoid tz gotchas; we only care about “before email”.
+                due_cmp = due_datetime.replace(tzinfo=None) if isinstance(due_datetime, datetime) else None
+                ts_cmp = timestamp.replace(tzinfo=None) if isinstance(timestamp, datetime) else None
+                if due_cmp and ts_cmp and due_cmp < (ts_cmp - timedelta(hours=1)):
+                    from app.tools.calendar.detect_requests import parse_datetime_from_text
+
+                    parsed_start, _parsed_end = parse_datetime_from_text(title, reference_dt=ts_cmp)
+                    if parsed_start:
+                        # Preserve tz-awareness if parse returns aware.
+                        due_datetime = parsed_start
+        except Exception:
+            # Never fail candidate creation due to fallback parsing.
+            pass
         
         # FILTER: Skip tasks that are overdue by more than X days.
         # (We do NOT skip based on email timestamp; we skip based on task due date.)
@@ -293,12 +361,115 @@ If no clear action, return {{"tasks": []}}"""
                 )
                 return None
         
+        # Prefer stable, user-friendly titles for meeting-like tasks.
+        # For meetings coming from email, we standardize to: "Meeting with <sender>".
+        title = str(task_data.get("title", "")).strip()
+        action_type = str(task_data.get("action_type", "review") or "review")
+        subject = str((email_data or {}).get("subject") or "").strip()
+
+        import re
+
+        def _looks_generic_meeting_phrase(text: str) -> bool:
+            s = re.sub(r"[^a-z0-9\s]", " ", (text or "").lower())
+            s = re.sub(r"\s+", " ", s).strip()
+            if not s:
+                return True
+
+            tokens = [t for t in s.split(" ") if t]
+            if not tokens:
+                return True
+
+            date_time_words = {
+                "today",
+                "tomorrow",
+                "next",
+                "this",
+                "at",
+                "on",
+                "in",
+                "am",
+                "pm",
+                "monday",
+                "tuesday",
+                "wednesday",
+                "thursday",
+                "friday",
+                "saturday",
+                "sunday",
+                "jan",
+                "january",
+                "feb",
+                "february",
+                "mar",
+                "march",
+                "apr",
+                "april",
+                "may",
+                "jun",
+                "june",
+                "jul",
+                "july",
+                "aug",
+                "august",
+                "sep",
+                "sept",
+                "september",
+                "oct",
+                "october",
+                "nov",
+                "november",
+                "dec",
+                "december",
+            }
+
+            core = [t for t in tokens if t not in date_time_words and not t.isdigit()]
+            if not core:
+                core = tokens
+            core_s = " ".join(core)
+
+            generic_set = {
+                "lets meet",
+                "let us meet",
+                "let s meet",
+                "meet",
+                "meeting",
+                "quick meeting",
+                "call",
+                "quick call",
+                "chat",
+                "quick chat",
+                "catch up",
+                "sync",
+                "sync up",
+            }
+            if core_s in generic_set or core_s.startswith("lets meet") or core_s.startswith("meet "):
+                return True
+
+            verbs = {"meet", "meeting", "call", "chat", "sync"}
+            verbish = [t for t in core if t in verbs]
+            nonverb = [t for t in core if t not in verbs]
+            return bool(verbish) and len(nonverb) <= 1
+
+        # Prefer email subject over LLM title when available (more stable wording).
+        cleaned_subject = re.sub(r"^\s*(re|fwd)\s*:\s*", "", subject, flags=re.IGNORECASE).strip()
+        if cleaned_subject:
+            title = cleaned_subject
+
+        # Standardize meeting-ish titles to "Meeting with <sender>".
+        # Apply regardless of action_type because the LLM may label meeting tasks as "call" or "schedule".
+        if _looks_generic_meeting_phrase(cleaned_subject or title):
+            sender_name_raw = str((email_data or {}).get("sender_name") or "")
+            sender_raw = str((email_data or {}).get("sender") or "")
+            who = self._display_name_from_sender(sender_name_raw, sender_raw)
+            if who:
+                title = f"Meeting with {who}"
+
         candidate = {
             "_id": candidate_id,
             "user_id": user_id,
             "event_id": event_id,
-            "title": task_data.get("title", "")[:200],
-            "action_type": task_data.get("action_type", "review"),
+            "title": title[:200],
+            "action_type": action_type,
             "due_datetime": due_datetime,
             "extracted_at": datetime.utcnow(),
             "llm_model": self.llm.default_model,

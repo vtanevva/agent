@@ -81,7 +81,7 @@ def start_gmail_watch(
     history_id = resp.get("historyId")
     expiration = resp.get("expiration")  # ms since epoch (string)
 
-    # Persist baseline under the Gmail address key
+    # Persist baseline under the Gmail address key (env-scoped collection)
     col = get_gmail_watch_state_collection()
     if col is not None:
         col.update_one(

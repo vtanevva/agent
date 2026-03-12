@@ -187,10 +187,10 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> None:
         logger.info(f"[GMAIL PUSH] Baseline historyId set for {email_address}: {notif.history_id}")
         return
 
-    # If Pub/Sub delivers an older/duplicate notification, ignore.
+    # Pub/Sub is at-least-once delivery; duplicates/out-of-order are normal.
     if notif.history_id <= last_history_id:
-        logger.info(
-            f"[GMAIL PUSH] Ignoring duplicate/old notification for {email_address}: "
+        logger.debug(
+            f"[GMAIL PUSH] Skip already-processed notification for {email_address}: "
             f"historyId={notif.history_id} <= last={last_history_id}"
         )
         return

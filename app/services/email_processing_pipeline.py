@@ -42,6 +42,7 @@ class EmailJobState:
     facts: str = JOB_PENDING
     relationships: str = JOB_PENDING
     tasks: str = JOB_PENDING
+    calendar: str = JOB_PENDING
     linking: str = JOB_PENDING
 
 
@@ -65,6 +66,7 @@ def ensure_email_processing_indexes() -> None:
         ([(("user_id", 1), ("facts_status", 1), ("received_at", -1))], "user_id_1_facts_status_1_received_at_-1", False),
         ([(("user_id", 1), ("relationships_status", 1), ("received_at", -1))], "user_id_1_relationships_status_1_received_at_-1", False),
         ([(("user_id", 1), ("tasks_status", 1), ("received_at", -1))], "user_id_1_tasks_status_1_received_at_-1", False),
+        ([(("user_id", 1), ("calendar_status", 1), ("received_at", -1))], "user_id_1_calendar_status_1_received_at_-1", False),
         ([(("user_id", 1), ("linking_status", 1), ("received_at", -1))], "user_id_1_linking_status_1_received_at_-1", False),
         # IMPORTANT: do NOT force unique here.
         # Some environments already have a non-unique index with this auto-generated name,
@@ -167,7 +169,14 @@ def ingest_latest_emails(
             # (privacy + avoids leaving body_temp around with no worker to delete it)
             existing = emails_col.find_one(
                 {"user_id": user_id, "thread_id": canonical_thread_id, "source": source},
-                {"facts_status": 1, "relationships_status": 1, "tasks_status": 1, "linking_status": 1, "body_temp": 1},
+                {
+                    "facts_status": 1,
+                    "relationships_status": 1,
+                    "tasks_status": 1,
+                    "calendar_status": 1,
+                    "linking_status": 1,
+                    "body_temp": 1,
+                },
             )
             doneish = {JOB_DONE, JOB_SKIPPED}
             already_done = False
@@ -176,6 +185,7 @@ def ingest_latest_emails(
                     existing.get("facts_status") in doneish
                     and existing.get("relationships_status") in doneish
                     and existing.get("tasks_status") in doneish
+                    and existing.get("calendar_status") in doneish
                     and existing.get("linking_status") in doneish
                 )
 
@@ -200,6 +210,7 @@ def ingest_latest_emails(
                         "facts_status": {"$ifNull": ["$facts_status", JOB_PENDING]},
                         "relationships_status": {"$ifNull": ["$relationships_status", JOB_PENDING]},
                         "tasks_status": {"$ifNull": ["$tasks_status", JOB_PENDING]},
+                        "calendar_status": {"$ifNull": ["$calendar_status", JOB_PENDING]},
                         "linking_status": {"$ifNull": ["$linking_status", JOB_PENDING]},
                     }
                 }
@@ -294,7 +305,14 @@ def ingest_threads(
 
             existing = emails_col.find_one(
                 {"user_id": user_id, "thread_id": canonical_thread_id, "source": source},
-                {"facts_status": 1, "relationships_status": 1, "tasks_status": 1, "linking_status": 1, "body_temp": 1},
+                {
+                    "facts_status": 1,
+                    "relationships_status": 1,
+                    "tasks_status": 1,
+                    "calendar_status": 1,
+                    "linking_status": 1,
+                    "body_temp": 1,
+                },
             )
             doneish = {JOB_DONE, JOB_SKIPPED}
             already_done = False
@@ -303,6 +321,7 @@ def ingest_threads(
                     existing.get("facts_status") in doneish
                     and existing.get("relationships_status") in doneish
                     and existing.get("tasks_status") in doneish
+                    and existing.get("calendar_status") in doneish
                     and existing.get("linking_status") in doneish
                 )
 
@@ -324,6 +343,7 @@ def ingest_threads(
                         "facts_status": {"$ifNull": ["$facts_status", JOB_PENDING]},
                         "relationships_status": {"$ifNull": ["$relationships_status", JOB_PENDING]},
                         "tasks_status": {"$ifNull": ["$tasks_status", JOB_PENDING]},
+                        "calendar_status": {"$ifNull": ["$calendar_status", JOB_PENDING]},
                         "linking_status": {"$ifNull": ["$linking_status", JOB_PENDING]},
                     }
                 }
@@ -462,6 +482,7 @@ def _maybe_delete_body_temp(email_doc_id) -> bool:
             "facts_status": doneish,
             "relationships_status": doneish,
             "tasks_status": doneish,
+            "calendar_status": doneish,
             "linking_status": doneish,
         },
         {"$unset": {"body_temp": ""}, "$set": {"body_deleted_at": _now()}},
@@ -754,6 +775,405 @@ def run_tasks_worker(
     return {"success": True, "processed": processed, "created": created, "failed": failed, "worker_id": worker_id}
 
 
+def run_calendar_worker(
+    user_id: str,
+    batch_id: Optional[str] = None,
+    max_items: int = 25,
+    worker_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Detect meeting-like emails and create calendar events.
+
+    This is best-effort and designed to be safe:
+    - Only runs for non-noise categories
+    - Uses cheap regex/heuristics first
+    - Dedupe per email thread via stored `calendar_event_id`
+    """
+    worker_id = worker_id or f"cal-{uuid4().hex[:6]}"
+    processed = 0
+    created = 0
+    skipped = 0
+    failed = 0
+
+    db = get_db()
+    emails_col = db.db["emails"] if (db.is_connected and db.db is not None) else None
+    if emails_col is None:
+        return {"success": False, "error": "Database not connected"}
+
+    # Quick connectivity check (avoid expensive work if no calendar provider)
+    try:
+        from app.services.calendar import check_user_calendar_connections, create_calendar_event
+
+        connections = check_user_calendar_connections(user_id)
+        if not (connections.get("google_connected") or connections.get("outlook_connected")):
+            return {
+                "success": True,
+                "processed": 0,
+                "created": 0,
+                "skipped": 0,
+                "failed": 0,
+                "worker_id": worker_id,
+                "note": "no_calendar_connected",
+            }
+    except Exception as e:
+        return {"success": False, "error": f"Calendar service unavailable: {e}", "worker_id": worker_id}
+
+    # Deterministic parsing helpers
+    from app.tools.calendar.detect_requests import detect_calendar_requests, parse_datetime_from_text
+
+    SKIP_CATEGORIES = {"notifications", "social", "promotional", "transactional", "newsletters"}
+    MEETING_HINTS = [
+        "meeting",
+        "meet",
+        "let's meet",
+        "lets meet",
+        "invite",
+        "invitation",
+        "calendar",
+        "google meet",
+        "meet.google.com",
+        "zoom",
+        "teams",
+        "microsoft teams",
+        "video call",
+        "conference",
+        "appointment",
+        "schedule",
+        "reschedule",
+        "call",
+        "demo",
+        "interview",
+        "standup",
+    ]
+
+    def _extract_sender_name(sender: str) -> str:
+        s = (sender or "").strip()
+        if "<" in s:
+            return s.split("<", 1)[0].strip().strip('"')
+        s = s.strip('"')
+        if "@" in s and " " not in s:
+            return s.split("@", 1)[0].strip()
+        return s
+
+    def _is_generic_summary(summary: str) -> bool:
+        import re
+
+        s = re.sub(r"[^a-z0-9\s]", " ", (summary or "").lower())
+        s = re.sub(r"\s+", " ", s).strip()
+        if not s:
+            return True
+        tokens = [t for t in s.split(" ") if t]
+        if not tokens:
+            return True
+
+        date_time_words = {
+            "today",
+            "tomorrow",
+            "next",
+            "this",
+            "at",
+            "on",
+            "in",
+            "am",
+            "pm",
+            "monday",
+            "tuesday",
+            "wednesday",
+            "thursday",
+            "friday",
+            "saturday",
+            "sunday",
+            "jan",
+            "january",
+            "feb",
+            "february",
+            "mar",
+            "march",
+            "apr",
+            "april",
+            "may",
+            "jun",
+            "june",
+            "jul",
+            "july",
+            "aug",
+            "august",
+            "sep",
+            "sept",
+            "september",
+            "oct",
+            "october",
+            "nov",
+            "november",
+            "dec",
+            "december",
+        }
+        core = [t for t in tokens if t not in date_time_words and not t.isdigit()]
+        if not core:
+            core = tokens
+        core_s = " ".join(core)
+
+        generic_set = {
+            "lets meet",
+            "let us meet",
+            "let s meet",
+            "meet",
+            "meeting",
+            "quick meeting",
+            "call",
+            "quick call",
+            "chat",
+            "quick chat",
+            "catch up",
+            "sync",
+            "sync up",
+        }
+        if core_s in generic_set or core_s.startswith("lets meet") or core_s.startswith("meet "):
+            return True
+
+        verbs = {"meet", "meeting", "call", "chat", "sync"}
+        verbish = [t for t in core if t in verbs]
+        nonverb = [t for t in core if t not in verbs]
+        return bool(verbish) and len(nonverb) <= 1
+
+    def _looks_like_meeting(text: str) -> bool:
+        t = (text or "").lower()
+        if not t:
+            return False
+        if any(h in t for h in MEETING_HINTS):
+            return True
+        # Word-boundary check to reduce false negatives like "Let's meet Friday…"
+        try:
+            import re
+
+            return re.search(r"\bmeet\b", t) is not None
+        except Exception:
+            return False
+
+    def _best_effort_extract(text: str, subject_fallback: str) -> tuple[Optional[str], Optional[datetime], Optional[datetime], str]:
+        """
+        Returns (summary, start_dt, end_dt, method).
+        """
+        reqs = detect_calendar_requests(text or "")
+        if reqs:
+            req = reqs[0]
+            start_dt, end_dt = parse_datetime_from_text(req.get("full_match", "") or "")
+            summary = (req.get("description") or subject_fallback or "Meeting").strip()
+            if start_dt:
+                return summary, start_dt, end_dt, "regex"
+
+        # Fallback: try parsing from subject line alone
+        start_dt, end_dt = parse_datetime_from_text(subject_fallback or "")
+        if start_dt:
+            return (subject_fallback or "Meeting").strip(), start_dt, end_dt, "subject_parse"
+
+        return None, None, None, "none"
+
+    def _llm_extract(subject: str, sender: str, snippet: str, body: str) -> Optional[Dict[str, Any]]:
+        import json
+        import re
+
+        from app.services.llm_service import get_llm_service
+
+        llm = get_llm_service()
+        prompt = f"""Extract calendar event details from this EMAIL.
+
+EMAIL:
+From: {sender}
+Subject: {subject}
+Snippet: {snippet}
+Body (truncated):
+{(body or '')[:1500]}
+
+Return ONLY valid JSON with keys:
+- summary (string, required)
+- start_time (string, required; can be natural language like "tomorrow at 2pm" if exact time not explicit)
+- end_time (string|null, optional)
+- location (string|null, optional)
+
+If there is no clear meeting/event invitation, return: {{"create": false}}
+Otherwise return: {{"create": true, "summary": "...", "start_time": "...", "end_time": null, "location": null}}"""
+
+        text = llm.chat_completion_text(
+            messages=[
+                {"role": "system", "content": "You extract calendar event details from emails. Output JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.1,
+            max_tokens=220,
+        )
+
+        raw = (text or "").strip()
+        # best-effort JSON extraction
+        try:
+            return json.loads(raw)
+        except Exception:
+            m = re.search(r"\{[\s\S]*\}", raw)
+            if not m:
+                return None
+            try:
+                return json.loads(m.group(0))
+            except Exception:
+                return None
+
+    for _ in range(max(1, min(int(max_items or 25), 200))):
+        doc = _claim_next_email(user_id=user_id, job_field="calendar", batch_id=batch_id, worker_id=worker_id)
+        if not doc:
+            break
+
+        processed += 1
+        try:
+            # Dedupe: never create twice for same ingested email doc
+            if doc.get("calendar_event_id") or doc.get("calendar_event_created_at"):
+                skipped += 1
+                _mark_job_done(
+                    email_doc_id=doc["_id"],
+                    job_field="calendar",
+                    status=JOB_SKIPPED,
+                    extra_set={"calendar_skip_reason": "already_created"},
+                )
+                _maybe_delete_body_temp(doc["_id"])
+                continue
+
+            category = (doc.get("category") or "").strip().lower()
+            if category in SKIP_CATEGORIES:
+                skipped += 1
+                _mark_job_done(
+                    email_doc_id=doc["_id"],
+                    job_field="calendar",
+                    status=JOB_SKIPPED,
+                    extra_set={"calendar_skip_reason": f"noise_category:{category}"},
+                )
+                _maybe_delete_body_temp(doc["_id"])
+                continue
+
+            subject = doc.get("subject") or "(No subject)"
+            sender = doc.get("from") or ""
+            snippet = (doc.get("snippet") or "")[:500]
+            body = (doc.get("body_temp") or "")[:4000]
+            combined = f"{subject}\n{snippet}\n{body}"
+
+            if not _looks_like_meeting(combined):
+                skipped += 1
+                _mark_job_done(
+                    email_doc_id=doc["_id"],
+                    job_field="calendar",
+                    status=JOB_SKIPPED,
+                    extra_set={"calendar_skip_reason": "no_meeting_hints"},
+                )
+                _maybe_delete_body_temp(doc["_id"])
+                continue
+
+            summary, start_dt, end_dt, method = _best_effort_extract(combined, subject_fallback=subject)
+
+            location = ""
+            if not start_dt:
+                extracted = _llm_extract(subject=subject, sender=sender, snippet=snippet, body=body)
+                if extracted and extracted.get("create") is True:
+                    summary = (extracted.get("summary") or subject or "Meeting").strip()
+                    start_text = (extracted.get("start_time") or "").strip()
+                    end_text = (extracted.get("end_time") or None)
+                    location = (extracted.get("location") or "") or ""
+
+                    # Parse natural language into datetimes (fallback to detect_requests parser)
+                    start_dt, end_dt = parse_datetime_from_text(start_text)
+                    if not start_dt:
+                        # last resort: try parsing from subject/body again
+                        _, start_dt, end_dt, _ = _best_effort_extract(combined, subject_fallback=subject)
+                    method = "llm" if start_dt else "llm_parse_failed"
+
+            if not start_dt:
+                skipped += 1
+                _mark_job_done(
+                    email_doc_id=doc["_id"],
+                    job_field="calendar",
+                    status=JOB_SKIPPED,
+                    extra_set={"calendar_skip_reason": f"could_not_parse_datetime:{method}"},
+                )
+                _maybe_delete_body_temp(doc["_id"])
+                continue
+
+            # Standardize meeting event titles to "Meeting with <sender>".
+            # We do this because subject-derived summaries are often junk ("lets", "re:", etc.)
+            try:
+                name = _extract_sender_name(sender)
+                if name:
+                    summary = f"Meeting with {name}"
+            except Exception:
+                pass
+
+            if not end_dt:
+                end_dt = start_dt + timedelta(hours=1)
+
+            # Avoid creating events in the past (simple guard)
+            if start_dt < (_now() - timedelta(minutes=10)):
+                skipped += 1
+                _mark_job_done(
+                    email_doc_id=doc["_id"],
+                    job_field="calendar",
+                    status=JOB_SKIPPED,
+                    extra_set={"calendar_skip_reason": "start_in_past"},
+                )
+                _maybe_delete_body_temp(doc["_id"])
+                continue
+
+            description = f"Created from email.\n\nFrom: {sender}\nSubject: {subject}\n\nSnippet:\n{(doc.get('snippet') or '')[:500]}"
+
+            res = create_calendar_event(
+                user_id=user_id,
+                summary=str(summary or "Meeting")[:160],
+                start_time=start_dt.isoformat(),
+                end_time=end_dt.isoformat(),
+                description=description[:1500],
+                location=(location or "")[:200],
+                attendees=None,
+                timezone="UTC",
+                provider=None,
+            )
+
+            if not res.get("success"):
+                skipped += 1
+                _mark_job_done(
+                    email_doc_id=doc["_id"],
+                    job_field="calendar",
+                    status=JOB_SKIPPED,
+                    extra_set={"calendar_skip_reason": f"calendar_create_failed:{res.get('error', 'unknown')}"},
+                )
+                _maybe_delete_body_temp(doc["_id"])
+                continue
+
+            created += 1
+            _mark_job_done(
+                email_doc_id=doc["_id"],
+                job_field="calendar",
+                extra_set={
+                    "calendar_event_id": res.get("event_id"),
+                    "calendar_event_html_link": res.get("html_link", ""),
+                    "calendar_event_provider": res.get("provider", ""),
+                    "calendar_event_summary": res.get("summary", summary),
+                    "calendar_event_start": res.get("start", start_dt.isoformat()),
+                    "calendar_event_end": res.get("end", end_dt.isoformat()),
+                    "calendar_event_created_at": _now(),
+                    "calendar_create_method": method,
+                },
+            )
+            _maybe_delete_body_temp(doc["_id"])
+
+        except Exception as e:
+            failed += 1
+            _mark_job_done(email_doc_id=doc["_id"], job_field="calendar", error=str(e))
+            _maybe_delete_body_temp(doc["_id"])
+
+    return {
+        "success": True,
+        "processed": processed,
+        "created": created,
+        "skipped": skipped,
+        "failed": failed,
+        "worker_id": worker_id,
+    }
+
+
 def run_linking_worker(
     user_id: str,
     batch_id: Optional[str] = None,
@@ -886,6 +1306,7 @@ def enqueue_login_email_pipeline(user_id: str, max_emails: int = 20, provider: O
         job_queue.enqueue(run_facts_worker, user_id, batch_id, job_id=f"facts-{user_id}-{batch_id}")
         job_queue.enqueue(run_relationships_worker, user_id, batch_id, job_id=f"rels-{user_id}-{batch_id}")
         job_queue.enqueue(run_tasks_worker, user_id, batch_id, job_id=f"tasks-{user_id}-{batch_id}")
+        job_queue.enqueue(run_calendar_worker, user_id, batch_id, job_id=f"cal-{user_id}-{batch_id}")
         job_queue.enqueue(run_linking_worker, user_id, batch_id, job_id=f"link-{user_id}-{batch_id}")
 
     return job_queue.enqueue(_orchestrate, job_id=f"login-email-pipeline-{user_id}-{uuid4().hex[:6]}")
@@ -910,6 +1331,7 @@ def enqueue_thread_email_pipeline(user_id: str, thread_ids: List[str], provider:
         job_queue.enqueue(run_facts_worker, user_id, batch_id, job_id=f"facts-{user_id}-{batch_id}")
         job_queue.enqueue(run_relationships_worker, user_id, batch_id, job_id=f"rels-{user_id}-{batch_id}")
         job_queue.enqueue(run_tasks_worker, user_id, batch_id, job_id=f"tasks-{user_id}-{batch_id}")
+        job_queue.enqueue(run_calendar_worker, user_id, batch_id, job_id=f"cal-{user_id}-{batch_id}")
         job_queue.enqueue(run_linking_worker, user_id, batch_id, job_id=f"link-{user_id}-{batch_id}")
 
     return job_queue.enqueue(_orchestrate, job_id=f"thread-email-pipeline-{user_id}-{uuid4().hex[:6]}")
