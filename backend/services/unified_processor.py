@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from utils.logger import get_logger
@@ -125,6 +126,10 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
     workspace_id = _safe_str(normalized.get("workspace_id"))
     source_id = _safe_str(normalized.get("source_id"))
     payload = normalized.get("payload") or {}
+    always_draft_reply = _as_bool(os.getenv("GMAIL_ALWAYS_DRAFT_REPLY", ""))
+    force_draft_ready = _as_bool(payload.get("force_draft_ready", False)) or (
+        always_draft_reply and source == "gmail"
+    )
 
     def _finalize_result(result: dict[str, Any]) -> dict[str, Any]:
         """
@@ -223,6 +228,7 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
 
     if not is_new:
         existing = get_message_context_for_source_id(source=source, source_id=source_id) or {}
+        existing_db_message_id = existing.get("id")
         existing_client_id = existing.get("client_id")
         existing_project_id = existing.get("project_id")
         continuity_context = build_continuity_context(
@@ -244,69 +250,94 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
             now_utc=_safe_str(payload.get("now_utc")),
         )
 
-        log.info(f"[DEDUP:{source}] source_id={source_id} -> duplicate delivery skipped")
-        log_event(
-            source=source,
-            source_id=source_id,
-            step="dedup",
-            status="duplicate",
-            data={
-                "workspace_id": workspace_id,
-                "channel": channel,
-                "thread_id": thread_id,
-                "ts": ts,
-                "sender": sender,
-                "user_id": user_id,
-                "subject": (subject or "")[:120] if subject else None,
-            },
-        )
-        return _finalize_result({
-            "status": "duplicate",
-            "source_id": source_id,
-            "classification": {},
-            "client_name": None,
-            "project_name": None,
-            "client_id": None,
-            "project_id": None,
-            "project_resolution_reason": None,
-            "project_confidence": None,
-            "needs_project_review": False,
-            "continuity_context": continuity_context,
-            "importance_result": importance_result,
-            "scheduling_result": scheduling_result,
-            "project_update_candidate": {},
-            "project_context_update_result": None,
-            "updated_project_context": None,
-            "follow_up_candidate": {},
-            "follow_up_created": False,
-            "follow_up_id": None,
-            "task_link_result": {
-                "matched": False,
-                "reason": "duplicate",
-                "task_id": None,
+        # Special case: if this processing run was triggered by an explicit adapter signal
+        # (e.g., Gmail label trigger), allow re-processing even though the message was
+        # already ingested earlier. This enables "label -> generate draft reply" flows.
+        if force_draft_ready and source == "gmail":
+            db_message_id = int(existing_db_message_id) if existing_db_message_id else None
+            log.info(
+                f"[DEDUP_REPROCESS:{source}] source_id={source_id} "
+                f"reason=force_draft_ready existing_message_id={db_message_id}"
+            )
+            log_event(
+                source=source,
+                source_id=source_id,
+                step="dedup_reprocess",
+                status="ok",
+                data={
+                    "workspace_id": workspace_id,
+                    "channel": channel,
+                    "thread_id": thread_id,
+                    "ts": ts,
+                    "sender": sender,
+                    "user_id": user_id,
+                    "subject": (subject or "")[:120] if subject else None,
+                },
+            )
+        else:
+            log.info(f"[DEDUP:{source}] source_id={source_id} -> duplicate delivery skipped")
+            log_event(
+                source=source,
+                source_id=source_id,
+                step="dedup",
+                status="duplicate",
+                data={
+                    "workspace_id": workspace_id,
+                    "channel": channel,
+                    "thread_id": thread_id,
+                    "ts": ts,
+                    "sender": sender,
+                    "user_id": user_id,
+                    "subject": (subject or "")[:120] if subject else None,
+                },
+            )
+            return _finalize_result({
+                "status": "duplicate",
+                "source_id": source_id,
+                "classification": {},
+                "client_name": None,
+                "project_name": None,
+                "client_id": None,
+                "project_id": None,
+                "project_resolution_reason": None,
+                "project_confidence": None,
+                "needs_project_review": False,
+                "continuity_context": continuity_context,
+                "importance_result": importance_result,
+                "scheduling_result": scheduling_result,
+                "project_update_candidate": {},
+                "project_context_update_result": None,
+                "updated_project_context": None,
+                "follow_up_candidate": {},
+                "follow_up_created": False,
+                "follow_up_id": None,
+                "task_link_result": {
+                    "matched": False,
+                    "reason": "duplicate",
+                    "task_id": None,
+                    "grafik_task_id": None,
+                    "confidence": 0.0,
+                    "needs_review": False,
+                },
+                "task_link_skipped": True,
+                "task_link_skip_reason": "duplicate_delivery",
+                "reply_policy": {
+                    "should_reply": False,
+                    "reply_mode": "none",
+                    "reason": "duplicate_delivery",
+                    "confidence": 1.0,
+                    "needs_review": False,
+                },
+                "reply_text": None,
+                "should_create_reply": False,
+                "should_create_draft": False,
+                "draft_status": None,
+                "draft_id": None,
                 "grafik_task_id": None,
-                "confidence": 0.0,
-                "needs_review": False,
-            },
-            "task_link_skipped": True,
-            "task_link_skip_reason": "duplicate_delivery",
-            "reply_policy": {
-                "should_reply": False,
-                "reply_mode": "none",
-                "reason": "duplicate_delivery",
-                "confidence": 1.0,
-                "needs_review": False,
-            },
-            "reply_text": None,
-            "should_create_reply": False,
-            "should_create_draft": False,
-            "draft_status": None,
-            "draft_id": None,
-            "grafik_task_id": None,
-            "linked_grafik_task_id": None,
-            "list_id": list_id,
-            "error": None,
-        })
+                "linked_grafik_task_id": None,
+                "list_id": list_id,
+                "error": None,
+            })
 
     log.info(
         f"[INBOUND:{source}] source_id={source_id} workspace_id={workspace_id} "
@@ -430,6 +461,12 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
     classification["project_resolution_reason"] = project_resolution_reason
     classification["project_confidence"] = project_confidence
     classification["needs_project_review"] = needs_project_review
+
+    # If we are forcing draft replies (label-triggered or always-on), ensure we have a usable
+    # reply_type (otherwise reply generation will be skipped).
+    if source == "gmail" and force_draft_ready and reply_type == "none":
+        reply_type = "short"
+        classification["reply_type"] = reply_type
 
     # 4) Project update + project memory update
     project_update_candidate = extract_project_updates(text_for_classification or raw_text)
@@ -555,6 +592,16 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
         follow_up_candidate=follow_up_candidate,
         project_update_candidate=project_update_candidate,
     )
+
+    # If the adapter indicates "force draft" (label-triggered or always-on), force Gmail into draft_ready mode.
+    if source == "gmail" and force_draft_ready:
+        reply_policy = {
+            "should_reply": True,
+            "reply_mode": "draft_ready",
+            "reason": "force_draft_ready",
+            "confidence": float(classification.get("confidence", 1.0) or 1.0),
+            "needs_review": False,
+        }
 
     log.info(
         f"[REPLY_POLICY:{source}] source_id={source_id} "
@@ -718,7 +765,6 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
     has_real_gmail_ids = bool(
         source == "gmail"
         and thread_id
-        and str(thread_id).isdigit()
         and message_id
     )
     should_create_draft = (

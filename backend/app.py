@@ -18,6 +18,7 @@ from flask import Flask, jsonify, request
 from routes.slack import slack_bp
 from routes.slack_interactive import slack_interactive_bp
 from routes.gmail import gmail_bp
+from routes.gmail_watch import gmail_watch_bp
 from routes.action_items import action_items_bp
 from routes.chat_api import chat_api_bp
 from routes.gmail_reply_routes import gmail_reply_bp
@@ -45,6 +46,7 @@ def create_app():
     app.register_blueprint(slack_bp)
     app.register_blueprint(slack_interactive_bp)
     app.register_blueprint(gmail_bp)
+    app.register_blueprint(gmail_watch_bp)
     app.register_blueprint(action_items_bp)
     app.register_blueprint(chat_api_bp)
     app.register_blueprint(gmail_reply_bp)

@@ -42,7 +42,7 @@ def _gmail_connect_error(reason: str) -> Tuple[dict, int]:
     return {"success": False, "action": "connect_google", "error": reason}, 200
 
 
-def _get_thread_detail(service, thread_id: str) -> Tuple[dict, Optional[str]]:
+def _get_thread_detail(service, thread_id: str, *, prefer_from_email: str | None = None) -> Tuple[dict, Optional[str]]:
     """
     Returns (detail, last_message_id)
     """
@@ -51,23 +51,57 @@ def _get_thread_detail(service, thread_id: str) -> Tuple[dict, Optional[str]]:
     if not msgs:
         return {"subject": "", "from": "", "date": "", "body": ""}, None
 
-    # Pick the latest message by internalDate
+    prefer_from_email_norm = _safe_str(prefer_from_email).lower()
+    me_email_norm = ""
+    try:
+        me_email_norm = _safe_str(
+            (service.users().getProfile(userId="me").execute() or {}).get("emailAddress")
+        ).lower()
+    except Exception:
+        me_email_norm = ""
+
+    # Sort by internalDate
     def _ts(m: dict) -> int:
         try:
             return int(m.get("internalDate") or 0)
         except Exception:
             return 0
 
-    last = sorted(msgs, key=_ts)[-1]
-    payload = last.get("payload") or {}
-    headers = payload.get("headers") or []
+    msgs_sorted = sorted(msgs, key=_ts)
 
-    subject = get_header(headers, "Subject") or ""
-    from_value = get_header(headers, "From") or ""
-    date_value = get_header(headers, "Date") or ""
-    body = extract_plain_text(payload) or ""
+    def _extract(m: dict) -> Tuple[str, str, str, str]:
+        payload = m.get("payload") or {}
+        headers = payload.get("headers") or []
+        subject = get_header(headers, "Subject") or ""
+        from_value = get_header(headers, "From") or ""
+        date_value = get_header(headers, "Date") or ""
+        body = extract_plain_text(payload) or ""
+        return subject, from_value, date_value, body
 
-    return {"subject": subject, "from": from_value, "date": date_value, "body": body}, str(last.get("id") or "") or None
+    chosen = None
+    if prefer_from_email_norm:
+        for m in reversed(msgs_sorted):
+            _subject, _from_value, _date_value, _body = _extract(m)
+            if prefer_from_email_norm in _from_value.lower():
+                chosen = m
+                break
+
+    # If we know "me", prefer the most recent inbound message (not from me)
+    if chosen is None and me_email_norm:
+        for m in reversed(msgs_sorted):
+            _subject, _from_value, _date_value, _body = _extract(m)
+            if me_email_norm not in _from_value.lower():
+                chosen = m
+                break
+
+    if chosen is None:
+        chosen = msgs_sorted[-1]
+
+    subject, from_value, date_value, body = _extract(chosen)
+    return (
+        {"subject": subject, "from": from_value, "date": date_value, "body": body},
+        str(chosen.get("id") or "") or None,
+    )
 
 
 def _find_latest_gmail_row_for_thread(thread_id: str) -> Optional[dict]:
@@ -105,6 +139,7 @@ def _find_latest_gmail_row_for_thread(thread_id: str) -> Optional[dict]:
 def thread_detail():
     payload = request.get_json(silent=True) or {}
     thread_id = _safe_str(payload.get("thread_id") or payload.get("threadId"))
+    prefer_from_email = _safe_str(payload.get("to") or payload.get("from") or "")
     if not thread_id:
         return jsonify({"success": False, "error": "missing_thread_id"}), 400
 
@@ -115,7 +150,11 @@ def thread_detail():
         return jsonify(body), status
 
     try:
-        detail, _last_mid = _get_thread_detail(service, thread_id)
+        detail, _last_mid = _get_thread_detail(
+            service,
+            thread_id,
+            prefer_from_email=prefer_from_email or None,
+        )
         return jsonify({"success": True, **detail}), 200
     except Exception as e:
         log.exception(f"thread-detail failed: {e}")

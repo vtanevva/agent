@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Set, Tuple
 
@@ -9,12 +10,12 @@ from googleapiclient.errors import HttpError
 
 from services.gmail_auth import get_gmail_service
 from services.gmail_draft import create_gmail_draft
-from services.gmail_text import extract_gmail_fields
 from services.gmail_message import extract_plain_text, get_header
 from services.unified_processor import process_normalized_message
 from services.gmail_text import clean_email_text, prepare_email_for_classification, build_gmail_source_id
 from utils.logger import get_logger
 from storage.sqlite_db import (
+    get_gmail_watch_state,
     get_gmail_last_history_id,
     log_event,
     set_gmail_last_history_id,
@@ -69,10 +70,43 @@ def decode_pubsub_envelope(envelope: Dict[str, Any]) -> GmailPushNotification:
     )
 
 
-def _iter_history_message_additions(
+def _safe_json_loads_list(v: Any) -> list[Any]:
+    if not v:
+        return []
+    if isinstance(v, list):
+        return v
+    if not isinstance(v, str):
+        return []
+    try:
+        obj = json.loads(v)
+        return obj if isinstance(obj, list) else []
+    except Exception:
+        return []
+
+
+def _get_watch_label_ids(email_address: str) -> list[str]:
+    """
+    Label IDs configured for this mailbox watch (stored in SQLite).
+    When present, we only process messages that contain at least one of these labels.
+    """
+    state = get_gmail_watch_state(email_address)
+    if not state:
+        return []
+    raw = state.get("label_ids_json")
+    items = _safe_json_loads_list(raw)
+    labels: list[str] = []
+    for x in items:
+        s = str(x or "").strip()
+        if s:
+            labels.append(s)
+    return labels
+
+
+def _iter_history_relevant_message_ids(
     service,
     *,
     start_history_id: int,
+    watch_label_ids: list[str] | None = None,
 ) -> Tuple[Set[str], Optional[int]]:
     """
     Returns (message_ids, latest_history_id_seen).
@@ -80,12 +114,18 @@ def _iter_history_message_additions(
     message_ids: Set[str] = set()
     latest_history_id: Optional[int] = None
 
+    # If we're configured to trigger on labeled emails (Zapier-style),
+    # include labelAdded so we react when the label is applied after receipt.
+    history_types = ["messageAdded"]
+    if watch_label_ids:
+        history_types = ["messageAdded", "labelAdded"]
+
     page_token = None
     while True:
         req = service.users().history().list(
             userId="me",
             startHistoryId=str(start_history_id),
-            historyTypes=["messageAdded"],
+            historyTypes=history_types,
             pageToken=page_token,
         )
         resp = req.execute()
@@ -102,6 +142,18 @@ def _iter_history_message_additions(
                 if mid:
                     message_ids.add(str(mid))
 
+            # When label triggers are configured, pick up messages when the
+            # watched label is applied (even if not "new").
+            if watch_label_ids:
+                want = set(watch_label_ids)
+                for la in (h.get("labelsAdded") or []):
+                    mid = ((la.get("message") or {}).get("id") if isinstance(la, dict) else None)
+                    if not mid:
+                        continue
+                    label_ids = la.get("labelIds") if isinstance(la, dict) else None
+                    if isinstance(label_ids, list) and want.intersection({str(x) for x in label_ids if x}):
+                        message_ids.add(str(mid))
+
         page_token = resp.get("nextPageToken")
         if not page_token:
             break
@@ -116,6 +168,7 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> Dict[str, Any]:
     """
     email_address = notif.email_address
     last_history_id = get_gmail_last_history_id(email_address)
+    watch_label_ids = _get_watch_label_ids(email_address)
 
     # If we have no baseline, store the pushed historyId and wait for the next push (no backfill).
     if last_history_id is None:
@@ -141,7 +194,11 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> Dict[str, Any]:
         return {"success": False, "status": "error", "error": str(e)}
 
     try:
-        message_ids, latest_seen = _iter_history_message_additions(service, start_history_id=last_history_id)
+        message_ids, latest_seen = _iter_history_relevant_message_ids(
+            service,
+            start_history_id=last_history_id,
+            watch_label_ids=watch_label_ids,
+        )
     except HttpError as e:
         status = getattr(getattr(e, "resp", None), "status", None)
         if status == 404:
@@ -174,6 +231,15 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> Dict[str, Any]:
         try:
             msg = service.users().messages().get(userId="me", id=mid, format="full").execute()
             thread_id = str(msg.get("threadId") or "")
+            msg_label_ids = msg.get("labelIds") or []
+
+            # Zapier-style: only trigger when the message has a watched label.
+            if watch_label_ids:
+                have = {str(x) for x in msg_label_ids if x}
+                want = set(watch_label_ids)
+                if not have.intersection(want):
+                    continue
+
             payload = msg.get("payload") or {}
             headers = payload.get("headers") or []
 
@@ -212,6 +278,9 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> Dict[str, Any]:
                     "body": body,
                     "timestamp": msg.get("internalDate"),
                     "emailAddress": email_address,
+                    # When the watch is configured with labels, treat matching messages as
+                    # explicit triggers (Zapier-style): generate a draft immediately.
+                    "force_draft_ready": bool(watch_label_ids),
                 },
                 "client_name_hint": "Email",
                 "project_name_hint": "General",
@@ -301,7 +370,49 @@ def start_watch(*, email_address: str, topic: str, label_ids: list[str] | None =
     if not topic:
         return {"success": False, "error": "Missing topic"}
 
-    label_ids = label_ids or ["INBOX"]
+    def _parse_env_labels() -> list[str]:
+        raw = (os.getenv("GMAIL_WATCH_LABELS") or "").strip()
+        if not raw:
+            return []
+        parts = [p.strip() for p in raw.split(",")]
+        return [p for p in parts if p]
+
+    def _resolve_label_ids(service, specs: list[str]) -> list[str]:
+        """
+        Accept label IDs (e.g. 'Label_123') or label names (e.g. 'Zapier').
+        Returns label IDs.
+        """
+        specs = [str(s or "").strip() for s in (specs or []) if str(s or "").strip()]
+        if not specs:
+            return []
+
+        resp = service.users().labels().list(userId="me").execute()
+        labels = resp.get("labels") or []
+
+        id_set = {str(l.get("id")) for l in labels if l.get("id")}
+        name_to_id = {str(l.get("name") or "").strip().lower(): str(l.get("id")) for l in labels if l.get("id")}
+
+        resolved: list[str] = []
+        missing: list[str] = []
+        for s in specs:
+            if s in id_set:
+                resolved.append(s)
+                continue
+            key = s.lower()
+            if key in name_to_id:
+                resolved.append(name_to_id[key])
+                continue
+            missing.append(s)
+
+        if missing:
+            raise RuntimeError(
+                "Unknown Gmail label(s): "
+                + ", ".join(missing)
+                + ". Configure by label *name* or label *id*."
+            )
+        return resolved
+
+    label_ids = label_ids or _parse_env_labels() or ["INBOX"]
 
     service = get_gmail_service()
 
@@ -328,13 +439,15 @@ def start_watch(*, email_address: str, topic: str, label_ids: list[str] | None =
     if not email_address:
         return {"success": False, "error": "Missing email_address (and could not resolve token account email)"}
 
+    resolved_label_ids = _resolve_label_ids(service, label_ids)
+
     resp = (
         service.users()
         .watch(
             userId="me",
             body={
                 "topicName": topic,
-                "labelIds": label_ids,
+                "labelIds": resolved_label_ids,
                 "labelFilterAction": "include",
             },
         )
@@ -348,7 +461,7 @@ def start_watch(*, email_address: str, topic: str, label_ids: list[str] | None =
         email_address=email_address,
         last_history_id=history_id,
         topic=topic,
-        label_ids=label_ids,
+        label_ids=resolved_label_ids,
         watch_expiration=str(expiration) if expiration is not None else None,
         note="watch_started",
     )
