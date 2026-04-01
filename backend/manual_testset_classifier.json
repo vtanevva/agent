@@ -1,0 +1,332 @@
+[
+  {
+    "id": "action_01",
+    "category": "action_request",
+    "channel": "slack",
+    "text": "Can you send the revised timeline by Friday?",
+    "expected_has_action": true,
+    "expected_reply_type": "time_relevant",
+    "expected_task_created": true
+  },
+  {
+    "id": "action_02",
+    "category": "action_request",
+    "channel": "slack",
+    "text": "Please review the proposal and confirm by EOD.",
+    "expected_has_action": true,
+    "expected_reply_type": "time_relevant",
+    "expected_task_created": true
+  },
+  {
+    "id": "action_03",
+    "category": "action_request",
+    "channel": "slack",
+    "text": "Send the invoice today.",
+    "expected_has_action": true,
+    "expected_reply_type": "time_relevant",
+    "expected_task_created": true
+  },
+  {
+    "id": "action_04",
+    "category": "action_request",
+    "channel": "gmail",
+    "subject": "Website migration",
+    "body": "Could you follow up with the client and let me know what they say?",
+    "expected_has_action": true,
+    "expected_reply_type": "context_relevant",
+    "expected_task_created": true
+  },
+  {
+    "id": "action_05",
+    "category": "action_request",
+    "channel": "gmail",
+    "subject": "Quick request",
+    "body": "Would you please schedule a call for tomorrow morning?",
+    "expected_has_action": true,
+    "expected_reply_type": "time_relevant",
+    "expected_task_created": true
+  },
+
+  {
+    "id": "status_01",
+    "category": "status_update",
+    "channel": "slack",
+    "text": "Still waiting on final design approval.",
+    "expected_has_action": false,
+    "expected_reply_type": "none",
+    "expected_task_created": false
+  },
+  {
+    "id": "status_02",
+    "category": "status_update",
+    "channel": "slack",
+    "text": "FYI, blocker is still the client approval.",
+    "expected_has_action": false,
+    "expected_reply_type": "context_relevant",
+    "expected_task_created": false
+  },
+  {
+    "id": "status_03",
+    "category": "status_update",
+    "channel": "gmail",
+    "subject": "Status",
+    "body": "Final design approval is still pending.",
+    "expected_has_action": false,
+    "expected_reply_type": "none",
+    "expected_task_created": false
+  },
+  {
+    "id": "status_04",
+    "category": "status_update",
+    "channel": "gmail",
+    "subject": "Update",
+    "body": "Quick update: dev handoff is complete and we're unblocked.",
+    "expected_has_action": false,
+    "expected_reply_type": "context_relevant",
+    "expected_task_created": false
+  },
+
+  {
+    "id": "greet_01",
+    "category": "greeting",
+    "channel": "slack",
+    "text": "Hey!",
+    "expected_has_action": false,
+    "expected_reply_type": "short",
+    "expected_task_created": false
+  },
+  {
+    "id": "greet_02",
+    "category": "greeting",
+    "channel": "slack",
+    "text": "Good morning - hope you're well.",
+    "expected_has_action": false,
+    "expected_reply_type": "short",
+    "expected_task_created": false
+  },
+  {
+    "id": "greet_03",
+    "category": "greeting",
+    "channel": "gmail",
+    "subject": "Hello",
+    "body": "Hi Vanesa, just checking in.",
+    "expected_has_action": false,
+    "expected_reply_type": "short",
+    "expected_task_created": false
+  },
+
+  {
+    "id": "followup_01",
+    "category": "vague_follow_up",
+    "channel": "slack",
+    "text": "Any clue on that?",
+    "expected_has_action": false,
+    "expected_reply_type": "context_relevant",
+    "expected_task_created": false,
+    "context": {
+      "client_name": "Vansi",
+      "project_name": "Code Transfer",
+      "project_context": {
+        "summary": "Vanesa is coordinating the code transfer and client communication.",
+        "current_status": "Timeline revision in progress.",
+        "current_priorities": "Finalize revised timeline and send update to Reni.",
+        "blockers": "Still waiting for final design approval.",
+        "next_steps": "Send revised timeline by Friday."
+      }
+    }
+  },
+  {
+    "id": "followup_02",
+    "category": "vague_follow_up",
+    "channel": "gmail",
+    "subject": "Follow up",
+    "body": "Any update on that?",
+    "expected_has_action": false,
+    "expected_reply_type": "context_relevant",
+    "expected_task_created": false,
+    "context": {
+      "client_name": "Cloe",
+      "project_name": "Book redaction",
+      "project_context": {
+        "summary": "Vanesa is coordinating the book website and client communication.",
+        "current_status": "Timeline revision in progress.",
+        "current_priorities": "Finalize revised timeline and send update to Kloe.",
+        "blockers": "Still waiting for final design approval.",
+        "next_steps": "Send revised timeline by Friday."
+      }
+    }
+  },
+  {
+    "id": "followup_03",
+    "category": "vague_follow_up",
+    "channel": "slack",
+    "text": "Did we send this yet?",
+    "expected_has_action": false,
+    "expected_reply_type": "context_relevant",
+    "expected_task_created": false
+  },
+
+  {
+    "id": "info_01",
+    "category": "informational",
+    "channel": "slack",
+    "text": "FYI: the staging deploy finished successfully.",
+    "expected_has_action": false,
+    "expected_reply_type": "context_relevant",
+    "expected_task_created": false
+  },
+  {
+    "id": "info_02",
+    "category": "informational",
+    "channel": "gmail",
+    "subject": "Invoice attached",
+    "body": "Sharing the invoice for your records.",
+    "expected_has_action": false,
+    "expected_reply_type": "none",
+    "expected_task_created": false
+  },
+  {
+    "id": "info_03",
+    "category": "informational",
+    "channel": "slack",
+    "text": "For your information, the vendor maintenance window is tonight at 10pm.",
+    "expected_has_action": false,
+    "expected_reply_type": "time_relevant",
+    "expected_task_created": false
+  },
+
+  {
+    "id": "proj_01",
+    "category": "project_update",
+    "channel": "slack",
+    "text": "Update: timeline revision is in progress; waiting on client approval.",
+    "expected_has_action": false,
+    "expected_reply_type": "context_relevant",
+    "expected_task_created": false
+  },
+  {
+    "id": "proj_02",
+    "category": "project_update",
+    "channel": "gmail",
+    "subject": "Migration update",
+    "body": "We finished the migration prep today; next step is QA tomorrow.",
+    "expected_has_action": false,
+    "expected_reply_type": "time_relevant",
+    "expected_task_created": false
+  },
+  {
+    "id": "proj_03",
+    "category": "project_update",
+    "channel": "slack",
+    "text": "Blocker: legal review still pending. ETA unknown.",
+    "expected_has_action": false,
+    "expected_reply_type": "context_relevant",
+    "expected_task_created": false
+  },
+
+  {
+    "id": "q_01",
+    "category": "question_without_action",
+    "channel": "slack",
+    "text": "What's the current status?",
+    "expected_has_action": false,
+    "expected_reply_type": "context_relevant",
+    "expected_task_created": false
+  },
+  {
+    "id": "q_02",
+    "category": "question_without_action",
+    "channel": "slack",
+    "text": "When is the deadline again?",
+    "expected_has_action": false,
+    "expected_reply_type": "time_relevant",
+    "expected_task_created": false
+  },
+  {
+    "id": "q_03",
+    "category": "question_without_action",
+    "channel": "gmail",
+    "subject": "Question",
+    "body": "Do we have final approval yet?",
+    "expected_has_action": false,
+    "expected_reply_type": "context_relevant",
+    "expected_task_created": false
+  },
+
+  {
+    "id": "edge_01",
+    "category": "edge_case",
+    "channel": "slack",
+    "text": "We should send the revised timeline by Friday.",
+    "expected_has_action": false,
+    "expected_reply_type": "context_relevant",
+    "expected_task_created": false
+  },
+  {
+    "id": "edge_02",
+    "category": "edge_case",
+    "channel": "slack",
+    "text": "Please advise.",
+    "expected_has_action": false,
+    "expected_reply_type": "context_relevant",
+    "expected_task_created": false
+  },
+  {
+    "id": "edge_03",
+    "category": "edge_case",
+    "channel": "gmail",
+    "subject": "Re: Timeline",
+    "body": "Can we send it by Friday?",
+    "expected_has_action": false,
+    "expected_reply_type": "time_relevant",
+    "expected_task_created": false
+  },
+  {
+    "id": "edge_04",
+    "category": "edge_case",
+    "channel": "slack",
+    "text": "Reminder: invoice is due by Friday (no action needed yet).",
+    "expected_has_action": false,
+    "expected_reply_type": "time_relevant",
+    "expected_task_created": false
+  },
+  {
+    "id": "edge_05",
+    "category": "edge_case",
+    "channel": "slack",
+    "text": "Can we get this done by Friday?",
+    "expected_has_action": false,
+    "expected_reply_type": "time_relevant",
+    "expected_task_created": false
+  },
+  {
+    "id": "edge_06",
+    "category": "edge_case",
+    "channel": "slack",
+    "text": "It would be great if we could send the timeline by Friday.",
+    "expected_has_action": false,
+    "expected_reply_type": "context_relevant",
+    "expected_task_created": false
+  },
+  {
+    "id": "edge_07",
+    "category": "edge_case",
+    "channel": "gmail",
+    "subject": "FYI",
+    "body": "Please see below for context - no action required.",
+    "expected_has_action": false,
+    "expected_reply_type": "context_relevant",
+    "expected_task_created": false
+  },
+  {
+    "id": "edge_08",
+    "category": "edge_case",
+    "channel": "gmail",
+    "subject": "Question",
+    "body": "Can you confirm whether we already sent the invoice?",
+    "expected_has_action": false,
+    "expected_reply_type": "context_relevant",
+    "expected_task_created": false
+  }
+]
+
