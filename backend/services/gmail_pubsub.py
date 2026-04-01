@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional, Set, Tuple
 from googleapiclient.errors import HttpError
 
 from services.gmail_auth import get_gmail_service
+from services.gmail_draft import create_gmail_draft
 from services.gmail_text import extract_gmail_fields
 from services.gmail_message import extract_plain_text, get_header
 from services.unified_processor import process_normalized_message
@@ -15,6 +16,7 @@ from services.gmail_text import clean_email_text, prepare_email_for_classificati
 from utils.logger import get_logger
 from storage.sqlite_db import (
     get_gmail_last_history_id,
+    log_event,
     set_gmail_last_history_id,
     upsert_gmail_watch_state,
 )
@@ -220,7 +222,59 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> Dict[str, Any]:
                 "needs_project_review": False,
             }
 
-            process_normalized_message(normalized)
+            result = process_normalized_message(normalized) or {}
+
+            # Create a real Gmail Draft immediately when allowed by policy.
+            if result.get("should_create_draft") and result.get("reply_text"):
+                try:
+                    draft_subject = subject
+                    if draft_subject and not draft_subject.lower().startswith("re:"):
+                        draft_subject = f"Re: {draft_subject}"
+                    elif not draft_subject:
+                        draft_subject = "Re:"
+
+                    draft_id = create_gmail_draft(
+                        service=service,
+                        to_email=sender,
+                        subject=draft_subject,
+                        reply_text=result.get("reply_text"),
+                        thread_id=thread_id,
+                        message_id=str(mid),
+                    )
+
+                    log.info(
+                        f"[GMAIL_DRAFT:pubsub] email_address={email_address} "
+                        f"message_id={mid} thread_id={thread_id} draft_id={draft_id}"
+                    )
+                    log_event(
+                        source="gmail",
+                        source_id=source_id,
+                        step="gmail_draft_create",
+                        status="ok",
+                        data={
+                            "workspace_id": email_address,
+                            "draft_id": draft_id,
+                            "thread_id": thread_id,
+                            "message_id": str(mid),
+                        },
+                    )
+                except Exception as e:
+                    log.exception(
+                        f"[GMAIL_DRAFT_ERROR:pubsub] email_address={email_address} "
+                        f"message_id={mid} thread_id={thread_id} -> {e}"
+                    )
+                    log_event(
+                        source="gmail",
+                        source_id=source_id,
+                        step="gmail_draft_create",
+                        status="error",
+                        data={
+                            "workspace_id": email_address,
+                            "thread_id": thread_id,
+                            "message_id": str(mid),
+                            "error": str(e),
+                        },
+                    )
             ingested += 1
         except Exception as e:
             failed += 1
