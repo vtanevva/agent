@@ -18,6 +18,7 @@ from flask import Flask, jsonify, request
 from routes.slack import slack_bp
 from routes.slack_interactive import slack_interactive_bp
 from routes.gmail import gmail_bp
+from routes.gmail_triage import gmail_triage_bp
 from routes.webhooks import webhooks_bp
 from routes.debug import debug_bp
 from routes.classification_debug import classify_bp
@@ -42,6 +43,7 @@ def create_app():
     app.register_blueprint(slack_bp)
     app.register_blueprint(slack_interactive_bp)
     app.register_blueprint(gmail_bp)
+    app.register_blueprint(gmail_triage_bp)
     app.register_blueprint(webhooks_bp)
     app.register_blueprint(debug_bp)
     app.register_blueprint(classify_bp)
@@ -56,6 +58,10 @@ def create_app():
     @app.after_request
     def _log_response(resp):
         log.info(f"[HTTP] {request.method} {request.path} -> {resp.status_code}")
+        # Allow Expo web (different port) to call this local backend.
+        resp.headers.setdefault("Access-Control-Allow-Origin", "*")
+        resp.headers.setdefault("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Webhook-Secret")
+        resp.headers.setdefault("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         return resp
 
     return app
@@ -65,4 +71,5 @@ app = create_app()
 
 if __name__ == "__main__":
     log.info(f"Starting backend Flask on :5000 pid={os.getpid()} exe={sys.executable}")
-    app.run(port=5000, debug=False)
+    # Bind to 0.0.0.0 so Expo devices/emulators can reach it via LAN IP.
+    app.run(host="0.0.0.0", port=5000, debug=False)
