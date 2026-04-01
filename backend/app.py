@@ -18,7 +18,8 @@ from flask import Flask, jsonify, request
 from routes.slack import slack_bp
 from routes.slack_interactive import slack_interactive_bp
 from routes.gmail import gmail_bp
-from routes.gmail_triage import gmail_triage_bp
+from routes.action_items import action_items_bp
+from routes.chat_api import chat_api_bp
 from routes.webhooks import webhooks_bp
 from routes.debug import debug_bp
 from routes.classification_debug import classify_bp
@@ -43,7 +44,8 @@ def create_app():
     app.register_blueprint(slack_bp)
     app.register_blueprint(slack_interactive_bp)
     app.register_blueprint(gmail_bp)
-    app.register_blueprint(gmail_triage_bp)
+    app.register_blueprint(action_items_bp)
+    app.register_blueprint(chat_api_bp)
     app.register_blueprint(webhooks_bp)
     app.register_blueprint(debug_bp)
     app.register_blueprint(classify_bp)
