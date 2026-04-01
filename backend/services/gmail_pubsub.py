@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Set, Tuple
 
@@ -19,10 +20,14 @@ from storage.sqlite_db import (
     get_gmail_last_history_id,
     log_event,
     set_gmail_last_history_id,
+    set_gmail_draft_result,
+    try_acquire_gmail_draft_lock,
     upsert_gmail_watch_state,
 )
 
 log = get_logger("gmail_pubsub")
+
+_RE_EMAIL = re.compile(r"<([^>]+)>")
 
 
 @dataclass(frozen=True)
@@ -39,6 +44,29 @@ def _coerce_int(v: Any) -> Optional[int]:
         return int(str(v))
     except Exception:
         return None
+
+
+def _extract_email_address(from_header: str) -> str:
+    """
+    Best-effort parse of an email address from a Gmail "From" header value.
+    Examples:
+      - 'Name <a@b.com>' -> 'a@b.com'
+      - 'a@b.com' -> 'a@b.com'
+    """
+    s = str(from_header or "").strip().lower()
+    if not s:
+        return ""
+    m = _RE_EMAIL.search(s)
+    if m:
+        return (m.group(1) or "").strip().lower()
+    # Fallback: if it's just an email
+    if "@" in s and " " not in s:
+        return s
+    # Very lax fallback: pick first token containing '@'
+    for token in re.split(r"\s+", s):
+        if "@" in token:
+            return token.strip("<>,;").lower()
+    return ""
 
 
 def decode_pubsub_envelope(envelope: Dict[str, Any]) -> GmailPushNotification:
@@ -169,6 +197,7 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> Dict[str, Any]:
     email_address = notif.email_address
     last_history_id = get_gmail_last_history_id(email_address)
     watch_label_ids = _get_watch_label_ids(email_address)
+    create_real_gmail_drafts = bool(str(os.getenv("GMAIL_CREATE_GMAIL_DRAFTS") or "").strip())
 
     # If we have no baseline, store the pushed historyId and wait for the next push (no backfill).
     if last_history_id is None:
@@ -233,6 +262,15 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> Dict[str, Any]:
             thread_id = str(msg.get("threadId") or "")
             msg_label_ids = msg.get("labelIds") or []
 
+            # Only draft replies for received/inbox messages.
+            # Pub/Sub will also notify on messages you SENT; those should never trigger drafts
+            # (otherwise you can get a "draft loop" on your own replies).
+            label_set = {str(x) for x in msg_label_ids if x}
+            if "SENT" in label_set:
+                continue
+            if "INBOX" not in label_set:
+                continue
+
             # Zapier-style: only trigger when the message has a watched label.
             if watch_label_ids:
                 have = {str(x) for x in msg_label_ids if x}
@@ -247,6 +285,12 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> Dict[str, Any]:
             sender = get_header(headers, "From") or ""
             recipient = get_header(headers, "To") or ""
             body = extract_plain_text(payload) or ""
+
+            # Extra guard: if the From address is the same as the mailbox token account, skip.
+            # (Some messages can be labeled INBOX even if self-sent in edge cases.)
+            from_email = _extract_email_address(sender)
+            if from_email and from_email == (email_address or "").strip().lower():
+                continue
 
             # Reuse existing backend ingestion logic (same as /ingest/gmail route)
             clean_text_value = clean_email_text(subject, body)
@@ -294,8 +338,17 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> Dict[str, Any]:
             result = process_normalized_message(normalized) or {}
 
             # Create a real Gmail Draft immediately when allowed by policy.
-            if result.get("should_create_draft") and result.get("reply_text"):
+            if create_real_gmail_drafts and result.get("should_create_draft") and result.get("reply_text"):
                 try:
+                    # Idempotency: Pub/Sub is at-least-once and may deliver the same event multiple times.
+                    # Acquire a DB lock keyed by Gmail message_id before calling Gmail API.
+                    if not try_acquire_gmail_draft_lock(
+                        message_id=str(mid),
+                        source_id=source_id,
+                        thread_id=thread_id,
+                    ):
+                        continue
+
                     draft_subject = subject
                     if draft_subject and not draft_subject.lower().startswith("re:"):
                         draft_subject = f"Re: {draft_subject}"
@@ -310,6 +363,7 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> Dict[str, Any]:
                         thread_id=thread_id,
                         message_id=str(mid),
                     )
+                    set_gmail_draft_result(message_id=str(mid), draft_id=str(draft_id), status="ok")
 
                     log.info(
                         f"[GMAIL_DRAFT:pubsub] email_address={email_address} "
@@ -328,6 +382,7 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> Dict[str, Any]:
                         },
                     )
                 except Exception as e:
+                    set_gmail_draft_result(message_id=str(mid), draft_id=None, status="error", error=str(e))
                     log.exception(
                         f"[GMAIL_DRAFT_ERROR:pubsub] email_address={email_address} "
                         f"message_id={mid} thread_id={thread_id} -> {e}"

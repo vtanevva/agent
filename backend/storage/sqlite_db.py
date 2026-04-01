@@ -106,6 +106,22 @@ def _migrate_sqlite(conn: sqlite3.Connection) -> None:
         """
     )
 
+    # Gmail draft idempotency (prevent multiple drafts per message)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gmail_draft_state (
+          message_id TEXT PRIMARY KEY,
+          source_id TEXT,
+          thread_id TEXT,
+          draft_id TEXT,
+          status TEXT NOT NULL,
+          error TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+
 
 # ---------- Gmail watch state (Pub/Sub baseline) ----------
 def get_gmail_watch_state(email_address: str) -> dict[str, Any] | None:
@@ -188,6 +204,61 @@ def upsert_gmail_watch_state(
 
 def set_gmail_last_history_id(email_address: str, history_id: int, *, note: str | None = None) -> None:
     upsert_gmail_watch_state(email_address=email_address, last_history_id=int(history_id), note=note)
+
+
+# ---------- Gmail draft idempotency ----------
+def try_acquire_gmail_draft_lock(
+    *,
+    message_id: str,
+    source_id: str,
+    thread_id: str | None,
+) -> bool:
+    """
+    Returns True if we acquired the lock for this message_id (first time),
+    False if this message_id was already attempted.
+    """
+    message_id = (str(message_id or "").strip())
+    if not message_id:
+        return False
+
+    now = utc_iso()
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            INSERT OR IGNORE INTO gmail_draft_state
+              (message_id, source_id, thread_id, draft_id, status, error, created_at, updated_at)
+            VALUES (?, ?, ?, NULL, 'started', NULL, ?, ?)
+            """,
+            (message_id, str(source_id or ""), (str(thread_id) if thread_id is not None else None), now, now),
+        )
+        conn.commit()
+        return int(cur.rowcount or 0) == 1
+
+
+def set_gmail_draft_result(
+    *,
+    message_id: str,
+    draft_id: str | None,
+    status: str,
+    error: str | None = None,
+) -> None:
+    message_id = (str(message_id or "").strip())
+    if not message_id:
+        return
+    now = utc_iso()
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE gmail_draft_state
+            SET draft_id = COALESCE(?, draft_id),
+                status = ?,
+                error = ?,
+                updated_at = ?
+            WHERE message_id = ?
+            """,
+            (str(draft_id).strip() if draft_id else None, str(status or "").strip(), (str(error) if error else None), now, message_id),
+        )
+        conn.commit()
 
 
 # ---------- Clients / Projects / Context ----------

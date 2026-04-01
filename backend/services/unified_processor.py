@@ -127,7 +127,8 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
     source_id = _safe_str(normalized.get("source_id"))
     payload = normalized.get("payload") or {}
     always_draft_reply = _as_bool(os.getenv("GMAIL_ALWAYS_DRAFT_REPLY", ""))
-    force_draft_ready = _as_bool(payload.get("force_draft_ready", False)) or (
+    payload_force_draft_ready = _as_bool(payload.get("force_draft_ready", False))
+    force_draft_ready = payload_force_draft_ready or (
         always_draft_reply and source == "gmail"
     )
 
@@ -253,7 +254,7 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
         # Special case: if this processing run was triggered by an explicit adapter signal
         # (e.g., Gmail label trigger), allow re-processing even though the message was
         # already ingested earlier. This enables "label -> generate draft reply" flows.
-        if force_draft_ready and source == "gmail":
+        if payload_force_draft_ready and source == "gmail":
             db_message_id = int(existing_db_message_id) if existing_db_message_id else None
             log.info(
                 f"[DEDUP_REPROCESS:{source}] source_id={source_id} "

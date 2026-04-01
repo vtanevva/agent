@@ -10,6 +10,8 @@ from services.gmail_text import (
 )
 from storage.sqlite_db import (
     log_event,
+    set_gmail_draft_result,
+    try_acquire_gmail_draft_lock,
 )
 
 log = get_logger("gmail")
@@ -119,6 +121,17 @@ def ingest_gmail():
             elif not subject:
                 draft_subject = "Re:"
 
+            # Idempotency: only create one Gmail Draft per Gmail message_id.
+            if not try_acquire_gmail_draft_lock(
+                message_id=str(message_id),
+                source_id=source_id,
+                thread_id=thread_id,
+            ):
+                result["draft_status"] = "skipped"
+                result["draft_id"] = None
+                status = 500 if result.get("status") == "error" else 200
+                return jsonify(result), status
+
             draft_id = create_gmail_draft(
                 service=gmail_service,
                 to_email=sender,
@@ -127,6 +140,7 @@ def ingest_gmail():
                 thread_id=thread_id,
                 message_id=message_id,
             )
+            set_gmail_draft_result(message_id=str(message_id), draft_id=str(draft_id), status="ok")
 
             draft_status = "created"
 
@@ -149,6 +163,7 @@ def ingest_gmail():
             )
 
         except Exception as err:
+            set_gmail_draft_result(message_id=str(message_id), draft_id=None, status="error", error=str(err))
             draft_status = "error"
 
             log.exception(
