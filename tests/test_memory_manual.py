@@ -8,7 +8,7 @@ import json
 import time
 from datetime import datetime
 
-BASE_URL = "http://localhost:10000"
+BASE_URL = "http://localhost:5000"
 USER_ID = f"test-user-{int(time.time())}"
 THREAD_ID = "test-thread-001"
 

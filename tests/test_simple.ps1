@@ -1,7 +1,7 @@
 # Simple PowerShell test script for memory system
 # Run this while server is running
 
-$baseUrl = "http://localhost:10000"
+$baseUrl = "http://localhost:5000"
 $userId = "test-user-$(Get-Date -Format 'yyyyMMddHHmmss')"
 
 Write-Host "========================================" -ForegroundColor Cyan

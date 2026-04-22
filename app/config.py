@@ -52,9 +52,8 @@ class Config:
     # ═══════════════════════════════════════════════════════════════════
     # Database Configuration
     # ═══════════════════════════════════════════════════════════════════
-    
-    MONGO_URI: Optional[str] = os.getenv("MONGO_URI")
-    MONGO_DB_NAME: str = os.getenv("MONGO_DB_NAME", "productivity-assistant")
+    #
+    # MongoDB has been removed. The core backend (/backend) uses SQLite.
     
     # ═══════════════════════════════════════════════════════════════════
     # Vector Database (Pinecone)
@@ -73,13 +72,22 @@ class Config:
         "https://www.googleapis.com/auth/gmail.send",
         "https://www.googleapis.com/auth/gmail.modify",
         "https://www.googleapis.com/auth/gmail.readonly",
-        "https://www.googleapis.com/auth/calendar.events",
-        "https://www.googleapis.com/auth/calendar.readonly",
     ]
     
     # OAuth redirect URLs
     OAUTH_REDIRECT_URI: Optional[str] = os.getenv("OAUTH_REDIRECT_URI")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Core backend (new app core) integration
+    # ═══════════════════════════════════════════════════════════════════
+
+    # Base URL for the new core backend service (see /backend).
+    # Used by app webhooks to forward Gmail/Slack ingestion to the backend core.
+    CORE_BACKEND_URL: str = os.getenv("CORE_BACKEND_URL", "http://localhost:5000").strip()
+
+    # Optional shared secret for forwarding Slack webhooks (header/query).
+    SLACK_WEBHOOK_SECRET: str = os.getenv("SLACK_WEBHOOK_SECRET", "").strip()
 
     # ═══════════════════════════════════════════════════════════════════
     # Gmail Pub/Sub Watch (push notifications)
@@ -159,9 +167,6 @@ class Config:
             if not cls.FLASK_SECRET_KEY or cls.FLASK_SECRET_KEY == "dev-secret-key-change-in-prod":
                 missing.append("FLASK_SECRET_KEY (production)")
             
-            if not cls.MONGO_URI:
-                missing.append("MONGO_URI (production)")
-            
             if not cls.OAUTH_REDIRECT_URI:
                 missing.append("OAUTH_REDIRECT_URI (production)")
         
@@ -190,7 +195,7 @@ class Config:
         print(f"Log Level: {cls.LOG_LEVEL}")
         print(f"LLM Provider: {cls.LLM_PROVIDER}")
         print(f"LLM Model: {cls.OPENAI_MODEL}")
-        print(f"MongoDB: {'Connected' if cls.MONGO_URI else 'Not configured'}")
+        print("MongoDB: removed (using SQLite core backend)")
         print(f"Pinecone: {'Enabled' if cls.PINECONE_API_KEY else 'Disabled'}")
         print(f"Memory: {'Enabled' if cls.ENABLE_MEMORY else 'Disabled'}")
         print(f"Rate Limiting: {'Enabled' if cls.RATE_LIMIT_ENABLED else 'Disabled'}")

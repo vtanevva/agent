@@ -3,7 +3,7 @@
 
 set -e
 
-BASE_URL="http://localhost:10000"
+BASE_URL="http://localhost:5000"
 USER_ID="test-user-$(date +%s)"
 THREAD_ID="test-thread-001"
 

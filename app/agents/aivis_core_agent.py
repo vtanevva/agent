@@ -1,3 +1,9 @@
+"""Compatibility shim to backend application agent."""
+
+from backend.application.agents.aivis_core_agent import AivisCoreAgent  # noqa: F401
+
+__all__ = ["AivisCoreAgent"]
+
 """
 AivisCoreAgent - handles general productivity and chat requests.
 

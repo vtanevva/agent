@@ -56,8 +56,8 @@ def demo_gmail_task_extraction():
     email_data = {
         "message_id": "msg_demo_001",
         "thread_id": "thread_demo_001",
-        "sender": "sam@company.com",
-        "sender_name": "Sam Chen",
+        "sender": "vanesa@company.com",
+        "sender_name": "Vanesa Taneva",
         "subject": "Quick sync on Q1 presentation",
         "snippet": "Hey! Can we have a quick call tomorrow to finalize the Q1 deck?",
         "body": """Hey!
@@ -69,7 +69,7 @@ I reviewed the latest version and it looks great, but I have a few questions abo
 Let me know if 2pm works for you. If not, I'm free anytime after 3pm.
 
 Thanks!
-Sam""",
+Vanesa""",
         "timestamp": datetime.utcnow(),
         "labels": ["INBOX", "UNREAD"]
     }

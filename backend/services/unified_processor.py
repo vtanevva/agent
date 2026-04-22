@@ -5,9 +5,7 @@ from typing import Any
 
 from utils.logger import get_logger
 
-from integrations.grafik import create_grafik_task
-from services.classifier_ai import classify
-from services.classification_context import build_classification_input
+from services.classification_service import classify_and_enrich
 from services.client_routing import ensure_client
 from services.continuity_context import build_continuity_context
 from services.follow_up_detector import detect_follow_up_candidate
@@ -17,10 +15,17 @@ from services.scheduling_awareness import analyze_scheduling_signals
 from services.project_context_updater import update_project_context_from_candidate
 from services.project_resolution import resolve_project_for_client
 from services.project_update_extractor import extract_project_updates
-from services.reply_policy import decide_reply_policy
-from services.reply_writer import generate_reply
-from services.task_linker import find_existing_task_for_message
+from services.inbound_reply_service import (
+    compute_reply_policy,
+    maybe_generate_reply_text,
+    should_create_gmail_draft,
+)
 from services.metrics_tracker import build_metrics_event
+from services.task_service import (
+    build_grafik_task_title_and_description,
+    create_grafik_task_and_record,
+    run_task_link_phase,
+)
 
 from storage.sqlite_db import (
     attach_message_context,
@@ -29,7 +34,6 @@ from storage.sqlite_db import (
     insert_message_if_new,
     insert_metrics_event,
     log_event,
-    upsert_task,
 )
 
 
@@ -89,13 +93,6 @@ def _safe_str(value: Any) -> str | None:
 def _norm_source(source: str | None) -> str:
     s = (source or "").strip().lower()
     return s if s else "unknown"
-
-
-def _allowed_reply_type(value: Any) -> str:
-    reply_type = str(value or "none").strip().lower()
-    if reply_type not in {"none", "short", "time_relevant", "context_relevant"}:
-        return "none"
-    return reply_type
 
 
 def _as_bool(value: Any) -> bool:
@@ -430,44 +427,19 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
     )
 
     # 3) Classification
-    classification_input = build_classification_input(
-        raw_message_text=text_for_classification or raw_text,
+    classification, classification_input, reply_type, has_action = classify_and_enrich(
+        source=source,
+        source_id=source_id or "",
+        raw_text=raw_text,
+        text_for_classification=text_for_classification,
         client_name=client_name,
         project_name=project_name,
         project_context=project_context,
+        project_resolution_reason=project_resolution_reason,
+        project_confidence=project_confidence,
+        needs_project_review=needs_project_review,
+        force_draft_ready=force_draft_ready,
     )
-
-    log.info(f"[CLASSIFY_INPUT_RAW:{source}] source_id={source_id} text={repr(raw_text)}")
-    log.info(
-        f"[CLASSIFY_INPUT_CLEAN:{source}] source_id={source_id} "
-        f"text={repr(text_for_classification or raw_text)}"
-    )
-    log.info(
-        f"[CLASSIFY_INPUT_CONTEXT:{source}] source_id={source_id} "
-        f"text={repr(classification_input)}"
-    )
-
-    classification = classify(
-        classification_input,
-        raw_text=(text_for_classification or raw_text),
-    ) or {}
-
-    has_action = bool(classification.get("has_action"))
-    reply_type = _allowed_reply_type(classification.get("reply_type"))
-
-    classification["has_action"] = has_action
-    classification["reply_type"] = reply_type
-    classification["client_name"] = client_name
-    classification["project_name"] = project_name
-    classification["project_resolution_reason"] = project_resolution_reason
-    classification["project_confidence"] = project_confidence
-    classification["needs_project_review"] = needs_project_review
-
-    # If we are forcing draft replies (label-triggered or always-on), ensure we have a usable
-    # reply_type (otherwise reply generation will be skipped).
-    if source == "gmail" and force_draft_ready and reply_type == "none":
-        reply_type = "short"
-        classification["reply_type"] = reply_type
 
     # 4) Project update + project memory update
     project_update_candidate = extract_project_updates(text_for_classification or raw_text)
@@ -492,29 +464,15 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
     )
 
     # 6) Task linking
-    skip_task_link = _as_bool(payload.get("skip_task_link", False))
-    task_link_skipped = False
-    task_link_skip_reason = None
-
-    if skip_task_link:
-        task_link_skipped = True
-        task_link_skip_reason = "payload_skip_task_link"
-        task_link_result = {
-            "matched": False,
-            "reason": "skipped",
-            "task_id": None,
-            "grafik_task_id": None,
-            "confidence": 0.0,
-            "needs_review": False,
-        }
-    else:
-        task_link_result = find_existing_task_for_message(
-            client_id=int(client_id) if client_id else None,
-            project_id=int(project_id) if project_id else None,
-            raw_text=(text_for_classification or raw_text),
-            classification=classification,
-            follow_up_candidate=follow_up_candidate,
-        )
+    task_link_result, task_link_skipped, task_link_skip_reason = run_task_link_phase(
+        payload=payload,
+        client_id=int(client_id) if client_id else None,
+        project_id=int(project_id) if project_id else None,
+        raw_text=raw_text,
+        text_for_classification=text_for_classification,
+        classification=classification,
+        follow_up_candidate=follow_up_candidate,
+    )
 
     # 6b) Importance scoring (advisory, Phase: Aivis Core importance)
     importance_result = score_message_importance(
@@ -584,25 +542,16 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
     )
 
     # 7) Reply policy + reply generation (source-specific behavior remains outside)
-    policy_clean_text = (text_for_classification or raw_text) if source == "slack" else raw_text
-    reply_policy = decide_reply_policy(
-        channel=source,
+    reply_policy = compute_reply_policy(
+        source=source,
+        raw_text=raw_text,
+        text_for_classification=text_for_classification,
         classification=classification,
-        clean_text=policy_clean_text,
         project_context=project_context,
         follow_up_candidate=follow_up_candidate,
         project_update_candidate=project_update_candidate,
+        force_draft_ready=force_draft_ready,
     )
-
-    # If the adapter indicates "force draft" (label-triggered or always-on), force Gmail into draft_ready mode.
-    if source == "gmail" and force_draft_ready:
-        reply_policy = {
-            "should_reply": True,
-            "reply_mode": "draft_ready",
-            "reason": "force_draft_ready",
-            "confidence": float(classification.get("confidence", 1.0) or 1.0),
-            "needs_review": False,
-        }
 
     log.info(
         f"[REPLY_POLICY:{source}] source_id={source_id} "
@@ -629,20 +578,18 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
     )
 
     should_create_reply = bool(reply_policy.get("should_reply"))
-    reply_text = None
-
-    if should_create_reply:
-        reply_text = generate_reply(
-            original_text=raw_text,
-            reply_type=reply_type,
-            summary=classification.get("summary"),
-            sender=sender or user_id,
-            project_name=project_name,
-            project_context=project_context,
-            project_update_candidate=project_update_candidate,
-            classification=classification,
-            channel=source,
-        )
+    reply_text = maybe_generate_reply_text(
+        reply_policy=reply_policy,
+        raw_text=raw_text,
+        reply_type=reply_type,
+        classification=classification,
+        sender=sender,
+        user_id=user_id,
+        project_name=project_name,
+        project_context=project_context,
+        project_update_candidate=project_update_candidate,
+        source=source,
+    )
 
     classification["suggested_reply"] = reply_text
 
@@ -763,18 +710,13 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
 
     # 9) Draft decision (Gmail only; creation stays in adapter)
     force_skip_draft = _as_bool(payload.get("skip_draft", False))
-    has_real_gmail_ids = bool(
-        source == "gmail"
-        and thread_id
-        and message_id
-    )
-    should_create_draft = (
-        source == "gmail"
-        and reply_policy.get("reply_mode") == "draft_ready"
-        and bool(reply_policy.get("should_reply"))
-        and (not force_skip_draft)
-        and has_real_gmail_ids
-        and bool(reply_text)
+    should_create_draft = should_create_gmail_draft(
+        source=source,
+        reply_policy=reply_policy,
+        reply_text=reply_text,
+        force_skip_draft=force_skip_draft,
+        thread_id=thread_id,
+        message_id=message_id,
     )
 
     # 10) Route: no task creation when not an action
@@ -912,64 +854,44 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
             "error": None,
         })
 
-    base_title = classification.get("title") or (
-        f"{source.capitalize()}: {(subject or text_for_classification or raw_text)[:50]}"
-        if (subject or text_for_classification or raw_text)
-        else f"{source.capitalize()}: (no text)"
-    )
-    title = f"[{client_name}] {base_title}" if client_name else base_title
-
-    context_block = ""
-    if project_context:
-        context_block = (
-            "\n\nProject Context:\n"
-            f"Summary: {project_context.get('summary')}\n"
-            f"Current Status: {project_context.get('current_status')}\n"
-            f"Current Priorities: {project_context.get('current_priorities')}\n"
-            f"Blockers: {project_context.get('blockers')}\n"
-            f"Next Steps: {project_context.get('next_steps')}\n"
-        )
-
-    description = (
-        f"Client: {client_name or 'Unknown'}\n"
-        f"Project: {project_name or 'Unknown'}\n"
-        f"Project Resolution: {project_resolution_reason or 'unknown'}\n"
-        f"Project Confidence: {project_confidence}\n"
-        f"Needs Project Review: {needs_project_review}\n"
-        f"Source: {source}\n"
-        f"Workspace ID: {workspace_id}\n"
-        f"Channel: {channel}\n"
-        f"Channel Type: {channel_type}\n"
-        f"Thread ID: {thread_id}\n"
-        f"TS: {ts}\n"
-        f"Sender: {sender}\n"
-        f"Recipient: {recipient}\n"
-        f"User ID: {user_id}\n"
-        f"Subject: {subject}\n\n"
-        f"Classification:\n{classification}\n"
-        f"Project Update Candidate:\n{project_update_candidate}\n"
-        f"Follow-up Candidate:\n{follow_up_candidate}\n"
-        f"{context_block}\n"
-        f"Raw Message:\n{raw_text}\n\n"
-        f"Text Used For Heuristics:\n{text_for_classification or raw_text}\n\n"
-        f"Text Used For LLM Classification:\n{classification_input}\n"
+    title, description = build_grafik_task_title_and_description(
+        source=source,
+        classification=classification,
+        subject=subject,
+        text_for_classification=text_for_classification,
+        raw_text=raw_text,
+        client_name=client_name,
+        project_name=project_name,
+        project_resolution_reason=project_resolution_reason,
+        project_confidence=project_confidence,
+        needs_project_review=needs_project_review,
+        workspace_id=workspace_id,
+        channel=channel,
+        channel_type=channel_type,
+        thread_id=thread_id,
+        ts=ts,
+        sender=sender,
+        recipient=recipient,
+        user_id=user_id,
+        project_update_candidate=project_update_candidate,
+        follow_up_candidate=follow_up_candidate,
+        project_context=project_context,
+        classification_input=classification_input,
     )
 
     try:
-        grafik_task_id = create_grafik_task(list_id, title, description)
-        log.info(
-            f"[GRAFIK:{source}] source_id={source_id} -> created task_id={grafik_task_id} list_id={list_id}"
-        )
-
-        upsert_task(
+        grafik_task_id = create_grafik_task_and_record(
             source=source,
             source_id=source_id,
-            grafik_task_id=grafik_task_id,
+            list_id=list_id,
             title=title,
             description=description,
             classification=classification,
             client_id=int(client_id) if client_id else None,
             project_id=int(project_id) if project_id else None,
+        )
+        log.info(
+            f"[GRAFIK:{source}] source_id={source_id} -> created task_id={grafik_task_id} list_id={list_id}"
         )
 
         log_event(

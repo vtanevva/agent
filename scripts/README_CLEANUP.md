@@ -45,7 +45,7 @@ python scripts/cleanup_memory.py --user_id v --cache-only
 1. **Re-login via Google OAuth** - Backfill will trigger automatically with new filtering
 2. **Or manually trigger backfill:**
    ```bash
-   curl -X POST http://localhost:10000/memory/admin/backfill-comprehensive \
+   curl -X POST http://localhost:5000/memory/admin/backfill-comprehensive \
      -H "Content-Type: application/json" \
      -d '{"user_id": "v", "max_emails": 100}'
    ```
@@ -88,7 +88,7 @@ Total items deleted: 295
 Next steps:
 1. Re-login via Google OAuth to trigger fresh backfill
 2. Or manually trigger backfill:
-   curl -X POST http://localhost:10000/memory/admin/backfill-comprehensive \
+   curl -X POST http://localhost:5000/memory/admin/backfill-comprehensive \
      -H "Content-Type: application/json" \
      -d '{"user_id": "v", "max_emails": 100}'
 

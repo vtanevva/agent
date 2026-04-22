@@ -1,11 +1,11 @@
 # MVP Task Pipeline - Complete Flow Example
 
-## Scenario: Sam's Meeting Confirmation Email
+## Scenario: Vanesa's Meeting Confirmation Email
 
 ### 📧 Input: Gmail Email
 
 ```
-From: Sam Chen <sam@company.com>
+From: Vanesa Taneva <vanesa@company.com>
 To: you@company.com
 Subject: Quick sync on Q1 presentation
 Date: Jan 28, 2026, 9:12 AM
@@ -37,8 +37,8 @@ The system stores the raw email as an **Event**.
   "source": "gmail",
   "timestamp": "2026-01-28T09:12:00Z",
   "data": {
-    "sender": "sam@company.com",
-    "sender_name": "Sam Chen",
+    "sender": "vanesa@company.com",
+    "sender_name": "Vanesa Taneva",
     "subject": "Quick sync on Q1 presentation",
     "snippet": "Hey! Can we have a quick call tomorrow at 2pm...",
     "body": "Hey!\n\nCan we have a quick call tomorrow at 2pm to finalize the Q1 presentation?\n\nI reviewed the latest version...",
@@ -370,7 +370,7 @@ print(tasks[0])  # See the AivisTask
 ### Using API:
 
 ```bash
-curl -X POST http://localhost:10000/api/tasks/process-email \
+curl -X POST http://localhost:5000/api/tasks/process-email \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "user_123",

@@ -15,19 +15,19 @@ load_dotenv()
 
 from flask import Flask, jsonify, request
 
-from routes.slack import slack_bp
-from routes.slack_interactive import slack_interactive_bp
-from routes.gmail import gmail_bp
-from routes.gmail_watch import gmail_watch_bp
-from routes.action_items import action_items_bp
-from routes.chat_api import chat_api_bp
-from routes.gmail_reply_routes import gmail_reply_bp
-from routes.webhooks import webhooks_bp
-from routes.debug import debug_bp
-from routes.classification_debug import classify_bp
-from routes.debug_sql import sql_debug_bp
-from routes.context import context_bp
-from routes.metrics import metrics_bp
+from api.routes.slack import slack_bp
+from api.routes.slack_interactive import slack_interactive_bp
+from api.routes.gmail import gmail_bp
+from api.routes.gmail_watch import gmail_watch_bp
+from api.routes.action_items import action_items_bp
+from api.routes.chat_api import chat_api_bp
+from api.routes.gmail_reply_routes import gmail_reply_bp
+from api.routes.webhooks import webhooks_bp
+from api.routes.debug import debug_bp
+from api.routes.classification_debug import classify_bp
+from api.routes.debug_sql import sql_debug_bp
+from api.routes.context import context_bp
+from api.routes.metrics import metrics_bp
 from storage.sqlite_db import init_sqlite
 from utils.logger import get_logger
 

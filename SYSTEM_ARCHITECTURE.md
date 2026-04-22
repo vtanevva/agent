@@ -12,15 +12,16 @@
                               ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         FLASK APPLICATION                                    │
-│                          (server.py)                                         │
-│                         Port: 10000                                          │
+│                          (backend/app.py)                                    │
+│                         Port: 5000 (or $PORT)                                │
 │                                                                              │
 │  ┌────────────────────────────────────────────────────────────────────┐    │
 │  │                      API LAYER (Blueprints)                         │    │
 │  ├────────────────────────────────────────────────────────────────────┤    │
 │  │                                                                      │    │
 │  │  📬 /api/chat                POST    General chat endpoint          │    │
-│  │     └─> chat_routes.py                                              │    │
+│  │     └─> routes/chat_api.py → HTTP POST /v1/chat (ai_chat_server.py) │    │
+│  │         separate process :5055, env AI_SERVICE_URL                    │    │
 │  │                                                                      │    │
 │  │  📧 /api/gmail/*             13 endpoints                           │    │
 │  │     ├─> /list                List emails                            │    │
@@ -301,7 +302,7 @@
      "session_id": "session456"
    }
 
-2. API LAYER (chat_routes.py)
+2. API LAYER (routes/chat_api.py)
    • Validates request
    • Extracts: user_id, message, session_id
    • Calls: orchestrator.handle_chat()

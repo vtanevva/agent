@@ -17,7 +17,7 @@ import requests
 from typing import Dict, Any
 
 
-def test_triaged_inbox(user_id: str = "v", base_url: str = "http://localhost:10000"):
+def test_triaged_inbox(user_id: str = "v", base_url: str = "http://localhost:5000"):
     """Test triaged inbox performance and functionality."""
     
     print(f"\n=== Testing Triaged Inbox for user: {user_id} ===\n")

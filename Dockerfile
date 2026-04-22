@@ -32,7 +32,7 @@ COPY . .
 # Build Expo web app (authoritative frontend served by Flask from /app/web-build)
 # IMPORTANT: this must happen AFTER copying the repo, otherwise the later COPY overwrites the build output.
 # ----------------------------
-WORKDIR /app/my-chatbot-expo
+WORKDIR /app/frontend
 RUN npm ci || npm install
 RUN rm -rf /app/web-build && npm run build:web
 RUN if [ ! -f "/app/web-build/index.html" ]; then \

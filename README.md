@@ -27,7 +27,7 @@ The User Awareness system enables Aivis to respond like a real assistant who kno
 1. **Set up environment variables** (see `.env.example`)
 2. **Upload a document**:
    ```bash
-   curl -X POST http://localhost:10000/memory/upload-file \
+   curl -X POST http://localhost:5000/memory/upload-file \
      -F "file=@document.pdf" \
      -F "user_id=your-user-id" \
      -F "title=My Document"
@@ -70,12 +70,19 @@ The User Awareness system enables Aivis to respond like a real assistant who kno
    # Edit .env with your API keys
    ```
 
-4. **Run the server**:
+4. **Run two processes** (core API and AI are separate):
    ```bash
-   python server.py
+   # Terminal 1 — orchestrator + LLM (default http://127.0.0.1:5055)
+   python ai_chat_server.py
+
+   # Terminal 2 — SQLite, webhooks, HTTP API including POST /api/chat
+   cd backend
+   python app.py
    ```
 
-Server will start on `http://localhost:10000`
+   - Core API: `http://localhost:5000` (set `PORT` with gunicorn / `start.sh`).
+   - AI service: `http://localhost:5055` (set `AI_CHAT_PORT` or use `./start-ai.sh`).
+   - Point the backend at the AI service with `AI_SERVICE_URL` if it is not on the default URL.
 
 ## Environment Variables
 
@@ -84,6 +91,12 @@ Key variables (see `env.example` for full list):
 ```bash
 # Required
 OPENAI_API_KEY=sk-...
+# Core backend → AI service (defaults shown)
+AI_SERVICE_URL=http://127.0.0.1:5055
+AI_SERVICE_TIMEOUT=120
+# Optional shared secret (set same value on both processes)
+# AI_SERVICE_SECRET=...
+
 MONGO_URI=mongodb://localhost:27017/
 
 # User Awareness (optional but recommended)
@@ -134,9 +147,7 @@ mental/
 │   │   ├── retrieval_service.py
 │   │   ├── prompt_builder.py
 │   │   └── background_jobs.py
-│   ├── api/                 # API routes
-│   │   ├── memory_routes.py
-│   │   ├── chat_routes.py
+│   ├── api/                 # Legacy / optional Flask routes (if present)
 │   │   └── ...
 │   ├── services/            # Business logic
 │   ├── agents/              # AI agents
@@ -146,7 +157,8 @@ mental/
 ├── docs/
 │   ├── USER_AWARENESS.md
 │   └── RUNBOOK_USER_AWARENESS.md
-├── server.py                # Main Flask app
+├── ai_chat_server.py        # AI chat service (Flask; orchestrator, port 5055)
+├── backend/app.py           # Core API (Flask)
 └── requirements.txt
 ```
 
@@ -222,7 +234,7 @@ echo $PINECONE_API_KEY
 tail -f logs/app.log | grep "fact"
 
 # Add fact manually
-curl -X POST http://localhost:10000/memory/facts \
+curl -X POST http://localhost:5000/memory/facts \
   -H "Content-Type: application/json" \
   -d '{"user_id": "test", "text": "Test fact", "type": "other", "confidence": 0.9}'
 ```
