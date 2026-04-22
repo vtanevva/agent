@@ -93,6 +93,20 @@ export default function MenuPage() {
               <Text style={styles.gridText}>Tasks</Text>
             </TouchableOpacity>
 
+            {/* Projects */}
+            <TouchableOpacity
+              style={styles.gridBox}
+              onPress={() => {
+                navigation.navigate('Projects', {userId, sessionId});
+              }}>
+              <View style={[styles.gridIcon, {backgroundColor: colors.primary[500] + '22'}]}>
+                <Svg width="32" height="32" viewBox="0 0 24 24" fill={colors.primary[700]}>
+                  <Path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2zm0 3v1h8V7h-8zm0 3v1h8v-1h-8zm0 3v1h5v-1h-5z" />
+                </Svg>
+              </View>
+              <Text style={styles.gridText}>Projects</Text>
+            </TouchableOpacity>
+
             {/* Box 3: Settings */}
             <TouchableOpacity 
               style={styles.gridBox}
@@ -119,6 +133,20 @@ export default function MenuPage() {
                 </Svg>
               </View>
               <Text style={styles.gridText}>Schedule Meetings</Text>
+            </TouchableOpacity>
+
+            {/* Week view (hourly) */}
+            <TouchableOpacity
+              style={styles.gridBox}
+              onPress={() => {
+                navigation.navigate('WeeklySchedule', {userId, sessionId});
+              }}>
+              <View style={[styles.gridIcon, {backgroundColor: colors.secondary[500] + '18'}]}>
+                <Svg width="32" height="32" viewBox="0 0 24 24" fill={colors.secondary[700]}>
+                  <Path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zm0-12H5V6h14v2zM7 12h5v5H7v-5z" />
+                </Svg>
+              </View>
+              <Text style={styles.gridText}>Week schedule</Text>
             </TouchableOpacity>
 
             {/* Box 5: Calendar */}

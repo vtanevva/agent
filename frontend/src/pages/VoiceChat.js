@@ -27,6 +27,7 @@ import EmailList from '../components/EmailList';
 import {API_BASE_URL} from '../config/api';
 import EmailReplyModal from '../components/EmailReplyModal';
 import ComposeEmailModal from '../components/ComposeEmailModal';
+import {extractEmailAddress} from '../utils/emailParse';
 
 export default function VoiceChat() {
   const route = useRoute();
@@ -422,10 +423,9 @@ export default function VoiceChat() {
   };
 
   const handleEmailSelect = (threadId, from) => {
-    const m = /<([^>]+)>/.exec(from);
-    const to = m ? m[1] : from;
+    const addr = extractEmailAddress(from);
     setReplyThreadId(threadId);
-    setReplyTo(to);
+    setReplyTo(addr || (from && String(from).trim()) || '');
     setReplyOpen(true);
     setEmailChoices(null);
   };

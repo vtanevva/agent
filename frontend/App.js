@@ -15,7 +15,9 @@ import ContactDetailPage from './src/pages/ContactDetailPage';
 import ContactsWithRelationshipsPage from './src/pages/ContactsWithRelationshipsPage';
 import WaitlistPage from './src/pages/WaitlistPage';
 import TasksPage from './src/pages/TasksPage';
+import ProjectsPage from './src/pages/ProjectsPage';
 import SchedulerPage from './src/pages/SchedulerPage';
+import WeeklySchedulePage from './src/pages/WeeklySchedulePage';
 import {genSession} from './src/config/api';
 
 const Stack = createNativeStackNavigator();
@@ -79,6 +81,7 @@ export default function App() {
                 },
               },
               Scheduler: 'schedule',
+              WeeklySchedule: 'week',
             },
           },
         }}>
@@ -98,7 +101,9 @@ export default function App() {
           <Stack.Screen name="ContactDetail" component={ContactDetailPage} />
           <Stack.Screen name="ContactsWithRelationships" component={ContactsWithRelationshipsPage} />
           <Stack.Screen name="Tasks" component={TasksPage} />
+          <Stack.Screen name="Projects" component={ProjectsPage} />
           <Stack.Screen name="Scheduler" component={SchedulerPage} />
+          <Stack.Screen name="WeeklySchedule" component={WeeklySchedulePage} />
           <Stack.Screen name="Waitlist" component={WaitlistPage} />
         </Stack.Navigator>
       </NavigationContainer>

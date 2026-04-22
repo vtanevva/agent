@@ -4,9 +4,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { colors } from '../styles/colors';
 import { commonStyles } from '../styles/commonStyles';
 import { CORE_BACKEND_URL } from '../config/api';
+import { extractEmailAddress } from '../utils/emailParse';
 
 export default function EmailReplyModal({ visible, onClose, userId, threadId, to }) {
-  const [loadingDraft, setLoadingDraft] = useState(false);
+  const [loadingThread, setLoadingThread] = useState(false);
+  const [loadingDraftReply, setLoadingDraftReply] = useState(false);
+  const [recipientEmail, setRecipientEmail] = useState('');
   const [sending, setSending] = useState(false);
   const [sentJustNow, setSentJustNow] = useState(false);
   const [error, setError] = useState(null);
@@ -22,6 +25,10 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
     const m = /^(.*?)\s*<([^>]+)>$/.exec(original.from);
     return m ? `${m[1]}  <${m[2]}>` : original.from;
   })();
+  const loadingDraft = loadingThread || loadingDraftReply;
+  const replyDest = () =>
+    (recipientEmail || extractEmailAddress(original.from) || extractEmailAddress(to || '')).trim();
+
   const avatarLetter = (original.from || to || 'U').trim().charAt(0)?.toUpperCase?.() || 'U';
   // Frontend guard: strip duplicated subject lines at top of the original body
   const cleanedOriginalBody = (() => {
@@ -59,91 +66,114 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
   useEffect(() => {
     async function loadData() {
       if (!visible || !userId || !threadId) return;
-      setLoadingDraft(true);
+      setLoadingThread(true);
+      setLoadingDraftReply(false);
       setError(null);
-      // Reset mode when modal opens (only if not already set)
+      setDraft('');
+      setRecipientEmail('');
       if (mode === 'reply') {
         setForwardTo('');
       }
       try {
-        // 1) fetch original message
+        const preferTo = extractEmailAddress(to || '');
         const d = await fetch(`${CORE_BACKEND_URL}/api/gmail/thread-detail`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: userId, thread_id: threadId, to }),
+          body: JSON.stringify({ user_id: userId, thread_id: threadId, to: preferTo || to || '' }),
         });
         const detail = await d.json();
-        if (detail?.success) {
-          setOriginal({
-            subject: detail.subject || '',
-            from: detail.from || '',
-            date: detail.date || '',
-            body: detail.body || '',
-          });
+        if (!detail?.success) {
+          setError(detail?.error || 'Failed to load thread.');
+          return;
         }
-        // 2) fetch draft based on mode
-        if (mode === 'reply' && to) {
-          const r = await fetch(`${CORE_BACKEND_URL}/api/gmail/draft-reply`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: userId, thread_id: threadId, to }),
-          });
-          const data = await r.json();
-          if (data?.success && data.body) {
-            setDraft(data.body);
-          } else if (data?.action === 'connect_google') {
-            setError('Google not connected. Please connect and retry.');
-          } else {
-            setError(data?.error || 'Failed to generate draft.');
+        setOriginal({
+          subject: detail.subject || '',
+          from: detail.from || '',
+          date: detail.date || '',
+          body: detail.body || '',
+        });
+        const rec = preferTo || extractEmailAddress(detail.from || '') || '';
+        setRecipientEmail(rec);
+
+        if (mode === 'reply') {
+          setLoadingThread(false);
+          setLoadingDraftReply(true);
+          try {
+            const r = await fetch(`${CORE_BACKEND_URL}/api/gmail/draft-reply`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ user_id: userId, thread_id: threadId, to: rec }),
+            });
+            const data = await r.json();
+            if (data?.success && data.body) {
+              setDraft(data.body);
+            } else if (data?.action === 'connect_google') {
+              setError('Google not connected. Please connect and retry.');
+            } else {
+              setError(data?.error || 'Failed to generate draft.');
+            }
+          } finally {
+            setLoadingDraftReply(false);
           }
-        } else if (mode === 'forward') {
-          // In forward mode, start with empty draft (will be generated when 'to' is entered)
-          setDraft('');
+        } else {
+          setLoadingThread(false);
+          setLoadingDraftReply(true);
+          try {
+            const r = await fetch(`${CORE_BACKEND_URL}/api/gmail/draft-forward`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                user_id: userId,
+                thread_id: threadId,
+                to: forwardTo.trim() || '',
+              }),
+            });
+            const data = await r.json();
+            if (data?.success && data.body) {
+              setDraft(data.body);
+            } else {
+              setDraft('');
+            }
+          } catch {
+            setDraft('');
+          } finally {
+            setLoadingDraftReply(false);
+          }
         }
       } catch (e) {
         setError(e?.message || 'Network error.');
       } finally {
-        setLoadingDraft(false);
+        setLoadingThread(false);
       }
     }
     loadData();
-  }, [visible, userId, threadId, to]);
-  
-  // Separate effect to handle mode changes and generate drafts
-  useEffect(() => {
-    if (!visible || !userId || !threadId) return;
-    
-    if (mode === 'forward') {
-      // Generate forward draft immediately when forward mode is opened
-      setLoadingDraft(true);
-      fetch(`${CORE_BACKEND_URL}/api/gmail/draft-forward`, {
+  }, [visible, userId, threadId, to, mode]);
+
+  const regenerateDraft = async () => {
+    if (!visible || !userId || !threadId || mode !== 'reply') return;
+    setError(null);
+    setLoadingDraftReply(true);
+    try {
+      const dest = replyDest();
+      const r = await fetch(`${CORE_BACKEND_URL}/api/gmail/draft-reply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          user_id: userId, 
-          thread_id: threadId,
-          to: forwardTo.trim() || '' // Optional, can be empty
-        }),
-      })
-        .then(r => r.json())
-        .then(data => {
-          if (data?.success && data.body) {
-            setDraft(data.body);
-          } else {
-            // If draft generation fails, just leave draft empty
-            setDraft('');
-          }
-          setLoadingDraft(false);
-        })
-        .catch(e => {
-          console.error('Failed to generate forward draft:', e);
-          setDraft('');
-          setLoadingDraft(false);
-        });
-    } else if (mode === 'reply') {
-      setForwardTo('');
+        body: JSON.stringify({ user_id: userId, thread_id: threadId, to: dest }),
+      });
+      const data = await r.json();
+      if (data?.success && data.body) {
+        setDraft(data.body);
+      } else if (data?.action === 'connect_google') {
+        setError('Google not connected. Please connect and retry.');
+      } else {
+        setError(data?.error || 'Failed to generate draft.');
+      }
+    } catch (e) {
+      setError(e?.message || 'Network error.');
+    } finally {
+      setLoadingDraftReply(false);
     }
-  }, [mode, visible, userId, threadId]); // Removed forwardTo from dependencies
+  };
 
   // Focus draft input when visible and draft is ready
   useEffect(() => {
@@ -177,18 +207,18 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
           body: draft 
         });
       } else {
-        // Reply mode
-        if (!to) {
-          setError('Recipient email is required.');
+        const dest = replyDest();
+        if (!dest) {
+          setError('Could not detect recipient email for this thread.');
           setSending(false);
           return;
         }
         endpoint = `${CORE_BACKEND_URL}/api/gmail/reply`;
-        body = JSON.stringify({ 
-          user_id: userId, 
-          thread_id: threadId, 
-          to, 
-          body: draft 
+        body = JSON.stringify({
+          user_id: userId,
+          thread_id: threadId,
+          to: dest,
+          body: draft,
         });
       }
       
@@ -260,14 +290,24 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
             <TouchableOpacity 
               style={[styles.toolbarBtn, mode === 'forward' && styles.toolbarBtnActive]}
               onPress={() => {
-                console.log('Forward button clicked, setting mode to forward');
                 setMode('forward');
-                setDraft(''); // Clear draft when switching to forward
-                setForwardTo(''); // Reset forwardTo when switching
+                setDraft('');
+                setForwardTo('');
               }}>
               <Text style={[styles.toolbarBtnText, mode === 'forward' && styles.toolbarBtnTextActive]}>Forward</Text>
             </TouchableOpacity>
             <View style={{flex: 1}} />
+            {mode === 'reply' ? (
+              <TouchableOpacity
+                onPress={regenerateDraft}
+                disabled={sending || loadingDraft || !threadId}
+                style={styles.regenerateBtn}
+              >
+                <Text style={styles.regenerateBtnText}>
+                  {loadingDraftReply ? '…' : 'Regenerate'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
             <Text style={styles.threadMeta}>Thread: {String(threadId || '').slice(-8)}</Text>
           </View>
 
@@ -307,7 +347,7 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
                     const r = await fetch(`${CORE_BACKEND_URL}/api/gmail/draft-reply`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ user_id: userId, thread_id: threadId, to, user_points: 'Agree politely, short and warm.' }),
+                      body: JSON.stringify({ user_id: userId, thread_id: threadId, to: replyDest(), user_points: 'Agree politely, short and warm.' }),
                     });
                     const data = await r.json();
                     if (data?.success && data.body) setDraft(data.body);
@@ -324,7 +364,7 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
                     const r = await fetch(`${CORE_BACKEND_URL}/api/gmail/draft-reply`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ user_id: userId, thread_id: threadId, to, user_points: 'Propose scheduling a meeting. Provide 2 time windows.' }),
+                      body: JSON.stringify({ user_id: userId, thread_id: threadId, to: replyDest(), user_points: 'Propose scheduling a meeting. Provide 2 time windows.' }),
                     });
                     const data = await r.json();
                     if (data?.success && data.body) setDraft(data.body);
@@ -341,7 +381,7 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
                     const r = await fetch(`${CORE_BACKEND_URL}/api/gmail/draft-reply`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ user_id: userId, thread_id: threadId, to, user_points: 'Write a brief summary of the key points before replying.' }),
+                      body: JSON.stringify({ user_id: userId, thread_id: threadId, to: replyDest(), user_points: 'Write a brief summary of the key points before replying.' }),
                     });
                     const data = await r.json();
                     if (data?.success && data.body) setDraft(data.body);
@@ -396,10 +436,12 @@ export default function EmailReplyModal({ visible, onClose, userId, threadId, to
               </View>
               <Text style={styles.replyLabel}>Me</Text>
             </View>
-            {loadingDraft && mode === 'reply' ? (
+            {loadingDraft ? (
               <View style={styles.loadingBox}>
                 <ActivityIndicator color={colors.secondary[600]} />
-                <Text style={styles.loadingText}>Preparing draft...</Text>
+                <Text style={styles.loadingText}>
+                  {loadingThread ? 'Loading conversation…' : mode === 'forward' ? 'Preparing forward…' : 'Generating reply…'}
+                </Text>
               </View>
             ) : (
               <TextInput
@@ -538,6 +580,16 @@ const styles = StyleSheet.create({
   threadMeta: {
     fontSize: 10,
     color: colors.primary[900] + '60',
+  },
+  regenerateBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginRight: 4,
+  },
+  regenerateBtnText: {
+    fontSize: 12,
+    color: colors.accent[700],
+    fontWeight: '600',
   },
   toolbarBtnActive: {
     backgroundColor: colors.accent[500] + '30',

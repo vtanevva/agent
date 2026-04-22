@@ -181,6 +181,18 @@ def draft_reply():
 
     # If we don't have a stored suggestion (or user asked for a specific angle), generate a new one.
     reply_type = _safe_str(classification.get("reply_type")) or "short"
+    if reply_type == "none" and not user_points:
+        reply_type = "short"
+
+    # Ingest row text can be empty; pull live thread body from Gmail for drafting.
+    if len(raw_text) < 12 and not user_points:
+        try:
+            service = get_gmail_service()
+            detail, _mid = _get_thread_detail(service, thread_id, prefer_from_email=to_email or None)
+            raw_text = _safe_str(detail.get("body")) or raw_text
+        except Exception as e:
+            log.warning("draft_reply: gmail thread body fallback skipped: %s", e)
+
     summary = _safe_str(classification.get("summary")) or None
     sender = _safe_str(classification.get("sender")) or None
     project_name = _safe_str(classification.get("project_name")) or None

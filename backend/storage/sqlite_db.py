@@ -636,6 +636,62 @@ def list_projects_for_client(client_id: int) -> list[dict[str, Any]]:
         ).fetchall()
     return [dict(r) for r in rows]
 
+
+def list_all_projects_with_clients() -> list[dict[str, Any]]:
+    """All projects with their client name, ordered by client then project."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+              p.id,
+              p.client_id,
+              p.name,
+              p.description,
+              p.status,
+              p.priority,
+              p.deadline,
+              p.created_at,
+              p.updated_at,
+              p.last_updated_at,
+              c.name AS client_name
+            FROM projects p
+            JOIN clients c ON c.id = p.client_id
+            ORDER BY c.name ASC, p.name ASC
+            """
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_projects_overview(*, tasks_per_project: int = 30) -> list[dict[str, Any]]:
+    """
+    Projects with optional SQLite project_context and recent tasks for each.
+    Intended for internal dashboards (GET /debug/sql/projects-overview).
+    """
+    lim = max(1, min(int(tasks_per_project), 100))
+    rows = list_all_projects_with_clients()
+    out: list[dict[str, Any]] = []
+    for p in rows:
+        pid = int(p["id"])
+        ctx = get_project_context(pid)
+        tasks = get_recent_tasks_for_project(pid, limit=lim)
+        slim_tasks: list[dict[str, Any]] = []
+        for t in tasks:
+            slim_tasks.append(
+                {
+                    "id": int(t["id"]),
+                    "title": t.get("title") or "",
+                    "source": t.get("source") or "",
+                    "classification_type": t.get("classification_type") or "",
+                    "created_at": t.get("created_at") or "",
+                }
+            )
+        entry = dict(p)
+        entry["context"] = ctx
+        entry["tasks"] = slim_tasks
+        out.append(entry)
+    return out
+
+
 # ---------- Messages (dedup + context) ----------
 def insert_message_if_new(
     *,

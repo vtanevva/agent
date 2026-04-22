@@ -7,6 +7,7 @@ import {commonStyles} from '../styles/commonStyles';
 import EmailList from '../components/EmailList';
 import EmailReplyModal from '../components/EmailReplyModal';
 import {CORE_BACKEND_URL} from '../config/api';
+import {extractEmailAddress} from '../utils/emailParse';
 import {useRoute, useNavigation} from '@react-navigation/native';
 import {Svg, Path} from 'react-native-svg';
 
@@ -126,10 +127,9 @@ export default function GmailAgentPage() {
     if (!picked || picked.source !== 'gmail') {
       return;
     }
-    const m = /<([^>]+)>/.exec(from);
-    const to = m ? m[1] : from;
+    const addr = extractEmailAddress(from);
     setReplyThreadId(threadId);
-    setReplyTo(to);
+    setReplyTo(addr || (from && String(from).trim()) || '');
     setReplyOpen(true);
   };
 
