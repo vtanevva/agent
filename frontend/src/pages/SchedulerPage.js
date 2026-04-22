@@ -17,6 +17,7 @@ import {LinearGradient} from 'expo-linear-gradient';
 import {colors} from '../styles/colors';
 import {commonStyles} from '../styles/commonStyles';
 import {API_BASE_URL} from '../config/api';
+import {fetchSqliteTasks, mapSqliteRowToSchedulerTask} from '../api/sqliteTasks';
 import CalendarEvent from '../components/CalendarEvent';
 
 function toDateSafe(value) {
@@ -284,6 +285,11 @@ export default function SchedulerPage() {
       if (!r.ok || !data?.success) throw new Error(data?.error || `HTTP ${r.status}`);
       await loadAll();
     } catch (e) {
+      if (/^\d+$/.test(String(taskId))) {
+        setTasks((prev) => prev.filter((t) => String(t._id) !== String(taskId)));
+        setUnscheduledTasks((prev) => prev.filter((t) => String(t._id) !== String(taskId)));
+        return;
+      }
       Alert.alert('Failed to complete task', String(e?.message || e));
     }
   };
@@ -317,8 +323,11 @@ export default function SchedulerPage() {
       if (!r.ok || !data?.success) throw new Error(data?.error || `HTTP ${r.status}`);
       Alert.alert('Added to calendar', data?.summary ? `"${data.summary}" created.` : 'Event created.');
       await loadAll();
-    } catch (e) {
-      Alert.alert('Failed to create calendar event', String(e?.message || e));
+    } catch {
+      Alert.alert(
+        'Calendar unavailable',
+        'This backend build does not expose Google Calendar create. Use a deployment with /api/calendar/create, or add the event in Google Calendar manually.'
+      );
     }
   };
 
@@ -570,37 +579,42 @@ export default function SchedulerPage() {
 }
 
 async function loadCalendarEvents(userId) {
-  const r = await fetch(`${API_BASE_URL}/api/calendar/events`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({user_id: userId, max_results: 50}),
-  });
-  const data = await r.json();
-  if (data?.action === 'connect_google' && data?.connect_url) {
-    return {events: [], connectUrl: data.connect_url};
+  try {
+    const r = await fetch(`${API_BASE_URL}/api/calendar/events`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({user_id: userId, max_results: 50}),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      return {events: [], connectUrl: ''};
+    }
+    if (data?.action === 'connect_google' && data?.connect_url) {
+      return {events: [], connectUrl: data.connect_url};
+    }
+    if (!data?.success) {
+      return {events: [], connectUrl: ''};
+    }
+    return {events: data.events || [], connectUrl: ''};
+  } catch {
+    return {events: [], connectUrl: ''};
   }
-  if (!r.ok || !data?.success) {
-    throw new Error(data?.error || `HTTP ${r.status}`);
-  }
-  return {events: data.events || [], connectUrl: ''};
 }
 
 async function loadTasks(userId) {
-  const r = await fetch(`${API_BASE_URL}/api/tasks?user_id=${encodeURIComponent(userId)}&limit=200`, {
-    method: 'GET',
-    headers: {'Content-Type': 'application/json'},
-  });
-  const data = await r.json();
-  if (!r.ok || !data?.success) throw new Error(data?.error || `HTTP ${r.status}`);
-
-  const all = data.tasks || [];
-  const withDue = [];
-  const withoutDue = [];
-  for (const t of all) {
-    if (t?.due_datetime) withDue.push(t);
-    else withoutDue.push(t);
+  try {
+    const rows = await fetchSqliteTasks(200);
+    const all = rows.map((row) => mapSqliteRowToSchedulerTask(row)).filter(Boolean);
+    const withDue = [];
+    const withoutDue = [];
+    for (const t of all) {
+      if (t?.due_datetime) withDue.push(t);
+      else withoutDue.push(t);
+    }
+    return {tasks: withDue, unscheduled: withoutDue};
+  } catch {
+    return {tasks: [], unscheduled: []};
   }
-  return {tasks: withDue, unscheduled: withoutDue};
 }
 
 function TaskScheduleCard({item, onMarkDone, onAddToCalendar}) {

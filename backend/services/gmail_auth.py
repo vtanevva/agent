@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Optional
 
 try:
     # Ensures `backend/.env` is loaded even when running `python -c ...`
@@ -30,9 +31,6 @@ REPO_DIR = BASE_DIR.parent
 DEFAULT_BACKEND_TOKEN_PATH = BASE_DIR / "token.json"
 DEFAULT_BACKEND_CREDENTIALS_PATH = BASE_DIR / "credentials.json"
 
-DEFAULT_APP_TOKEN_PATH = REPO_DIR / "app" / "token.json"
-DEFAULT_APP_CREDENTIALS_PATH = REPO_DIR / "app" / "credentials.json"
-
 
 def _resolve_config_path(env_var: str, default_path: Path) -> Path:
     raw = os.getenv(env_var)
@@ -45,26 +43,38 @@ def _resolve_config_path(env_var: str, default_path: Path) -> Path:
     return p
 
 
-def _pick_existing_or_default(*candidates: Path, default: Path) -> Path:
-    for p in candidates:
-        if p.exists():
-            return p
-    return default
-
-
 def _get_token_path() -> Path:
-    # Let users override explicitly, but default to reusing the original /app auth if present.
-    token_path = _resolve_config_path("GMAIL_TOKEN_PATH", DEFAULT_BACKEND_TOKEN_PATH)
-    if os.getenv("GMAIL_TOKEN_PATH"):
-        return token_path
-    return _pick_existing_or_default(DEFAULT_APP_TOKEN_PATH, DEFAULT_BACKEND_TOKEN_PATH, default=DEFAULT_BACKEND_TOKEN_PATH)
+    return _resolve_config_path("GMAIL_TOKEN_PATH", DEFAULT_BACKEND_TOKEN_PATH)
 
 
 def _get_credentials_path() -> Path:
-    creds_path = _resolve_config_path("GMAIL_CREDENTIALS_PATH", DEFAULT_BACKEND_CREDENTIALS_PATH)
-    if os.getenv("GMAIL_CREDENTIALS_PATH"):
-        return creds_path
-    return _pick_existing_or_default(DEFAULT_APP_CREDENTIALS_PATH, DEFAULT_BACKEND_CREDENTIALS_PATH, default=DEFAULT_BACKEND_CREDENTIALS_PATH)
+    return _resolve_config_path("GMAIL_CREDENTIALS_PATH", DEFAULT_BACKEND_CREDENTIALS_PATH)
+
+
+def get_client_secrets_path() -> Path:
+    """OAuth client JSON path (``credentials.json`` / ``GMAIL_CREDENTIALS_PATH``)."""
+    return _get_credentials_path()
+
+
+def load_google_credentials(user_id: Optional[str] = None) -> Optional[Credentials]:
+    """Load stored Gmail OAuth credentials (single ``token.json``; ``user_id`` is unused for now)."""
+    _ = user_id
+    token_path = _get_token_path()
+    if not token_path.exists():
+        return None
+    try:
+        return Credentials.from_authorized_user_file(str(token_path), SCOPES)
+    except Exception:
+        return None
+
+
+def save_google_credentials(user_id: Optional[str], creds: Credentials) -> None:
+    """Persist Gmail OAuth credentials to the configured token path."""
+    _ = user_id
+    token_path = _get_token_path()
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(token_path, "w", encoding="utf-8") as f:
+        f.write(creds.to_json())
 
 
 def get_gmail_service():

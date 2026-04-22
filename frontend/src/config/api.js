@@ -63,7 +63,7 @@ const getApiBaseUrl = () => {
      window.location.hostname.includes('aivis.pw'));
   
   // Web: if not production, prefer the current hostname with core backend port 5000.
-  // Aligns with `python backend/app.py` / gunicorn from start.sh.
+  // Aligns with `python server.py core` / gunicorn core_app:app (start.sh, cwd backend/).
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     if (!isProduction) {
       const host = window.location.hostname;

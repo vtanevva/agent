@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from backend.application.services import memory_service
-from backend.application.services.core_backend_client import ingest_gmail
+from backend.application.services.core_backend_client import fetch_recent_messages, ingest_gmail
 from backend.utils.logger import get_logger
 
 logger = get_logger("gmail_agent")
@@ -24,8 +24,10 @@ class GmailAgent:
         if any(phrase in lower for phrase in [
             "recent email", "last email", "latest email", "show my emails",
             "show inbox", "check emails", "check my emails", "check inbox",
-            "past email", "old emails", "show me emails", "list emails",
-            "emails from", "show emails from", "reply to",
+            "past email", "past emails", "old emails", "show me emails", "list emails",
+            "emails from", "show emails from", "what emails", "my emails",
+            "email history", "inbox messages", "mail i received",
+            "reply to",
         ]):
             return "list"
         if any(phrase in lower for phrase in [
@@ -88,6 +90,25 @@ class GmailAgent:
             return {"to": (m.group("to") or "").strip(), "body": ""}
         return {"to": "", "body": ""}
 
+    @staticmethod
+    def _format_recent_email_list(items: list) -> str:
+        if not items:
+            return (
+                "No Gmail messages are stored in the core database yet. "
+                "They show up after messages are ingested (Gmail watch or pipeline). "
+                "For actionable threads, open the Action inbox tab in the app."
+            )
+        lines: list[str] = ["Here are the most recently ingested Gmail messages (newest first):\n"]
+        for i, it in enumerate(items[:40], 1):
+            sub = (it.get("subject") or "(no subject)").strip()
+            fr = (it.get("from") or "?").strip()
+            sn = (it.get("snippet") or "").replace("\n", " ").strip()
+            if len(sn) > 180:
+                sn = sn[:177] + "…"
+            ts = (it.get("ts") or "").strip()
+            lines.append(f"{i}. {sub} — From: {fr}" + (f" — {sn}" if sn else "") + (f" — {ts}" if ts else ""))
+        return "\n".join(lines)
+
     def handle_chat(
         self,
         user_id: str,
@@ -107,6 +128,16 @@ class GmailAgent:
             logger.warning("User Awareness retrieval failed for GmailAgent: %s", e)
 
         intent = self._detect_email_intent(message)
+        if intent == "list":
+            res = fetch_recent_messages(user_id=user_id or "", limit=30, source="gmail")
+            if not res.get("success"):
+                return (
+                    "I could not load recent messages from the core server. "
+                    f"Check that the core API is running and CORE_BACKEND_URL is set. ({res.get('error', 'error')})"
+                )
+            items = res.get("items") if isinstance(res.get("items"), list) else []
+            return self._format_recent_email_list(items)
+
         if intent == "send":
             extracted = self._extract_recipient_and_message(message)
             raw_to = extracted.get("to", "").strip()

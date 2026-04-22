@@ -1,7 +1,7 @@
 """
 OpenAI LLM client (chat + embeddings).
 
-Env vars match legacy `app.config.Config` / production `.env`.
+Env vars match ``backend.config.Config`` / production ``.env``.
 """
 
 from __future__ import annotations

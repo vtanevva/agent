@@ -343,10 +343,11 @@ action_metadata = {
 ### Using Python:
 
 ```python
-from app.services.task_pipeline_service import get_task_pipeline_service
+# Legacy Mongo task_pipeline_service was removed. Use the SQLite core instead:
+#   - backend/services/unified_processor.py
+#   - backend/services/task_service.py
+#   - examples/task_pipeline_demo.py (DB snapshot)
 from datetime import datetime
-
-pipeline = get_task_pipeline_service()
 
 # The email data
 email = {
@@ -359,12 +360,9 @@ email = {
     "timestamp": datetime.utcnow()
 }
 
-# Process through pipeline
-task_id = pipeline.process_gmail_event("user_123", email)
-
-# Get the task
-tasks = pipeline.get_tasks_by_priority("user_123", priority="NOW")
-print(tasks[0])  # See the AivisTask
+# Ingestion path today: Gmail/Slack webhooks → unified_processor → SQLite `tasks` / `events`.
+# See backend/services/unified_processor.py for the live flow.
+_ = email  # sample payload shape only
 ```
 
 ### Using API:

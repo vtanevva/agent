@@ -23,6 +23,11 @@ export default function ContactsWithRelationshipsPage() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({user_id: userId}),
       });
+      if (!r.ok) {
+        setContacts([]);
+        setProjectContactRelationships([]);
+        return;
+      }
       const data = await r.json();
       console.log('[ContactsWithRelationships] API Response:', {
         success: data?.success,

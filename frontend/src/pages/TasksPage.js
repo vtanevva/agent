@@ -14,6 +14,7 @@ import {Svg, Path} from 'react-native-svg';
 import {colors} from '../styles/colors';
 import {commonStyles} from '../styles/commonStyles';
 import {API_BASE_URL} from '../config/api';
+import {fetchSqliteTasks, mapSqliteTaskToUi} from '../api/sqliteTasks';
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -33,37 +34,8 @@ export default function TasksPage() {
     setLoading(true);
     setError('');
     try {
-      // NEW: Use task pipeline API with priorities (NOW/SOON/LATER)
-      const r = await fetch(`${API_BASE_URL}/api/tasks?user_id=${userId}&limit=200`, {
-        method: 'GET',
-        headers: {'Content-Type': 'application/json'},
-      });
-      const data = await r.json();
-      if (!r.ok || !data?.success) {
-        throw new Error(data?.error || `HTTP ${r.status}`);
-      }
-      // Map pipeline tasks to local format
-      const mapped = (data.tasks || []).map((task) => ({
-        id: task._id || uid(),
-        text: task.title || '',
-        status: task.status === 'completed' ? 'done' : task.status === 'in_progress' ? 'in_progress' : 'todo',
-        // NEW: Store pipeline priority (NOW/SOON/LATER)
-        priority: task.priority || 'LATER',
-        priorityScore: task.priority_score || 0,
-        reason: task.reason || '',
-        impact: task.priority_score || 2,
-        effort: 2,
-        source: task.source || 'email',
-        meta: {
-          description: task.reason || '',
-          due_date: task.due_datetime || null,
-          source_ref: task.source_event || '',
-          created_at: task.created_at || '',
-          actions: task.actions || [],
-        },
-        // Store full task for API updates
-        _taskData: task,
-      }));
+      const rows = await fetchSqliteTasks(200);
+      const mapped = rows.map((row) => mapSqliteTaskToUi(row)).filter(Boolean);
       setTodos(mapped);
     } catch (e) {
       setError(e?.message || 'Failed to load tasks');
@@ -135,38 +107,57 @@ export default function TasksPage() {
   const addTodo = async () => {
     const text = (newTodo || '').trim();
     if (!text || !userId) return;
-    
-    try {
-      // Create task via API
-      const r = await fetch(`${API_BASE_URL}/memory/tasks`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          user_id: userId,
-          title: text,
-          status: 'pending',
-          priority: 'medium',
-          source: 'manual',
-        }),
-      });
-      const data = await r.json();
-      if (!r.ok || !data?.success) {
-        throw new Error(data?.error || 'Failed to create task');
-      }
-      
-      // Reload tasks to get the new one
-      await loadTasks();
-      setNewTodo('');
-    } catch (e) {
-      setError(e?.message || 'Failed to add task');
-    }
+
+    const localId = `local-${uid()}`;
+    const pipelineLike = {
+      _id: localId,
+      title: text,
+      status: 'pending',
+      priority: 'LATER',
+      priority_score: 0,
+      reason: '',
+      source: 'manual',
+      due_datetime: null,
+      created_at: new Date().toISOString(),
+      actions: [],
+    };
+    setTodos((prev) => [
+      {
+        id: localId,
+        text,
+        status: 'todo',
+        priority: 'LATER',
+        priorityScore: 0,
+        reason: '',
+        impact: 2,
+        effort: 2,
+        source: 'manual',
+        meta: {
+          description: '',
+          due_date: null,
+          source_ref: '',
+          created_at: pipelineLike.created_at,
+          actions: [],
+        },
+        _taskData: pipelineLike,
+        _sqlite: false,
+        _localOnly: true,
+      },
+      ...prev,
+    ]);
+    setNewTodo('');
   };
 
   const markTaskDone = async (id) => {
     if (!userId) return;
-    
+
+    const task = todos.find((t) => t.id === id);
+    if (task?._sqlite || task?._localOnly || String(id).startsWith('local-')) {
+      setTodos((prev) => prev.map((t) => (t.id === id ? {...t, status: 'done'} : t)));
+      return;
+    }
+
     try {
-      // NEW: Use pipeline complete endpoint
       const r = await fetch(`${API_BASE_URL}/api/tasks/${id}/complete`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -176,8 +167,7 @@ export default function TasksPage() {
       if (!r.ok || !data?.success) {
         throw new Error(data?.error || 'Failed to complete task');
       }
-      
-      // Reload tasks
+
       await loadTasks();
     } catch (e) {
       setError(e?.message || 'Failed to complete task');
@@ -186,11 +176,10 @@ export default function TasksPage() {
 
   const cycleStatus = async (id) => {
     if (!userId) return;
-    
+
     const task = todos.find((t) => t.id === id);
     if (!task || !task._taskData) return;
-    
-    // Map UI status to API status
+
     const statusMap = {
       todo: 'pending',
       in_progress: 'in_progress',
@@ -201,13 +190,27 @@ export default function TasksPage() {
       in_progress: 'completed',
       done: 'pending',
     };
-    
+
     const currentStatus = task.status;
     const nextStatus = nextStatusMap[currentStatus] || 'pending';
     const apiStatus = statusMap[nextStatus] || 'pending';
-    
+
+    if (task._sqlite || task._localOnly || String(id).startsWith('local-')) {
+      setTodos((prev) =>
+        prev.map((t) =>
+          t.id === id
+            ? {
+                ...t,
+                status: nextStatus,
+                _taskData: {...t._taskData, status: apiStatus},
+              }
+            : t
+        )
+      );
+      return;
+    }
+
     try {
-      // Use legacy endpoint for status cycling (fallback for old tasks)
       const r = await fetch(`${API_BASE_URL}/memory/tasks/${id}`, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
@@ -219,8 +222,7 @@ export default function TasksPage() {
       if (!r.ok || !data?.success) {
         throw new Error(data?.error || 'Failed to update task');
       }
-      
-      // Reload tasks to get updated status
+
       await loadTasks();
     } catch (e) {
       setError(e?.message || 'Failed to update task');
@@ -248,7 +250,10 @@ export default function TasksPage() {
         {/* NEW: Priority Groups (NOW/SOON/LATER) */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>📋 Prioritized Tasks</Text>
-          <Text style={styles.cardHint}>Auto-prioritized by urgency, sender VIP, and deadline. Tap to mark done.</Text>
+          <Text style={styles.cardHint}>
+            Tasks load from the core SQLite store (GET /debug/sql/tasks). New tasks and status changes stay on this device
+            until the legacy task API is wired back up.
+          </Text>
 
           {!userId ? (
             <View style={styles.banner}>

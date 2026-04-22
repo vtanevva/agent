@@ -1,0 +1,121 @@
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+# Core SQLite + webhooks Flask API.
+# Run from repo root: `python server.py core`  (recommended), or `cd backend && python core_app.py`.
+# Gunicorn (see start.sh, cwd=backend): `gunicorn core_app:app`
+BACKEND_DIR = Path(__file__).resolve().parent
+REPO_ROOT = BACKEND_DIR.parent
+# Repo root must precede backend/ so `integrations.grafik` resolves to repo `integrations/`
+# (not `backend/integrations`, which is LLM-only). Backend dir is still needed for `api`, `storage`, …
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from flask import Flask, jsonify, make_response, request, send_from_directory
+
+from api.routes.slack import slack_bp
+from api.routes.slack_interactive import slack_interactive_bp
+from api.routes.gmail import gmail_bp
+from api.routes.gmail_watch import gmail_watch_bp
+from api.routes.action_items import action_items_bp
+from api.routes.chat_api import chat_api_bp
+from api.routes.gmail_reply_routes import gmail_reply_bp
+from api.routes.webhooks import webhooks_bp
+from api.routes.debug import debug_bp
+from api.routes.classification_debug import classify_bp
+from api.routes.debug_sql import sql_debug_bp
+from api.routes.context import context_bp
+from api.routes.metrics import metrics_bp
+from api.routes.google_oauth import google_oauth_bp
+from api.routes.recent_messages import recent_messages_bp
+from storage.sqlite_db import init_sqlite
+from utils.logger import get_logger
+
+
+log = get_logger("backend")
+
+
+def create_app():
+    _backend_dir = Path(__file__).resolve().parent
+    flask_app = Flask(
+        __name__,
+        static_folder=str(_backend_dir / "static"),
+        static_url_path="/static",
+    )
+    # Required for /google/auth → Google → /google/oauth2callback (OAuth state in session).
+    flask_app.secret_key = (os.getenv("FLASK_SECRET_KEY") or "dev-only-change-FLASK_SECRET_KEY").strip()
+    init_sqlite()
+
+    _waitlist_dir = _backend_dir / "static" / "waitlist"
+
+    @flask_app.get("/health")
+    def health():
+        return jsonify({"status": "ok"}), 200
+
+    @flask_app.get("/waitlist-admin")
+    @flask_app.get("/waitlist-admin/")
+    def waitlist_admin_login():
+        """Static waitlist admin login (expects /api/waitlist/* when those routes exist)."""
+        return send_from_directory(_waitlist_dir, "admin_login.html")
+
+    @flask_app.get("/waitlist-admin/dashboard")
+    def waitlist_admin_dashboard():
+        return send_from_directory(_waitlist_dir, "admin.html")
+
+    flask_app.register_blueprint(slack_bp)
+    flask_app.register_blueprint(slack_interactive_bp)
+    flask_app.register_blueprint(gmail_bp)
+    flask_app.register_blueprint(gmail_watch_bp)
+    flask_app.register_blueprint(action_items_bp)
+    flask_app.register_blueprint(chat_api_bp)
+    flask_app.register_blueprint(gmail_reply_bp)
+    flask_app.register_blueprint(webhooks_bp)
+    flask_app.register_blueprint(debug_bp)
+    flask_app.register_blueprint(classify_bp)
+    flask_app.register_blueprint(sql_debug_bp)
+    flask_app.register_blueprint(context_bp)
+    flask_app.register_blueprint(metrics_bp)
+    flask_app.register_blueprint(google_oauth_bp)
+    flask_app.register_blueprint(recent_messages_bp)
+
+    @flask_app.before_request
+    def _cors_preflight():
+        if request.method == "OPTIONS":
+            r = make_response("", 204)
+            r.headers["Access-Control-Allow-Origin"] = "*"
+            r.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Webhook-Secret"
+            r.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+            return r
+
+    @flask_app.before_request
+    def _log_request():
+        log.info(f"[HTTP] {request.method} {request.path}")
+
+    @flask_app.after_request
+    def _log_response(resp):
+        log.info(f"[HTTP] {request.method} {request.path} -> {resp.status_code}")
+        # Allow Expo web (different port) to call this local backend.
+        resp.headers.setdefault("Access-Control-Allow-Origin", "*")
+        resp.headers.setdefault("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Webhook-Secret")
+        resp.headers.setdefault("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        return resp
+
+    return flask_app
+
+
+# WSGI entry for gunicorn (cwd must be backend/): `gunicorn core_app:app`
+app = create_app()
+
+if __name__ == "__main__":
+    log.info(f"Starting backend Flask on :5000 pid={os.getpid()} exe={sys.executable}")
+    # Bind to 0.0.0.0 so Expo devices/emulators can reach it via LAN IP.
+    app.run(host="0.0.0.0", port=5000, debug=False)

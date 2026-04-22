@@ -30,6 +30,10 @@ export default function ContactDetailPage() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({user_id: userId, email: contact.email}),
       });
+      if (!r.ok) {
+        setContactData(null);
+        return;
+      }
       const data = await r.json();
       if (data?.success) {
         setContactData(data);
@@ -54,6 +58,10 @@ export default function ContactDetailPage() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({user_id: userId, email: contact.email, limit: 50}),
       });
+      if (!r.ok) {
+        setPastConversations([]);
+        return;
+      }
       const data = await r.json();
       if (data?.success) {
         setPastConversations(data.conversations || []);

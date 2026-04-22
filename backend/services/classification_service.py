@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Optional, Tuple
 
 from services.classifier_ai import classify
@@ -7,6 +8,17 @@ from services.classification_context import build_classification_input
 from utils.logger import get_logger
 
 log = get_logger("classification_service")
+
+
+def _log_text_chunk(text: str, *, limit: int = 480) -> str:
+    """Avoid multi‑KB log lines (PII + noise). Set CLASSIFY_LOG_FULL_TEXT=1 for full ``repr``."""
+    if (os.getenv("CLASSIFY_LOG_FULL_TEXT") or "").strip().lower() in {"1", "true", "yes"}:
+        return repr(text)
+    raw = text if isinstance(text, str) else str(text)
+    one_line = raw.replace("\r", " ").replace("\n", " ").strip()
+    if len(one_line) <= limit:
+        return repr(one_line)
+    return repr(one_line[:limit] + "…")
 
 
 def allowed_reply_type(value: Any) -> str:
@@ -41,14 +53,16 @@ def classify_and_enrich(
         project_context=project_context,
     )
 
-    log.info(f"[CLASSIFY_INPUT_RAW:{source}] source_id={source_id} text={repr(raw_text)}")
+    log.info(
+        f"[CLASSIFY_INPUT_RAW:{source}] source_id={source_id} text={_log_text_chunk(raw_text)}"
+    )
     log.info(
         f"[CLASSIFY_INPUT_CLEAN:{source}] source_id={source_id} "
-        f"text={repr(text_for_classification or raw_text)}"
+        f"text={_log_text_chunk(text_for_classification or raw_text)}"
     )
     log.info(
         f"[CLASSIFY_INPUT_CONTEXT:{source}] source_id={source_id} "
-        f"text={repr(classification_input)}"
+        f"text={_log_text_chunk(classification_input)}"
     )
 
     classification = classify(

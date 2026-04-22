@@ -125,7 +125,23 @@ export default function ChatPage() {
   // Check email provider connections (Gmail and Outlook)
   const checkEmailConnections = useCallback(async () => {
     if (!userId) return;
-    
+
+    const applyGoogleProfile = async () => {
+      const r2 = await fetch(`${API_BASE_URL}/api/google-profile`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({user_id: userId}),
+      });
+      if (!r2.ok) return false;
+      const p = await r2.json();
+      const email = p?.email ?? null;
+      setGoogleConnected(!!email);
+      setGoogleEmail(email);
+      setOutlookConnected(false);
+      setOutlookEmail(null);
+      return true;
+    };
+
     try {
       const url = `${API_BASE_URL}/api/email-connections`;
       const r = await fetch(url, {
@@ -133,20 +149,23 @@ export default function ChatPage() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({user_id: userId}),
       });
-      
+
+      if (r.ok) {
+        const data = await r.json();
+        setGoogleConnected(data.gmail_connected || false);
+        setGoogleEmail(data.gmail_email || null);
+        setOutlookConnected(data.outlook_connected || false);
+        setOutlookEmail(data.outlook_email || null);
+        return;
+      }
+
+      if (r.status === 404 && (await applyGoogleProfile())) {
+        return;
+      }
+
       if (!r.ok) {
         throw new Error(`HTTP error! status: ${r.status}`);
       }
-      
-      const data = await r.json();
-      
-      // Update Gmail status
-      setGoogleConnected(data.gmail_connected || false);
-      setGoogleEmail(data.gmail_email || null);
-      
-      // Update Outlook status
-      setOutlookConnected(data.outlook_connected || false);
-      setOutlookEmail(data.outlook_email || null);
     } catch (e) {
       console.error('Error checking email connections:', e);
       setGoogleConnected(false);
@@ -681,10 +700,22 @@ export default function ChatPage() {
                 ) : (
                   <TouchableOpacity
                     onPress={async () => {
-                      const expoRedirect = Platform.OS === 'web' 
-                        ? (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8081')
-                        : 'exp://localhost:8081';
+                      const expoRedirect =
+                        Platform.OS === 'web' && typeof window !== 'undefined'
+                          ? `${window.location.origin}${window.location.pathname || '/'}`
+                          : 'exp://localhost:8081';
                       const authUrl = `${API_BASE_URL}/google/auth/${encodeURIComponent(userId)}?expo_app=true&expo_redirect=${encodeURIComponent(expoRedirect)}`;
+                      try {
+                        if (typeof sessionStorage !== 'undefined' && userId) {
+                          sessionStorage.setItem('pending_oauth_username', String(userId).toLowerCase());
+                        }
+                      } catch {
+                        /* ignore */
+                      }
+                      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                        window.location.assign(authUrl);
+                        return;
+                      }
                       const canOpen = await Linking.canOpenURL(authUrl);
                       if (canOpen) {
                         await Linking.openURL(authUrl);

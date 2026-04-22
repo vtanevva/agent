@@ -73,12 +73,12 @@ The User Awareness system enables Aivis to respond like a real assistant who kno
 4. **Run two processes** (core API and AI are separate):
    ```bash
    # Terminal 1 — orchestrator + LLM (default http://127.0.0.1:5055)
-   python ai_chat_server.py
+   python server.py ai
 
    # Terminal 2 — SQLite, webhooks, HTTP API including POST /api/chat
-   cd backend
-   python app.py
+   python server.py core
    ```
+   (Equivalent: `python backend/ai_app.py` and `cd backend && python core_app.py`.)
 
    - Core API: `http://localhost:5000` (set `PORT` with gunicorn / `start.sh`).
    - AI service: `http://localhost:5055` (set `AI_CHAT_PORT` or use `./start-ai.sh`).
@@ -157,8 +157,9 @@ mental/
 ├── docs/
 │   ├── USER_AWARENESS.md
 │   └── RUNBOOK_USER_AWARENESS.md
-├── ai_chat_server.py        # AI chat service (Flask; orchestrator, port 5055)
-├── backend/app.py           # Core API (Flask)
+├── server.py                # Dev launcher: `python server.py core|ai`
+├── backend/core_app.py      # Core API (Flask); gunicorn: `core_app:app` (cwd backend/)
+├── backend/ai_app.py        # AI chat service (Flask); gunicorn: `backend.ai_app:app` (cwd repo root)
 └── requirements.txt
 ```
 

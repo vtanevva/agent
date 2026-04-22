@@ -11,7 +11,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from uuid import uuid4
 
-from app.config import Config
+from .runtime_paths import Config, get_user_email
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,6 @@ class VectorStore:
         
         # Fallback to email
         try:
-            from app.utils.user_email_utils import get_user_email
             namespace = get_user_email(user_id)
             logger.debug(f"Using email namespace for {user_id}: {namespace}")
             return namespace
@@ -180,7 +179,6 @@ class VectorStore:
         
         try:
             # Get user email for namespace (fallback to user_id if email not available)
-            from app.utils.user_email_utils import get_user_email
             namespace = get_user_email(user_id)
             
             embedding_service = self._get_embedding_service()

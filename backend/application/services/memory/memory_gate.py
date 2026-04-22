@@ -14,7 +14,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 
-from app.config import Config
+from .runtime_paths import Config
 from .models import FactType
 
 logger = logging.getLogger(__name__)

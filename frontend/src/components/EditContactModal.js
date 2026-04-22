@@ -32,6 +32,10 @@ export default function EditContactModal({visible, onClose, userId, contact}) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({user_id: userId, email, name, nickname, groups: parsedGroups}),
       });
+      if (!r.ok) {
+        onClose(false);
+        return;
+      }
       const data = await r.json();
       if (data?.success) {
         onClose(true, data.contact);

@@ -1,5 +1,5 @@
 """
-Compatibility wrapper: keep backend/app.py imports stable.
+Compatibility wrapper: keep backend/core_app.py imports stable.
 """
 
 from api.routes.sql_debug import sql_debug_bp

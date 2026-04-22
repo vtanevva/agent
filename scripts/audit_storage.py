@@ -24,8 +24,8 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
-from app.config import Config
-from app.database import DatabaseManager
+from backend.config import Config
+from backend.database import DatabaseManager
 
 load_dotenv()
 

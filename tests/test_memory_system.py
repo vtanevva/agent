@@ -47,7 +47,7 @@ class TestDocumentChunking:
     
     def test_chunk_text_basic(self):
         """Test basic text chunking"""
-        from app.memory.ingestion_service import IngestionService
+        from backend.application.services.memory.ingestion_service import IngestionService
         
         service = IngestionService()
         service.chunk_size = 50  # Small for testing
@@ -61,7 +61,7 @@ class TestDocumentChunking:
     
     def test_chunk_text_overlap(self):
         """Test that chunks have overlap"""
-        from app.memory.ingestion_service import IngestionService
+        from backend.application.services.memory.ingestion_service import IngestionService
         
         service = IngestionService()
         service.chunk_size = 100
@@ -79,10 +79,11 @@ class TestDocumentChunking:
 class TestMemoryGate:
     """Test fact extraction and curation"""
     
-    @patch('app.memory.memory_gate.MemoryGate._get_llm_service')
+    @patch('backend.application.services.memory.memory_gate.MemoryGate._get_llm_service')
     def test_extract_candidate_facts(self, mock_llm):
         """Test fact extraction from text"""
-        from app.memory.memory_gate import MemoryGate, CandidateFact, FactType
+        from backend.application.services.memory.memory_gate import MemoryGate, CandidateFact
+        from backend.application.services.memory.models import FactType
         
         # Mock LLM response
         mock_service = Mock()
@@ -104,7 +105,8 @@ class TestMemoryGate:
     
     def test_should_store_fact_confidence(self):
         """Test fact validation by confidence"""
-        from app.memory.memory_gate import MemoryGate, CandidateFact, FactType
+        from backend.application.services.memory.memory_gate import MemoryGate, CandidateFact
+        from backend.application.services.memory.models import FactType
         
         gate = MemoryGate()
         
@@ -126,7 +128,8 @@ class TestMemoryGate:
     
     def test_deduplicate_facts(self):
         """Test fact deduplication"""
-        from app.memory.memory_gate import MemoryGate, CandidateFact, FactType
+        from backend.application.services.memory.memory_gate import MemoryGate, CandidateFact
+        from backend.application.services.memory.models import FactType
         
         gate = MemoryGate()
         
@@ -161,12 +164,12 @@ class TestMemoryGate:
 class TestMessageIngestion:
     """Test message ingestion"""
     
-    @patch('app.memory.ingestion_service.get_messages_collection')
-    @patch('app.memory.ingestion_service.get_vector_store')
+    @patch('backend.application.services.memory.ingestion_service.get_messages_collection')
+    @patch('backend.application.services.memory.ingestion_service.get_vector_store')
     def test_ingest_message_basic(self, mock_vector_store, mock_collection):
         """Test basic message ingestion"""
-        from app.memory.ingestion_service import IngestionService
-        from app.memory.models import MessageDirection
+        from backend.application.services.memory.ingestion_service import IngestionService
+        from backend.application.services.memory.models import MessageDirection
         
         # Mock MongoDB collection
         mock_col = Mock()
@@ -197,10 +200,10 @@ class TestMessageIngestion:
 class TestRetrievalService:
     """Test context retrieval"""
     
-    @patch('app.memory.retrieval_service.get_memory_facts_collection')
+    @patch('backend.application.services.memory.retrieval_service.get_memory_facts_collection')
     def test_retrieve_facts_by_confidence(self, mock_collection):
         """Test retrieving facts by confidence"""
-        from app.memory.retrieval_service import RetrievalService
+        from backend.application.services.memory.retrieval_service import RetrievalService
         
         # Mock facts
         mock_col = Mock()
@@ -216,10 +219,10 @@ class TestRetrievalService:
         assert len(facts) == 2
         assert facts[0]["confidence"] >= 0.5
     
-    @patch('app.memory.retrieval_service.get_messages_collection')
+    @patch('backend.application.services.memory.retrieval_service.get_messages_collection')
     def test_get_recent_messages(self, mock_collection):
         """Test retrieving recent messages"""
-        from app.memory.retrieval_service import RetrievalService
+        from backend.application.services.memory.retrieval_service import RetrievalService
         
         # Mock messages
         mock_col = Mock()
@@ -234,12 +237,12 @@ class TestRetrievalService:
         
         assert len(messages) == 2
     
-    @patch('app.memory.retrieval_service.get_memory_facts_collection')
-    @patch('app.memory.retrieval_service.get_thread_summaries_collection')
-    @patch('app.memory.retrieval_service.get_messages_collection')
+    @patch('backend.application.services.memory.retrieval_service.get_memory_facts_collection')
+    @patch('backend.application.services.memory.retrieval_service.get_thread_summaries_collection')
+    @patch('backend.application.services.memory.retrieval_service.get_messages_collection')
     def test_retrieve_context_bundle(self, mock_msgs, mock_summaries, mock_facts):
         """Test retrieving complete context bundle"""
-        from app.memory.retrieval_service import RetrievalService, ContextBundle
+        from backend.application.services.memory.retrieval_service import RetrievalService, ContextBundle
         
         # Mock collections
         mock_facts_col = Mock()
@@ -270,8 +273,8 @@ class TestPromptBuilder:
     
     def test_build_system_prompt(self):
         """Test building system prompt with context"""
-        from app.memory.prompt_builder import PromptBuilder
-        from app.memory.retrieval_service import ContextBundle
+        from backend.application.services.memory.prompt_builder import PromptBuilder
+        from backend.application.services.memory.retrieval_service import ContextBundle
         
         bundle = ContextBundle(
             user_id=SAMPLE_USER_ID,
@@ -290,8 +293,8 @@ class TestPromptBuilder:
     
     def test_build_messages_with_context(self):
         """Test building OpenAI messages with context"""
-        from app.memory.prompt_builder import PromptBuilder
-        from app.memory.retrieval_service import ContextBundle
+        from backend.application.services.memory.prompt_builder import PromptBuilder
+        from backend.application.services.memory.retrieval_service import ContextBundle
         
         bundle = ContextBundle(
             user_id=SAMPLE_USER_ID,
@@ -319,10 +322,10 @@ class TestPromptBuilder:
 class TestUserIsolation:
     """Test that user data is properly isolated"""
     
-    @patch('app.memory.retrieval_service.get_memory_facts_collection')
+    @patch('backend.application.services.memory.retrieval_service.get_memory_facts_collection')
     def test_facts_filtered_by_user(self, mock_collection):
         """Test that facts are filtered by user_id"""
-        from app.memory.retrieval_service import RetrievalService
+        from backend.application.services.memory.retrieval_service import RetrievalService
         
         mock_col = Mock()
         mock_col.find.return_value.sort.return_value.limit.return_value = []
@@ -335,11 +338,11 @@ class TestUserIsolation:
         call_args = mock_col.find.call_args
         assert call_args[0][0]["user_id"] == "user-123"
     
-    @patch('app.memory.vector_store.VectorStore.initialize')
-    @patch('app.memory.vector_store.VectorStore._get_embedding_service')
+    @patch('backend.application.services.memory.vector_store.VectorStore.initialize')
+    @patch('backend.application.services.memory.vector_store.VectorStore._get_embedding_service')
     def test_vector_search_uses_namespace(self, mock_embed, mock_init):
         """Test that vector search uses user_id as namespace"""
-        from app.memory.vector_store import VectorStore
+        from backend.application.services.memory.vector_store import VectorStore
         
         mock_init.return_value = True
         
@@ -369,23 +372,30 @@ class TestUserIsolation:
 
 class TestAPIEndpoints:
     """Test API endpoints (integration-style)"""
-    
+
     @pytest.fixture
     def client(self):
-        """Create test Flask client"""
-        from server import create_app
-        app = create_app()
-        app.config['TESTING'] = True
-        with app.test_client() as client:
+        """Create test Flask client for the core backend app."""
+        import sys
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        backend = root / "backend"
+        for p in (str(root), str(backend)):
+            if p not in sys.path:
+                sys.path.insert(0, p)
+        from backend.core_app import create_app
+
+        flask_app = create_app()
+        flask_app.config["TESTING"] = True
+        with flask_app.test_client() as client:
             yield client
-    
+
     def test_health_endpoint(self, client):
-        """Test memory health endpoint"""
-        response = client.get('/memory/health')
+        response = client.get("/health")
         assert response.status_code == 200
         data = response.get_json()
-        assert data["success"] == True
-        assert "components" in data
+        assert data.get("status") == "ok"
 
 
 # Run tests

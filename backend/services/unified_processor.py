@@ -394,13 +394,19 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
         project_confidence = project_confidence if project_confidence is not None else confidence
         needs_project_review = bool(needs_project_review or needs_review)
 
-    project_context = get_project_context(int(project_id)) if project_id else None
-
-    # 2b) Continuity context (Phase 8B) — gather recent relevant context
-    continuity_context = build_continuity_context(
-        client_id=int(client_id) if client_id else None,
-        project_id=int(project_id) if project_id else None,
-    )
+    # GmailAgent sends app chat as synthetic ``gmail_chat`` ingest. Do not attach the default
+    # Email/General SQLite project_context (often huge unrelated marketing/thread text) to the
+    # classifier or continuity — only the user's chat line should matter.
+    is_chat_delegate = source == "gmail_chat"
+    if is_chat_delegate:
+        project_context = None
+        continuity_context = build_continuity_context(client_id=None, project_id=None)
+    else:
+        project_context = get_project_context(int(project_id)) if project_id else None
+        continuity_context = build_continuity_context(
+            client_id=int(client_id) if client_id else None,
+            project_id=int(project_id) if project_id else None,
+        )
     continuity_summary = (continuity_context or {}).get("summary") or {}
     log.info(
         f"[CONTINUITY_CONTEXT:{source}] source_id={source_id} "
@@ -445,11 +451,20 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
     project_update_candidate = extract_project_updates(text_for_classification or raw_text)
     follow_up_candidate = detect_follow_up_candidate(text_for_classification or raw_text)
 
-    project_context_update_result = update_project_context_from_candidate(
-        int(project_id) if project_id else None,
-        project_update_candidate,
-        updated_by=source,
-    )
+    if is_chat_delegate:
+        project_context_update_result = {
+            "updated": False,
+            "changed_fields": [],
+            "skipped_reason": "gmail_chat_synthetic",
+            "before": None,
+            "after": None,
+        }
+    else:
+        project_context_update_result = update_project_context_from_candidate(
+            int(project_id) if project_id else None,
+            project_update_candidate,
+            updated_by=source,
+        )
 
     if project_context_update_result.get("updated"):
         project_context = get_project_context(int(project_id)) if project_id else project_context

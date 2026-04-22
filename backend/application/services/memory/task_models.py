@@ -11,6 +11,8 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from enum import Enum
 
+from .runtime_paths import get_db
+
 
 class EventSource(str, Enum):
     """Source of events"""
@@ -57,7 +59,6 @@ class StakeType(str, Enum):
 
 def get_events_collection():
     """Get events collection (raw inputs from sources)"""
-    from app.database import get_db
     db = get_db()
     if db.is_connected and db.db is not None:
         return db.db["events"]
@@ -66,7 +67,6 @@ def get_events_collection():
 
 def get_task_candidates_collection():
     """Get task_candidates collection (LLM outputs)"""
-    from app.database import get_db
     db = get_db()
     if db.is_connected and db.db is not None:
         return db.db["task_candidates"]
@@ -75,7 +75,6 @@ def get_task_candidates_collection():
 
 def get_aivis_tasks_collection():
     """Get aivis_tasks collection (prioritized user-facing tasks)"""
-    from app.database import get_db
     db = get_db()
     if db.is_connected and db.db is not None:
         return db.db["aivis_tasks"]
@@ -127,7 +126,6 @@ AIVIS_TASK_SCHEMA = {
 
 def ensure_task_pipeline_indexes():
     """Create indexes for task pipeline collections"""
-    from app.database import get_db
     import logging
     
     logger = logging.getLogger(__name__)

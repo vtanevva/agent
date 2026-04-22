@@ -1,7 +1,7 @@
 """
 Application-layer memory / RAG context.
 
-Implementation lives in ``backend.application.services.memory`` (migrated from ``app.memory``).
+Implementation lives in ``backend.application.services.memory``.
 """
 
 from __future__ import annotations

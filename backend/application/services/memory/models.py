@@ -14,6 +14,8 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from enum import Enum
 
+from .runtime_paths import get_db
+
 
 class MessageDirection(str, Enum):
     """Direction of message flow"""
@@ -47,7 +49,6 @@ class DocumentPermission(str, Enum):
 # MongoDB collection helpers
 def get_users_collection():
     """Get users collection"""
-    from app.database import get_db
     db = get_db()
     if db.is_connected and db.db is not None:
         return db.db["users"]
@@ -56,7 +57,6 @@ def get_users_collection():
 
 def get_messages_collection():
     """Get messages collection"""
-    from app.database import get_db
     db = get_db()
     if db.is_connected and db.db is not None:
         return db.db["messages"]
@@ -65,7 +65,6 @@ def get_messages_collection():
 
 def get_memory_facts_collection():
     """Get memory_facts collection"""
-    from app.database import get_db
     db = get_db()
     if db.is_connected and db.db is not None:
         return db.db["memory_facts"]
@@ -74,7 +73,6 @@ def get_memory_facts_collection():
 
 def get_thread_summaries_collection():
     """Get thread_summaries collection"""
-    from app.database import get_db
     db = get_db()
     if db.is_connected and db.db is not None:
         return db.db["thread_summaries"]
@@ -83,7 +81,6 @@ def get_thread_summaries_collection():
 
 def get_documents_collection():
     """Get documents collection"""
-    from app.database import get_db
     db = get_db()
     if db.is_connected and db.db is not None:
         return db.db["documents"]
@@ -92,7 +89,6 @@ def get_documents_collection():
 
 def get_document_chunks_collection():
     """Get document_chunks collection"""
-    from app.database import get_db
     db = get_db()
     if db.is_connected and db.db is not None:
         return db.db["document_chunks"]
@@ -101,7 +97,6 @@ def get_document_chunks_collection():
 
 def get_preferences_collection():
     """Get preferences collection"""
-    from app.database import get_db
     db = get_db()
     if db.is_connected and db.db is not None:
         return db.db["preferences"]
@@ -110,7 +105,6 @@ def get_preferences_collection():
 
 def get_projects_collection():
     """Get projects collection"""
-    from app.database import get_db
     db = get_db()
     if db.is_connected and db.db is not None:
         return db.db["projects"]
@@ -119,7 +113,6 @@ def get_projects_collection():
 
 def get_tasks_collection():
     """Get tasks collection (unified, not just email)"""
-    from app.database import get_db
     db = get_db()
     if db.is_connected and db.db is not None:
         return db.db["tasks"]
@@ -128,7 +121,6 @@ def get_tasks_collection():
 
 def get_truth_ledger_collection():
     """Get truth_ledger collection"""
-    from app.database import get_db
     db = get_db()
     if db.is_connected and db.db is not None:
         return db.db["truth_ledger"]
@@ -137,7 +129,6 @@ def get_truth_ledger_collection():
 
 def get_relationships_collection():
     """Get relationships collection (legacy - contact-centric structure)"""
-    from app.database import get_db
     db = get_db()
     if db.is_connected and db.db is not None:
         return db.db["relationships"]
@@ -146,7 +137,6 @@ def get_relationships_collection():
 
 def get_project_contact_relationships_collection():
     """Get project-contact relationships collection (new structure)"""
-    from app.database import get_db
     db = get_db()
     if db.is_connected and db.db is not None:
         return db.db["project_contact_relationships"]
@@ -155,7 +145,6 @@ def get_project_contact_relationships_collection():
 
 def ensure_indexes():
     """Create indexes for all memory collections"""
-    from app.database import get_db
     import logging
     
     logger = logging.getLogger(__name__)

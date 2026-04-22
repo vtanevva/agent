@@ -13,7 +13,7 @@ This directory contains examples showing how to integrate the User Awareness mem
 The easiest way to add memory to your chat:
 
 ```python
-from app.memory.prompt_builder import build_context_aware_messages
+from backend.application.services.memory.prompt_builder import build_context_aware_messages
 
 messages = build_context_aware_messages(
     user_id=user_id,
@@ -29,9 +29,10 @@ response = llm_service.call_llm(messages=messages)
 For when you need more control over context retrieval:
 
 ```python
-from app.memory.retrieval_service import get_retrieval_service
-from app.memory.prompt_builder import PromptBuilder
+from backend.application.services.memory.retrieval_service import get_retrieval_service
+from backend.application.services.memory.prompt_builder import PromptBuilder
 
+retrieval_service = get_retrieval_service()
 # Retrieve context
 bundle = retrieval_service.retrieve_context(
     user_id=user_id,
@@ -165,7 +166,7 @@ curl -X POST http://localhost:5000/documents/ask \
 
 ```python
 # Debug: Check what context is available
-from app.memory.retrieval_service import get_retrieval_service
+from backend.application.services.memory.retrieval_service import get_retrieval_service
 
 bundle = get_retrieval_service().retrieve_context(
     user_id="test-user",
@@ -182,7 +183,7 @@ print(f"Messages: {len(bundle.recent_messages)}")
 
 ```python
 # Debug: Manually extract facts
-from app.memory.memory_gate import get_memory_gate
+from backend.application.services.memory.memory_gate import get_memory_gate
 
 gate = get_memory_gate()
 candidates = gate.extract_candidate_facts(
@@ -199,7 +200,7 @@ for c in candidates:
 
 ```python
 # Check token count before calling LLM
-from app.memory.prompt_builder import PromptBuilder
+from backend.application.services.memory.prompt_builder import PromptBuilder
 
 builder = PromptBuilder()
 token_count = builder.estimate_token_count(bundle)

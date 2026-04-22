@@ -60,6 +60,11 @@ Category:"""
         )
         intent = response.strip().lower()
         if intent in {"email", "slack", "general"}:
+            # LLM often returns "general" for read-only inbox questions; keyword override fixes routing.
+            if intent == "general" and any(k in text for k in EMAIL_KEYWORDS):
+                return "email"
+            if intent == "general" and any(k in text for k in SLACK_KEYWORDS):
+                return "slack"
             return intent  # type: ignore[return-value]
     except Exception as e:
         logger.warning("LLM intent detection failed: %s", e)

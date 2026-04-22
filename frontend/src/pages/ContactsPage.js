@@ -28,6 +28,10 @@ export default function ContactsPage() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({user_id: userId}),
       });
+      if (!r.ok) {
+        setGroups([]);
+        return;
+      }
       const data = await r.json();
       if (data?.success) setGroups(data.groups || []);
     } catch {}
@@ -42,6 +46,10 @@ export default function ContactsPage() {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({user_id: userId}),
       });
+      if (!r.ok) {
+        setContacts([]);
+        return;
+      }
       const data = await r.json();
       const have = (data?.contacts || []).length > 0;
       if (data?.success && have) {
@@ -61,9 +69,11 @@ export default function ContactsPage() {
               headers: {'Content-Type': 'application/json'},
               body: JSON.stringify({user_id: userId}),
             });
-            const d3 = await r3.json();
-            if (d3?.success) {
-              setContacts(d3.contacts || []);
+            if (r3.ok) {
+              const d3 = await r3.json();
+              if (d3?.success) {
+                setContacts(d3.contacts || []);
+              }
             }
             await loadGroups();
           } catch {}
@@ -81,8 +91,12 @@ export default function ContactsPage() {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({user_id: userId}),
           });
-          const d2 = await r2.json();
-          setContacts(d2?.contacts || []);
+          if (r2.ok) {
+            const d2 = await r2.json();
+            setContacts(d2?.contacts || []);
+          } else {
+            setContacts([]);
+          }
         } catch {
           setContacts([]);
         }

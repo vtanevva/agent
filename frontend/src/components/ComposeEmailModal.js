@@ -3,7 +3,7 @@ import {Modal, View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoi
 import {LinearGradient} from 'expo-linear-gradient';
 import {colors} from '../styles/colors';
 import {commonStyles} from '../styles/commonStyles';
-import {API_BASE_URL} from '../config/api';
+import {CORE_BACKEND_URL} from '../config/api';
 
 export default function ComposeEmailModal({visible, onClose, userId, initialTo, initialSubject, initialBody}) {
   const [to, setTo] = useState('');
@@ -48,7 +48,11 @@ export default function ComposeEmailModal({visible, onClose, userId, initialTo, 
           generate_subject: true,
         }),
       });
-      const data = await r.json();
+      const data = await r.json().catch(() => ({}));
+      if (r.status === 404) {
+        setError('Rewrite is not available on this server (no /api/gmail/rewrite).');
+        return;
+      }
       if (data?.success && data.rewritten) {
         setBody(data.rewritten);
         if (data.subject && !subject.trim()) {
@@ -72,13 +76,17 @@ export default function ComposeEmailModal({visible, onClose, userId, initialTo, 
     setSending(true);
     setError(null);
     try {
-      const r = await fetch(`${API_BASE_URL}/api/gmail/send`, {
+      const r = await fetch(`${CORE_BACKEND_URL}/api/gmail/send`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({user_id: userId, to, subject, body}),
       });
       
-      // Check if response is JSON
+      if (r.status === 404) {
+        setError('Send is not available on this server (no /api/gmail/send).');
+        return;
+      }
+
       const contentType = r.headers.get('content-type');
       if (!contentType || !contentType.includes('application/json')) {
         const text = await r.text();
@@ -86,7 +94,7 @@ export default function ComposeEmailModal({visible, onClose, userId, initialTo, 
         console.error('Non-JSON response:', text.substring(0, 200));
         return;
       }
-      
+
       const data = await r.json();
       if (data?.success) {
         onClose(true);

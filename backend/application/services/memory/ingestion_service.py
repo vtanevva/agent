@@ -16,7 +16,7 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 from uuid import uuid4
 
-from app.config import Config
+from .runtime_paths import Config
 from .models import (
     MessageDirection,
     DocumentSource,

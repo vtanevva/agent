@@ -80,7 +80,13 @@ export default function WaitlistPage() {
         }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
+
+      if (response.status === 404 || response.status === 501) {
+        setMessage('Waitlist signup is not enabled on this server (no /api/waitlist/signup route).');
+        setMessageType('error');
+        return;
+      }
 
       if (response.ok && data.success) {
         setMessage('🎉 Successfully joined the waitlist! We\'ll be in touch soon.');

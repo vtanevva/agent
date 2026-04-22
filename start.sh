@@ -9,5 +9,5 @@ cd "$REPO_ROOT/backend"
 PORT="${PORT:-5000}"
 echo "Starting backend on port $PORT"
 
-exec gunicorn app:app --bind "0.0.0.0:$PORT" --workers 1 --timeout 120
+exec gunicorn core_app:app --bind "0.0.0.0:$PORT" --workers 1 --timeout 120
 

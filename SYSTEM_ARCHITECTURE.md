@@ -12,7 +12,7 @@
                               ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         FLASK APPLICATION                                    │
-│                          (backend/app.py)                                    │
+│                        (backend/core_app.py)                                   │
 │                         Port: 5000 (or $PORT)                                │
 │                                                                              │
 │  ┌────────────────────────────────────────────────────────────────────┐    │
@@ -20,7 +20,7 @@
 │  ├────────────────────────────────────────────────────────────────────┤    │
 │  │                                                                      │    │
 │  │  📬 /api/chat                POST    General chat endpoint          │    │
-│  │     └─> routes/chat_api.py → HTTP POST /v1/chat (ai_chat_server.py) │    │
+│  │     └─> routes/chat_api.py → HTTP POST /v1/chat (backend/ai_app.py) │    │
 │  │         separate process :5055, env AI_SERVICE_URL                    │    │
 │  │                                                                      │    │
 │  │  📧 /api/gmail/*             13 endpoints                           │    │
@@ -55,7 +55,7 @@
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                          ORCHESTRATOR                                        │
-│                    (app/agents/orchestrator.py)                              │
+│            (backend/application/orchestrators/ai_chat_orchestrator.py)        │
 │                                                                              │
 │  ┌──────────────────────────────────────────────────────────────────────┐  │
 │  │                      INTENT DETECTION                                 │  │
@@ -85,7 +85,7 @@
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         AGENT LAYER                                          │
-│                    (app/agents/*.py)                                         │
+│              (backend/application/agents/*.py)                               │
 │                                                                              │
 │  ┌────────────────────────────────────────────────────────────────────┐    │
 │  │  🤖 AIVIS CORE AGENT                                                │    │
@@ -147,7 +147,7 @@
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         SERVICES LAYER                                       │
-│                    (app/services/*.py)                                       │
+│         (backend/application/services/*, backend/services/*)                 │
 │                                                                              │
 │  ┌──────────────────────────────────────────────────────────────────┐      │
 │  │  🧠 LLMService (llm_service.py)                                   │      │
@@ -225,7 +225,7 @@
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                      UTILITY LAYER                                           │
-│                    (app/utils/*.py)                                          │
+│                    (backend/utils/*)                                           │
 │                                                                              │
 │  ┌──────────────────────────────────────────────────────────────────┐      │
 │  │  🔧 google_api_helpers.py                                         │      │
@@ -260,7 +260,7 @@
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                      DATABASE LAYER                                          │
-│                    (app/db/collections.py)                                   │
+│                    (backend/storage/sqlite_db.py)                            │
 │                                                                              │
 │  ┌──────────────────────────────────────────────────────────────────┐      │
 │  │  MongoDB Collection Getters                                       │      │

@@ -11,6 +11,7 @@ import {
   Linking,
   AppState,
   Animated,
+  Alert,
 } from 'react-native';
 import {useNavigation, useFocusEffect} from '@react-navigation/native';
 import {LinearGradient} from 'expo-linear-gradient';
@@ -45,6 +46,37 @@ export default function LoginPage() {
     pulse.start();
     return () => pulse.stop();
   }, [pulseOpacity]);
+
+  // Web: full-page OAuth clears JS memory — return URL carries oauth_username; we also stash in sessionStorage.
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const err = params.get('gmail_oauth_error');
+    if (err) {
+      Alert.alert('Google sign-in', err === 'access_denied' ? 'Sign-in was cancelled.' : `Error: ${err}`);
+      window.history.replaceState({}, document.title, window.location.pathname || '/');
+      return;
+    }
+    if (params.get('gmail_oauth') !== '1') return;
+    const u = (
+      params.get('oauth_username') ||
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('pending_oauth_username') : '') ||
+      ''
+    )
+      .trim()
+      .toLowerCase();
+    try {
+      if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem('pending_oauth_username');
+    } catch {
+      /* ignore */
+    }
+    window.history.replaceState({}, document.title, window.location.pathname || '/');
+    if (u) {
+      const sessionId = genSession(u);
+      Alert.alert('Gmail connected', 'Your account is linked. You can use inbox features in Chat.');
+      navigation.replace('Chat', {userId: u, sessionId});
+    }
+  }, [navigation]);
 
   // Check if Google is connected for a user
   const checkGoogleConnection = async (userId) => {
@@ -153,14 +185,26 @@ export default function LoginPage() {
   const handleGoogleAuth = async () => {
     const username = loginName.trim().toLowerCase();
     if (!username) return;
-    
-    // Store username for OAuth return detection
+
     pendingOAuthUsername.current = username;
-    
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem('pending_oauth_username', username);
+      }
+    } catch {
+      /* ignore */
+    }
+
     const authUrl = getGoogleAuthUrl();
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.location.assign(authUrl);
+      return;
+    }
     const canOpen = await Linking.canOpenURL(authUrl);
     if (canOpen) {
       await Linking.openURL(authUrl);
+    } else {
+      Alert.alert('Cannot open browser', 'Try opening this URL manually:\n\n' + authUrl);
     }
   };
 

@@ -6,19 +6,19 @@ to provide context-aware responses.
 """
 
 from flask import Flask, request, jsonify
-from app.memory.prompt_builder import build_context_aware_messages
-from app.memory.ingestion_service import get_ingestion_service
-from app.memory.models import MessageDirection
-from app.services.llm_service import get_llm_service
+from backend.application.services.memory.prompt_builder import build_context_aware_messages
+from backend.application.services.memory.ingestion_service import get_ingestion_service
+from backend.application.services.memory.models import MessageDirection
+from backend.integrations.llm.llm_client import get_llm_service
 
-app = Flask(__name__)
+flask_app = Flask(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════
 # Example 1: Simple Context-Aware Chat
 # ═══════════════════════════════════════════════════════════════════
 
-@app.route('/chat/simple', methods=['POST'])
+@flask_app.route('/chat/simple', methods=['POST'])
 def chat_simple():
     """
     Simple chat endpoint with automatic context injection.
@@ -71,7 +71,7 @@ def chat_simple():
 # Example 2: Advanced Chat with Manual Context Control
 # ═══════════════════════════════════════════════════════════════════
 
-@app.route('/chat/advanced', methods=['POST'])
+@flask_app.route('/chat/advanced', methods=['POST'])
 def chat_advanced():
     """
     Advanced chat with manual control over context retrieval.
@@ -81,8 +81,8 @@ def chat_advanced():
     - Access context components separately
     - Add custom context sources
     """
-    from app.memory.retrieval_service import get_retrieval_service
-    from app.memory.prompt_builder import PromptBuilder
+    from backend.application.services.memory.retrieval_service import get_retrieval_service
+    from backend.application.services.memory.prompt_builder import PromptBuilder
     
     data = request.json
     user_id = data['user_id']
@@ -143,7 +143,7 @@ def chat_advanced():
 # Example 3: WhatsApp Webhook Integration
 # ═══════════════════════════════════════════════════════════════════
 
-@app.route('/webhook/whatsapp', methods=['POST'])
+@flask_app.route('/webhook/whatsapp', methods=['POST'])
 def whatsapp_webhook():
     """
     WhatsApp webhook that uses memory system.
@@ -205,7 +205,7 @@ def whatsapp_webhook():
 # Example 4: Email Draft with Context
 # ═══════════════════════════════════════════════════════════════════
 
-@app.route('/email/draft', methods=['POST'])
+@flask_app.route('/email/draft', methods=['POST'])
 def draft_email_with_context():
     """
     Generate email draft using context from past conversations and documents.
@@ -215,8 +215,8 @@ def draft_email_with_context():
     - System retrieves: facts about John, project docs, past email threads
     - Generates: Personalized email draft
     """
-    from app.memory.retrieval_service import get_retrieval_service
-    from app.memory.prompt_builder import PromptBuilder
+    from backend.application.services.memory.retrieval_service import get_retrieval_service
+    from backend.application.services.memory.prompt_builder import PromptBuilder
     
     data = request.json
     user_id = data['user_id']
@@ -255,7 +255,7 @@ def draft_email_with_context():
 # Example 5: Document Q&A
 # ═══════════════════════════════════════════════════════════════════
 
-@app.route('/documents/ask', methods=['POST'])
+@flask_app.route('/documents/ask', methods=['POST'])
 def ask_document():
     """
     Ask questions about uploaded documents.
@@ -265,8 +265,8 @@ def ask_document():
     2. Retrieve relevant excerpts
     3. Generate answer based on document content
     """
-    from app.memory.retrieval_service import get_retrieval_service
-    from app.memory.prompt_builder import PromptBuilder
+    from backend.application.services.memory.retrieval_service import get_retrieval_service
+    from backend.application.services.memory.prompt_builder import PromptBuilder
     
     data = request.json
     user_id = data['user_id']
@@ -317,7 +317,7 @@ DOCUMENT EXCERPTS:
 # Example 6: Batch Fact Extraction
 # ═══════════════════════════════════════════════════════════════════
 
-@app.route('/admin/extract-facts', methods=['POST'])
+@flask_app.route('/admin/extract-facts', methods=['POST'])
 def batch_extract_facts():
     """
     Admin endpoint to batch extract facts from existing messages.
@@ -326,8 +326,8 @@ def batch_extract_facts():
     - Backfilling facts from old conversations
     - Re-processing after improving extraction logic
     """
-    from app.memory.models import get_messages_collection
-    from app.memory.memory_gate import get_memory_gate
+    from backend.application.services.memory.models import get_messages_collection
+    from backend.application.services.memory.memory_gate import get_memory_gate
     
     data = request.json
     user_id = data['user_id']
@@ -352,7 +352,7 @@ def batch_extract_facts():
         )
         
         # Get existing facts for deduplication
-        from app.memory.models import get_memory_facts_collection
+        from backend.application.services.memory.models import get_memory_facts_collection
         facts_col = get_memory_facts_collection()
         existing = list(facts_col.find(
             {"user_id": user_id, "is_active": True},
@@ -371,5 +371,5 @@ def batch_extract_facts():
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    flask_app.run(debug=True, port=5000)
 
