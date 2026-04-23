@@ -72,5 +72,58 @@ def sessions_log():
     return jsonify({"sessions": list_chat_sessions(user_id=user_id)}), 200
 
 
+@chat_api_bp.post("/api/transcribe")
+def api_transcribe():
+    """
+    Voice-to-text via OpenAI Whisper. Accepts multipart uploads (``file``/``audio``)
+    from expo-av on mobile and web fallbacks. Used by the VoiceChat page so mobile
+    users (where there is no Web Speech API) can speak into the same chat entry
+    point as the keyboard chat (``/api/chat``).
+    """
+    api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        return jsonify({"success": False, "error": "transcription_unavailable"}), 503
+
+    upload = None
+    for key in ("file", "audio", "recording"):
+        if key in request.files:
+            upload = request.files[key]
+            break
+
+    if upload is None and request.data:
+        filename = (request.headers.get("X-Audio-Filename") or "audio.m4a").strip()
+        upload = io.BytesIO(request.data)
+        upload.name = filename  # type: ignore[attr-defined]
+
+    if upload is None:
+        return jsonify({"success": False, "error": "missing_audio"}), 400
+
+    language = (request.form.get("language") or request.args.get("language") or "").strip() or None
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key)
+        stream = upload.stream if hasattr(upload, "stream") else upload
+        filename = getattr(upload, "filename", None) or getattr(upload, "name", "audio.m4a")
+
+        # openai>=1.x expects a tuple (filename, fileobj, content_type) OR a file-like with .name
+        payload = stream.read()
+        fileobj = io.BytesIO(payload)
+        fileobj.name = filename
+        kwargs: dict[str, Any] = {"model": "whisper-1", "file": fileobj}
+        if language:
+            kwargs["language"] = language
+
+        result = client.audio.transcriptions.create(**kwargs)
+        text = getattr(result, "text", None) or (result.get("text") if isinstance(result, dict) else "")
+        text = (text or "").strip()
+    except Exception as e:  # noqa: BLE001 - surfaced to client
+        log.exception("transcribe failed: %s", e)
+        return jsonify({"success": False, "error": "transcribe_failed"}), 500
+
+    return jsonify({"success": True, "text": text}), 200
+
+
 __all__ = ["chat_api_bp"]
 

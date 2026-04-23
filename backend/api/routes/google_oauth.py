@@ -124,8 +124,13 @@ def google_auth_start(username: str):
                 {
                     "error": "missing_credentials_json",
                     "path": str(cred_path),
-                    "hint": "Download OAuth client JSON from Google Cloud Console and save as credentials.json, "
-                    "or set GMAIL_CREDENTIALS_PATH.",
+                    "hint": (
+                        "Download OAuth client JSON from Google Cloud Console and save as "
+                        "backend/credentials.json, or set GMAIL_CREDENTIALS_PATH. In container "
+                        "deployments you can instead set GMAIL_CREDENTIALS_JSON (raw JSON) or "
+                        "GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET (+ GOOGLE_PROJECT_ID, "
+                        "GOOGLE_REDIRECT_URI) as environment variables."
+                    ),
                 }
             ),
             503,
