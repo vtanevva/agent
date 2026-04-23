@@ -9,6 +9,27 @@ import { Platform, NativeModules } from 'react-native';
 // You can still override everything with EXPO_PUBLIC_API_BASE_URL / API_BASE_URL.
 const FALLBACK_LOCAL_IP = '192.168.0.101';
 
+/** Safe on native: `window` may exist without `window.location` (Expo / Hermes). */
+const getWebHostname = () => {
+  try {
+    if (typeof window === 'undefined' || !window.location) return '';
+    const h = window.location.hostname;
+    return typeof h === 'string' ? h : '';
+  } catch {
+    return '';
+  }
+};
+
+const getWebOrigin = () => {
+  try {
+    if (typeof window === 'undefined' || !window.location) return '';
+    const o = window.location.origin;
+    return typeof o === 'string' ? o : '';
+  } catch {
+    return '';
+  }
+};
+
 const isProbablyPrivateHost = (host) => {
   if (!host) return false;
   if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') return true;
@@ -56,18 +77,19 @@ const getApiBaseUrl = () => {
     process.env.USE_LOCAL;
   const USE_LOCAL = envUseLocal === 'true';
   
-  // Detect if we're in production (running on Railway domain or custom domain)
-  const isProduction = typeof window !== 'undefined' &&
-    (window.location.hostname.includes('railway.app') ||
-     window.location.hostname.includes('railway') ||
-     window.location.hostname.includes('aivis.pw'));
-  
+  // Detect production only in a real browser (native has no location.hostname).
+  const webHost = getWebHostname();
+  const isProduction =
+    !!webHost &&
+    (webHost.includes('railway.app') ||
+      webHost.includes('railway') ||
+      webHost.includes('aivis.pw'));
+
   // Web: if not production, prefer the current hostname with core backend port 5000.
   // Aligns with `python server.py core` / gunicorn core_app:app (start.sh, cwd backend/).
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+  if (Platform.OS === 'web' && webHost) {
     if (!isProduction) {
-      const host = window.location.hostname;
-      const url = `http://${host}:5000`;
+      const url = `http://${webHost}:5000`;
       console.log('Using local web API URL (derived from window host):', url);
       return url;
     }
@@ -82,10 +104,9 @@ const getApiBaseUrl = () => {
     return url;
   }
   
-  // Production: Use Railway URL or current origin
-  const apiUrl = isProduction && typeof window !== 'undefined' 
-    ? window.location.origin  // Use same origin in production
-    : RAILWAY_URL;
+  // Production: Use Railway URL or current origin (web only when origin exists).
+  const origin = getWebOrigin();
+  const apiUrl = isProduction && origin ? origin : RAILWAY_URL;
   console.log('Using production API URL:', apiUrl);
   return apiUrl;
 };
@@ -108,9 +129,9 @@ const getCoreBackendUrl = () => {
   }
 
   // Default local core backend port.
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    const host = window.location.hostname;
-    const url = `http://${host}:5000`;
+  const webHostCore = getWebHostname();
+  if (Platform.OS === 'web' && webHostCore) {
+    const url = `http://${webHostCore}:5000`;
     console.log('Using local web CORE_BACKEND_URL (derived):', url);
     return url;
   }
