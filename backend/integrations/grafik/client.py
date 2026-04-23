@@ -23,4 +23,3 @@ def create_grafik_task(list_id: str, title: str, description: str) -> str:
         raise RuntimeError(f"Grafik API error {response.status_code}: {response.text}")
 
     return response.json()["id"]
-

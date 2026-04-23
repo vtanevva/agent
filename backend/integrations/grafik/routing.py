@@ -36,4 +36,3 @@ def resolve_grafik_list_id_from_channel(channel: str) -> tuple[str | None, str |
         return default_list_id, default_client, default_project
 
     return None, None, None
-

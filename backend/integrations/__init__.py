@@ -1,1 +1,1 @@
-"""External integrations (LLM, vendors, etc.)."""
+"""External integrations (LLM, Grafik, vendors, etc.)."""

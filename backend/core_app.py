@@ -9,8 +9,8 @@ from pathlib import Path
 # Gunicorn (see start.sh, cwd=backend): `gunicorn core_app:app`
 BACKEND_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BACKEND_DIR.parent
-# Repo root must precede backend/ so `integrations.grafik` resolves to repo `integrations/`
-# (not `backend/integrations`, which is LLM-only). Backend dir is still needed for `api`, `storage`, …
+# Repo root first for assets and ``from backend.*`` when cwd is backend; ``integrations.grafik`` lives in
+# ``backend/integrations/grafik`` so it resolves whether ``sys.path[0]`` is repo root or backend (Gunicorn).
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 if str(REPO_ROOT) not in sys.path:
