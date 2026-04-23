@@ -1,0 +1,19 @@
+
+Project Requirements Document
+
+Overview:
+This project aims to build an AI assistant with memory capabilities.
+
+Key Features:
+1. Natural language understanding
+2. Context awareness from past conversations
+3. Document upload and semantic search (RAG)
+4. Integration with email and calendar
+
+Technical Stack:
+- Backend: Python with Flask
+- Database: MongoDB
+- Vector Database: Pinecone
+- LLM: OpenAI GPT-4
+
+The assistant should remember user preferences and provide personalized responses.

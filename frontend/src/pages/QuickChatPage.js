@@ -11,14 +11,40 @@ import {
   ActivityIndicator,
   Alert,
   Share,
+  Linking,
 } from 'react-native';
 import {useRoute, useNavigation} from '@react-navigation/native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Svg, Line, Path} from 'react-native-svg';
 
 import {theme} from '../styles/theme';
-import {API_BASE_URL, CORE_BACKEND_URL} from '../config/api';
+import {API_BASE_URL} from '../config/api';
 import {extractEmailAddress} from '../utils/emailParse';
+
+/** Keep GET URL under a safe length; Gmail compose uses query params. */
+const GMAIL_COMPOSE_URL_MAX = 7200;
+
+/**
+ * Opens Gmail web compose with pre-filled reply (user taps Send in Gmail).
+ * Avoids server-side ``messages.send``; threading is best-effort via ``th`` when a thread id exists.
+ */
+function buildGmailComposeDeepLink({to, subject, body, threadId}) {
+  const subjRaw = (subject || '').trim();
+  const su = /^re:/i.test(subjRaw) ? subjRaw : subjRaw ? `Re: ${subjRaw}` : 'Re:';
+  let bodyText = body || '';
+  const th = (threadId || '').trim();
+  const thParam = th ? `&th=${encodeURIComponent(th)}` : '';
+  const prefix = `https://mail.google.com/mail/u/0/?view=cm&fs=1&tf=cm&to=${encodeURIComponent(
+    (to || '').trim(),
+  )}&su=${encodeURIComponent(su)}&body=`;
+  while (prefix.length + encodeURIComponent(bodyText).length + thParam.length > GMAIL_COMPOSE_URL_MAX && bodyText.length > 120) {
+    bodyText = bodyText.slice(0, Math.floor(bodyText.length * 0.88));
+  }
+  if (prefix.length + encodeURIComponent(bodyText).length + thParam.length > GMAIL_COMPOSE_URL_MAX) {
+    bodyText = bodyText.slice(0, 80);
+  }
+  return prefix + encodeURIComponent(bodyText) + thParam;
+}
 
 /**
  * Figma-styled "quick" chat — opened from Home's + button and from
@@ -39,7 +65,7 @@ export default function QuickChatPage() {
   const [loading, setLoading] = useState(false);
   const [editableDraft, setEditableDraft] = useState('');
   const [showReplyComposer, setShowReplyComposer] = useState(false);
-  /** Gmail Send button: idle → sending → sent (stay on screen until user leaves). */
+  /** Gmail: idle → sending → opened_gmail (compose opened in browser/app; user sends there). */
   const [gmailReplyBtn, setGmailReplyBtn] = useState('idle');
   const [rewriteAsInstruction, setRewriteAsInstruction] = useState('');
   const [polishLoading, setPolishLoading] = useState(false);
@@ -188,41 +214,25 @@ export default function QuickChatPage() {
       (rd?.reply_to_email && String(rd.reply_to_email).trim()) ||
       extractEmailAddress(String(rd?.from_header || ''));
     const to = (toRaw || '').trim();
-    if (!threadId || !to || !bodyText) {
-      Alert.alert(
-        'Cannot send',
-        !threadId ? 'Missing thread.' : !to ? 'Could not detect recipient email.' : 'Draft is empty.',
-      );
+    if (!to || !bodyText) {
+      Alert.alert('Cannot open Gmail', !to ? 'Could not detect recipient email.' : 'Draft is empty.');
       return;
     }
     setGmailReplyBtn('sending');
     try {
-      const r = await fetch(`${CORE_BACKEND_URL}/api/gmail/reply`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          user_id: userId,
-          thread_id: threadId,
-          to,
-          body: bodyText,
-        }),
+      const url = buildGmailComposeDeepLink({
+        to,
+        subject: String(rd?.subject || '').trim(),
+        body: bodyText,
+        threadId,
       });
-      const data = await r.json().catch(() => ({}));
-      if (data?.success) {
-        setGmailReplyBtn('sent');
-      } else if (data?.action === 'connect_google') {
-        setGmailReplyBtn('idle');
-        Alert.alert('Google', 'Connect Google in settings, then try again.');
-      } else {
-        setGmailReplyBtn('idle');
-        const msg = data?.message || data?.error || `HTTP ${r.status}`;
-        Alert.alert(data?.error === 'invalid_gmail_thread_id' ? 'Invalid thread' : 'Send failed', String(msg));
-      }
+      await Linking.openURL(url);
+      setGmailReplyBtn('opened_gmail');
     } catch (e) {
       setGmailReplyBtn('idle');
-      Alert.alert('Send failed', String(e?.message || e));
+      Alert.alert('Gmail', String(e?.message || e));
     }
-  }, [editableDraft, userId]);
+  }, [editableDraft]);
 
   const polishDraftWithAi = useCallback(async () => {
     const draft = (editableDraft || '').trim();
@@ -323,16 +333,16 @@ export default function QuickChatPage() {
             <Text style={styles.replyComposerTitle}>You can edit your reply</Text>
             <Text style={styles.replyComposerHint}>
               {String(replyDraftRef.current.source || '').toLowerCase() === 'gmail'
-                ? gmailReplyBtn === 'sent'
-                  ? 'Your reply was sent.'
-                  : 'Send via Gmail when ready.'
+                ? gmailReplyBtn === 'opened_gmail'
+                  ? 'Gmail compose opened—tap Send in Gmail to deliver.'
+                  : 'Opens Gmail compose with your draft (you send from Gmail).'
                 : 'Share or paste into Slack when ready.'}
             </Text>
             <TextInput
               value={editableDraft}
               onChangeText={setEditableDraft}
               multiline
-              editable={gmailReplyBtn !== 'sent'}
+              editable={gmailReplyBtn !== 'opened_gmail'}
               placeholder="Your draft…"
               placeholderTextColor={theme.colors.textSecondary}
               style={[
@@ -340,7 +350,7 @@ export default function QuickChatPage() {
                 Platform.OS === 'web' && {outline: 'none', outlineWidth: 0},
               ]}
             />
-            {gmailReplyBtn !== 'sent' ? (
+            {gmailReplyBtn !== 'opened_gmail' ? (
               <View style={styles.rewriteBlock}>
                 <Text style={styles.rewriteLabel}>Rewrite email as</Text>
                 <TextInput
@@ -376,18 +386,22 @@ export default function QuickChatPage() {
                   onPress={sendGmailReply}
                   disabled={
                     gmailReplyBtn === 'sending' ||
-                    gmailReplyBtn === 'sent' ||
+                    gmailReplyBtn === 'opened_gmail' ||
                     !(editableDraft || '').trim()
                   }
                   style={[
                     styles.sendReplyBtn,
                     gmailReplyBtn === 'idle' && !(editableDraft || '').trim() && styles.sendReplyBtnDisabled,
                     gmailReplyBtn === 'sending' && styles.sendReplyBtnDisabled,
-                    gmailReplyBtn === 'sent' && styles.sendReplyBtnSent,
+                    gmailReplyBtn === 'opened_gmail' && styles.sendReplyBtnSent,
                   ]}
                   activeOpacity={0.85}>
                   <Text style={styles.sendReplyBtnText}>
-                    {gmailReplyBtn === 'sending' ? 'Sending…' : gmailReplyBtn === 'sent' ? 'Sent!' : 'Send'}
+                    {gmailReplyBtn === 'sending'
+                      ? 'Opening…'
+                      : gmailReplyBtn === 'opened_gmail'
+                        ? 'Opened Gmail'
+                        : 'Send in Gmail'}
                   </Text>
                 </TouchableOpacity>
               ) : (

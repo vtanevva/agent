@@ -31,20 +31,57 @@ def _safe_json_loads(v: Any) -> dict:
 _REPLY_TYPES_NEEDING_RESPONSE = {"short", "time_relevant", "context_relevant"}
 
 
-def _as_actionable(*, classification_type: Any, classification: dict) -> bool:
+def _is_low_signal_stub(*, subject: str, body: str) -> bool:
+    """
+    An empty-subject message whose body is empty or just a bare URL /
+    single short line does not carry enough context to become a task.
+    These are almost always self-forwards or accidental sends and
+    shouldn't pollute the action list.
+    """
+    s = (subject or "").strip()
+    b = (body or "").strip()
+    if s:
+        return False
+    if not b:
+        return True
+    if len(b) < 80 and ("\n" not in b) and (b.startswith("http://") or b.startswith("https://")):
+        return True
+    if len(b) < 20:
+        return True
+    return False
+
+
+def _as_actionable(
+    *,
+    classification_type: Any,
+    classification: dict,
+    subject: str = "",
+    body: str = "",
+) -> bool:
     """
     A row deserves a spot in the tasks/action list when it is either:
       - a concrete action/task (classification_type == 'ACTION' or has_action)
       - or a message that expects a reply (reply_type != 'none')
+      - AND it's not a low-signal stub (empty subject + trivial body).
 
-    Marketing/newsletters are excluded upstream by ``is_likely_marketing_or_newsletter``.
+    Marketing/newsletters are excluded upstream by ``should_suppress_as_non_actionable``.
     """
-    if str(classification_type or "").strip().upper() == "ACTION":
-        return True
-    if bool(classification.get("has_action") is True or classification.get("has_action") == 1):
-        return True
+    is_action = str(classification_type or "").strip().upper() == "ACTION"
+    has_action = bool(
+        classification.get("has_action") is True or classification.get("has_action") == 1
+    )
     reply_type = str(classification.get("reply_type") or "none").strip().lower()
-    return reply_type in _REPLY_TYPES_NEEDING_RESPONSE
+    needs_reply = reply_type in _REPLY_TYPES_NEEDING_RESPONSE
+
+    if not (is_action or has_action or needs_reply):
+        return False
+
+    # Only reply-type keeps us in? Require at least some content.
+    if not (is_action or has_action) and needs_reply:
+        if _is_low_signal_stub(subject=subject, body=body):
+            return False
+
+    return True
 
 
 def _text_preview(v: Any, limit: int = 180) -> str:
@@ -111,9 +148,21 @@ def _row_to_item(row: dict) -> dict:
 
     subject = payload.get("subject") or cls.get("title") or ""
     snippet = payload.get("snippet") or _text_preview(payload.get("text") or row.get("text") or "")
+    body_for_check = str(
+        row.get("text")
+        or payload.get("text")
+        or payload.get("body")
+        or payload.get("snippet")
+        or ""
+    )
 
     classification_type = row.get("classification_type")
-    actionable = _as_actionable(classification_type=classification_type, classification=cls)
+    actionable = _as_actionable(
+        classification_type=classification_type,
+        classification=cls,
+        subject=subject,
+        body=body_for_check,
+    )
 
     out: dict = {
         "source": source,
@@ -209,7 +258,21 @@ def list_action_items():
         if str(row.get("source") or "").strip().lower() in ("chat", "gmail_chat", "slack_chat"):
             continue
 
-        if not _as_actionable(classification_type=row.get("classification_type"), classification=cls):
+        subj_for_check = (payload.get("subject") or cls.get("title") or "").strip()
+        body_for_check = str(
+            row.get("text")
+            or payload.get("text")
+            or payload.get("body")
+            or payload.get("snippet")
+            or ""
+        )
+
+        if not _as_actionable(
+            classification_type=row.get("classification_type"),
+            classification=cls,
+            subject=subj_for_check,
+            body=body_for_check,
+        ):
             continue
 
         src_l = str(row.get("source") or "").strip().lower()
@@ -217,11 +280,6 @@ def list_action_items():
         # Hide marketing / notifications / no-reply / ESP traffic already stored
         # (no re-ingest required; this is a runtime filter).
         if src_l == "gmail":
-            subj_g = (payload.get("subject") or cls.get("title") or "").strip()
-            raw_g = (
-                str(row.get("text") or "")
-                or str(payload.get("text") or payload.get("body") or payload.get("snippet") or "")
-            ).strip()
             sender_g = str(
                 payload.get("from")
                 or payload.get("sender")
@@ -229,7 +287,10 @@ def list_action_items():
                 or ""
             )
             suppress, _reason = should_suppress_as_non_actionable(
-                payload=payload, subject=subj_g, raw_text=raw_g, sender=sender_g,
+                payload=payload,
+                subject=subj_for_check,
+                raw_text=body_for_check.strip(),
+                sender=sender_g,
             )
             if suppress:
                 continue

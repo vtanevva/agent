@@ -233,5 +233,159 @@ class TestShouldSuppressAsNonActionable(unittest.TestCase):
         self.assertIsNone(reason)
 
 
+class TestNewBulkSignals(unittest.TestCase):
+    """Signals added specifically for the real-mailbox escapees."""
+
+    def test_standalone_unsubscribe_word_in_body(self) -> None:
+        # NYT newsletter / DataCamp etc. just render "Unsubscribe" as a link
+        # label with no surrounding "here/from/to" phrasing.
+        self.assertTrue(
+            is_automated_or_bulk_sender(
+                payload={},
+                sender="Some Brand <nytdirect@nytimes.com>",
+                raw_text="...long content... | Privacy Policy | Unsubscribe | Contact Us",
+            )
+        )
+
+    def test_email_subdomain_is_bulk(self) -> None:
+        # email.ns.nl — common EU marketing subdomain convention.
+        self.assertTrue(
+            is_automated_or_bulk_sender(
+                payload={},
+                sender="Spoordeelwinkel <info@email.ns.nl>",
+                raw_text="Ontdek de aanbieding.",
+            )
+        )
+
+    def test_mailing_subdomain_is_bulk(self) -> None:
+        self.assertTrue(
+            is_automated_or_bulk_sender(
+                payload={},
+                sender="ITALO <italo@mailing.italotreno.it>",
+                raw_text="Scopri le novita.",
+            )
+        )
+
+    def test_comms_subdomain_is_bulk(self) -> None:
+        self.assertTrue(
+            is_automated_or_bulk_sender(
+                payload={},
+                sender="Vueling <vueling@comms.vueling.com>",
+                raw_text="Longer days to get away",
+            )
+        )
+
+    def test_news_dash_subdomain_is_bulk(self) -> None:
+        # e.g. news-hb.hugoboss.com
+        self.assertTrue(
+            is_automated_or_bulk_sender(
+                payload={},
+                sender="BOSS <boss@news-hb.hugoboss.com>",
+                raw_text="Discover the new",
+            )
+        )
+
+    def test_emailmarket_subdomain_is_bulk(self) -> None:
+        self.assertTrue(
+            is_automated_or_bulk_sender(
+                payload={},
+                sender="SHEIN <shein@emailmarket.shein.com>",
+                raw_text="Style playbook",
+            )
+        )
+
+    def test_numbered_email_subdomain_is_bulk(self) -> None:
+        # email2.microsoft.com
+        self.assertTrue(
+            is_automated_or_bulk_sender(
+                payload={},
+                sender="Best of MSN <msn@email2.microsoft.com>",
+                raw_text="Daily digest",
+            )
+        )
+
+    def test_lottery_domain_is_bulk(self) -> None:
+        # info@postcodeloterij.nl — role-local + lottery domain.
+        self.assertTrue(
+            is_automated_or_bulk_sender(
+                payload={},
+                sender="Postcode Loterij <info@postcodeloterij.nl>",
+                raw_text="Laatste kans",
+            )
+        )
+
+    def test_html_heavy_body_alone_is_bulk(self) -> None:
+        # Large HTML marketing body with no unsubscribe word but classic
+        # cellpadding table layout — almost always bulk.
+        html = "<!DOCTYPE html><html>" + ("<table cellpadding=\"0\"><tr><td>x</td></tr></table>" * 200) + "</html>"
+        self.assertTrue(
+            is_automated_or_bulk_sender(
+                payload={},
+                sender="Uber Eats <uber@uber.com>",
+                raw_text=html,
+            )
+        )
+
+    def test_info_role_local_with_html_body_is_bulk(self) -> None:
+        self.assertTrue(
+            is_automated_or_bulk_sender(
+                payload={},
+                sender="Casino <info@inbet.com>",
+                raw_text="<!DOCTYPE html><html>promo content</html>",
+            )
+        )
+
+    def test_info_role_local_with_short_plain_body_not_bulk(self) -> None:
+        # We don't want to nuke every ``info@`` reply — a short plain-text
+        # one should still pass through unless another signal appears.
+        self.assertFalse(
+            is_automated_or_bulk_sender(
+                payload={"headers": {"From": "Info <info@smallbiz.co>"}},
+                sender="Info <info@smallbiz.co>",
+                raw_text="Hi Vanesa, yes Friday works for the call. Thanks.",
+            )
+        )
+
+    def test_calendar_cancellation_subject_is_marketing(self) -> None:
+        # Bulgarian Google Calendar cancellation subject.
+        subj = "Анулирано събитие: Weekly @ пт 2026.05.22 12:00 - 13:00 (Гринуич+2)"
+        self.assertTrue(
+            is_likely_marketing_or_newsletter(
+                payload={}, subject=subj, raw_text="Това събитие бе отменено."
+            )
+        )
+
+    def test_calendar_tail_alone_is_marketing(self) -> None:
+        # Even without a recognizable verb prefix, the "@ date time" tail
+        # is a strong enough signal.
+        subj = "Team Standup @ Mon 2026.05.20 09:00 (GMT+2)"
+        self.assertTrue(
+            is_likely_marketing_or_newsletter(
+                payload={}, subject=subj, raw_text="x"
+            )
+        )
+
+    def test_dutch_promo_subject_suppressed(self) -> None:
+        # "Laatste kans om gratis mee te spelen" — Dutch lottery promo.
+        ok, reason = should_suppress_as_non_actionable(
+            payload={},
+            subject="Miljoenenjacht | Laatste kans om gratis mee te spelen",
+            raw_text="Klik hieronder.",
+            sender="Postcode Loterij <info@postcodeloterij.nl>",
+        )
+        self.assertTrue(ok)
+
+    def test_real_dinner_invitation_not_calendar_notification(self) -> None:
+        # "Dinner @ 8" is NOT a calendar notification tail because it lacks a
+        # full date pattern.
+        self.assertFalse(
+            is_likely_marketing_or_newsletter(
+                payload={},
+                subject="Dinner @ 8",
+                raw_text="Want to join us tomorrow?",
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
