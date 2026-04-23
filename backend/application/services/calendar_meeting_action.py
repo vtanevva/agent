@@ -96,11 +96,13 @@ def _clock_from_text(text: str) -> tuple[int, int] | None:
         return None
     h, mi = int(m.group(1)), int(m.group(2) or "0")
     if m.group(2) is None:
+        # Bare hours are ambiguous; keep prior PM heuristic for 1..7, but
+        # also accept explicit 24-hour clocks like "at 18".
         if 1 <= h <= 7:
             h = h + 12
         elif h == 12:
             pass
-        elif 8 <= h <= 11:
+        elif 8 <= h <= 23:
             pass
         else:
             return None
