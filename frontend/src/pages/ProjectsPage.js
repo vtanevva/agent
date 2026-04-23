@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Platform,
+  Linking,
 } from 'react-native';
 import {useRoute, useNavigation} from '@react-navigation/native';
 import {SafeAreaView} from 'react-native-safe-area-context';
@@ -14,12 +15,37 @@ import {Svg, Path} from 'react-native-svg';
 import {colors} from '../styles/colors';
 import {commonStyles} from '../styles/commonStyles';
 import {fetchSqliteProjectsOverview} from '../api/sqliteProjects';
+import {fetchScheduleSources} from '../api/scheduleData';
 
 function formatShortDate(iso) {
   if (!iso || typeof iso !== 'string') return '—';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
   return d.toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'});
+}
+
+function normalizeForMatch(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[\u2019']/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function inferProjectMeetings(projectName, events) {
+  const projectNorm = normalizeForMatch(projectName);
+  if (!projectNorm) return [];
+  const out = [];
+  for (const ev of events || []) {
+    const summaryNorm = normalizeForMatch(ev?.summary || ev?.title || '');
+    if (!summaryNorm) continue;
+    if (summaryNorm.includes(projectNorm) || projectNorm.includes(summaryNorm)) {
+      out.push(ev);
+    }
+  }
+  out.sort((a, b) => new Date(a.start || 0).getTime() - new Date(b.start || 0).getTime());
+  return out.slice(0, 6);
 }
 
 export default function ProjectsPage() {
@@ -31,13 +57,18 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState({});
+  const [calendarEvents, setCalendarEvents] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const rows = await fetchSqliteProjectsOverview(40);
+      const [rows, schedule] = await Promise.all([
+        fetchSqliteProjectsOverview(40),
+        fetchScheduleSources(userId || 'me'),
+      ]);
       setProjects(rows);
+      setCalendarEvents(Array.isArray(schedule?.events) ? schedule.events : []);
       const next = {};
       for (const p of rows) {
         next[p.id] = true;
@@ -49,7 +80,7 @@ export default function ProjectsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     load();
@@ -105,7 +136,13 @@ export default function ProjectsPage() {
           ) : null}
 
           {projects.map((p) => (
-            <ProjectCard key={String(p.id)} project={p} expanded={!!expanded[p.id]} onToggle={() => toggle(p.id)} />
+            <ProjectCard
+              key={String(p.id)}
+              project={p}
+              meetings={inferProjectMeetings(p.name, calendarEvents)}
+              expanded={!!expanded[p.id]}
+              onToggle={() => toggle(p.id)}
+            />
           ))}
         </View>
       </ScrollView>
@@ -113,7 +150,7 @@ export default function ProjectsPage() {
   );
 }
 
-function ProjectCard({project, expanded, onToggle}) {
+function ProjectCard({project, meetings, expanded, onToggle}) {
   const ctx = project.context;
   const tasks = project.tasks || [];
   const status = (project.status || '—').replace(/_/g, ' ');
@@ -190,6 +227,36 @@ function ProjectCard({project, expanded, onToggle}) {
                 </Text>
               </View>
             ))
+          )}
+
+          <View style={styles.tasksHeader}>
+            <Text style={styles.tasksTitle}>Meetings</Text>
+            <Text style={styles.tasksCount}>{meetings.length}</Text>
+          </View>
+          {meetings.length === 0 ? (
+            <Text style={styles.noTasks}>No meetings linked to this project yet.</Text>
+          ) : (
+            meetings.map((m, idx) => {
+              const openLink = m.html_link || m.hangout_link || '';
+              const startText = formatShortDate(m.start);
+              return (
+                <View key={String(m.id || `${project.id}-meeting-${idx}`)} style={styles.taskRow}>
+                  <Text style={styles.taskTitle} numberOfLines={2}>
+                    {m.summary || '(Untitled meeting)'}
+                  </Text>
+                  <Text style={styles.taskMeta} numberOfLines={1}>
+                    {startText} · {m.provider || 'calendar'}
+                  </Text>
+                  {openLink ? (
+                    <TouchableOpacity onPress={() => Linking.openURL(openLink)} style={styles.linkBtn}>
+                      <Text style={styles.linkBtnText}>Open meeting link</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <Text style={styles.noMeetingLink}>No meeting link saved</Text>
+                  )}
+                </View>
+              );
+            })
           )}
         </View>
       ) : null}
@@ -484,5 +551,20 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: colors.primary[900] + '70',
+  },
+  linkBtn: {
+    marginTop: 7,
+    alignSelf: 'flex-start',
+  },
+  linkBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.secondary[700],
+  },
+  noMeetingLink: {
+    marginTop: 7,
+    fontSize: 11,
+    fontStyle: 'italic',
+    color: colors.primary[900] + '65',
   },
 });
