@@ -16,6 +16,20 @@ exact redirect URI in Google Cloud Console → Credentials → Authorized redire
 Set ``OAUTH_FRONTEND_RETURN_URL`` to your Expo web origin (e.g. ``http://127.0.0.1:8081/``) so after
 sign-in the browser returns to the app instead of ``GET /`` on the API host (which used to 404).
 
+**Production ``redirect_uri_mismatch``:** Behind Railway/nginx, ``request.url_root`` is often wrong
+(``http://`` or internal host). Set **one** of these to the exact callback Google must see (must also
+be listed under Authorized redirect URIs for your Web client)::
+
+    GOOGLE_OAUTH_REDIRECT_URI=https://YOUR_DOMAIN/google/oauth2callback
+    # or full URL in GOOGLE_REDIRECT_URI / OAUTH_REDIRECT_URI
+    # or only origin: PRODUCTION_URL / PUBLIC_API_URL=https://YOUR_DOMAIN  (path is appended)
+
+Google Cloud Console must list that same URI character-for-character (scheme, host, path; no extra slash).
+
+On **Railway + Gunicorn**, set ``FORWARDED_ALLOW_IPS=*`` (already the default in ``start.sh``) so the edge
+proxy's ``X-Forwarded-Proto`` / ``Host`` reach Flask; otherwise ``request.url_root`` stays ``http://`` and
+OAuth breaks even when env vars look correct.
+
 Local **http** callbacks require oauthlib to allow non-TLS (this module sets it for ``localhost`` /
 ``127.0.0.1`` only). For **LAN IP** (e.g. ``192.168.x.x``) over http, set ``OAUTHLIB_INSECURE_TRANSPORT=1``
 in your environment while testing — do not use that on a public deployment.
@@ -26,7 +40,7 @@ from __future__ import annotations
 import os
 from urllib.parse import quote, urlencode, urlparse
 
-from flask import Blueprint, abort, jsonify, redirect, request, session
+from flask import Blueprint, abort, has_request_context, jsonify, redirect, request, session
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -82,7 +96,99 @@ def _callback_path() -> str:
     return "/google/oauth2callback"
 
 
+def _parsed_hostname(url: str) -> str:
+    try:
+        return (urlparse(url).hostname or "").lower()
+    except Exception:
+        return ""
+
+
+def _is_local_hostname(host: str) -> bool:
+    h = (host or "").lower().split(":")[0]
+    return not h or h in ("localhost", "127.0.0.1", "0.0.0.0") or h.endswith(".local")
+
+
+def _request_public_hostname() -> str:
+    """Hostname the client used (first hop), when not localhost."""
+    if not has_request_context():
+        return ""
+    raw = (
+        (request.headers.get("X-Forwarded-Host") or request.environ.get("HTTP_HOST") or request.host or "")
+        .split(",")[0]
+        .strip()
+    )
+    host = raw.split(":")[0].lower()
+    return "" if _is_local_hostname(host) else host
+
+
+def _oauth_redirect_uri_from_env() -> str | None:
+    """
+    Public OAuth callback URL, independent of ``request.url_root`` (broken behind reverse proxies).
+
+    Checks env in priority order; values may be a full callback URL or an API origin only.
+    """
+    path = _callback_path()
+    req_host = _request_public_hostname()
+
+    def _finalize(raw: str) -> str:
+        u = raw.split("?", 1)[0].strip().rstrip("/")
+        if u.endswith(path):
+            return u
+        return f"{u}{path}"
+
+    for key in ("GOOGLE_OAUTH_REDIRECT_URI", "GOOGLE_REDIRECT_URI", "OAUTH_REDIRECT_URI"):
+        raw = (os.getenv(key) or "").strip()
+        if not raw:
+            continue
+        candidate = _finalize(raw)
+        # Copied .env often leaves localhost OAuth URIs in Railway — ignore them when the browser hit a public host.
+        if req_host and _is_local_hostname(_parsed_hostname(candidate)):
+            log.warning("[OAuth] skipping %s=... (localhost) because request Host is %s", key, req_host)
+            continue
+        return candidate
+
+    for key in ("PUBLIC_API_URL", "PRODUCTION_URL", "RAILWAY_URL"):
+        raw = (os.getenv(key) or "").strip()
+        if not raw:
+            continue
+        if "://" not in raw:
+            raw = f"https://{raw.lstrip('/')}"
+        return _finalize(raw)
+
+    return None
+
+
+def _redirect_uri_from_public_host_header() -> str | None:
+    """
+    Build callback URL from Host / X-Forwarded-* when Gunicorn did not fix url_root yet.
+
+    Google OAuth on the public internet requires https; Railway sets X-Forwarded-Proto when
+    ``--forwarded-allow-ips`` is configured.
+    """
+    if not has_request_context():
+        return None
+    host = _request_public_hostname()
+    if not host:
+        return None
+    proto = (request.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+    if proto == "https":
+        scheme = "https"
+    elif proto == "http":
+        scheme = "http"
+    else:
+        # No forwarded proto (misconfigured proxy): assume TLS for real domains.
+        scheme = "https"
+    path = _callback_path()
+    return f"{scheme}://{host}{path}"
+
+
 def _redirect_uri() -> str:
+    explicit = _oauth_redirect_uri_from_env()
+    if explicit:
+        return explicit
+    from_host = _redirect_uri_from_public_host_header()
+    if from_host:
+        return from_host
     base = (request.url_root or "").rstrip("/")
     return f"{base}{_callback_path()}"
 
@@ -142,11 +248,14 @@ def google_auth_start(username: str):
     session["oauth_expo_redirect"] = expo_redirect
     session.permanent = True
 
+    redirect_uri = _redirect_uri()
+    log.info("[OAuth] start username=%s redirect_uri=%s", username, redirect_uri)
+
     try:
         flow = Flow.from_client_secrets_file(
             str(cred_path),
             scopes=SCOPES,
-            redirect_uri=_redirect_uri(),
+            redirect_uri=redirect_uri,
         )
         authorization_url, state = flow.authorization_url(
             access_type="offline",
@@ -196,6 +305,7 @@ def google_oauth_callback():
             scopes=SCOPES,
             redirect_uri=_redirect_uri(),
         )
+        # Google redirects to the same host/scheme as in the auth request; redirect_uri must match.
         flow.fetch_token(authorization_response=request.url)
     except Exception as e:
         log.exception("[OAuth] token exchange failed: %s", e)

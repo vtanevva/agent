@@ -79,11 +79,30 @@ def _build_client_config_from_env() -> Optional[dict]:
 
     project_id = (os.getenv("GOOGLE_PROJECT_ID") or "").strip()
 
+    path = "/google/oauth2callback"
     redirect_uris: list[str] = []
-    for key in ("GOOGLE_REDIRECT_URI", "OAUTH_REDIRECT_URI"):
+
+    def _add_redirect(u: str) -> None:
+        u = u.split("?", 1)[0].strip().rstrip("/")
+        if u.endswith(path):
+            full = u
+        else:
+            full = f"{u.rstrip('/')}{path}"
+        if full not in redirect_uris:
+            redirect_uris.append(full)
+
+    for key in ("GOOGLE_OAUTH_REDIRECT_URI", "GOOGLE_REDIRECT_URI", "OAUTH_REDIRECT_URI"):
         v = (os.getenv(key) or "").strip()
-        if v and v not in redirect_uris:
-            redirect_uris.append(v)
+        if v:
+            _add_redirect(v)
+    for key in ("PUBLIC_API_URL", "PRODUCTION_URL", "RAILWAY_URL"):
+        v = (os.getenv(key) or "").strip()
+        if not v:
+            continue
+        if "://" not in v:
+            v = f"https://{v.lstrip('/')}"
+        _add_redirect(v)
+
     if not redirect_uris:
         redirect_uris = ["http://localhost:5000/google/oauth2callback"]
 

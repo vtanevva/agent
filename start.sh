@@ -12,6 +12,10 @@ REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 PORT="${PORT:-5000}"
 AI_CHAT_PORT="${AI_CHAT_PORT:-5055}"
 export AI_CHAT_PORT
+# Railway / edge proxies: trust X-Forwarded-* so Gunicorn sets wsgi.url_scheme=https (required for
+# Flask request.url_root and for OAuth redirect_uri). Default Gunicorn only trusts loopback.
+FORWARDED_ALLOW_IPS="${FORWARDED_ALLOW_IPS:-*}"
+export FORWARDED_ALLOW_IPS
 # If caller didn't set AI_SERVICE_URL, point core at the in-container AI service.
 export AI_SERVICE_URL="${AI_SERVICE_URL:-http://127.0.0.1:${AI_CHAT_PORT}}"
 
@@ -21,7 +25,8 @@ echo "Starting AI chat service on port $AI_CHAT_PORT (background)"
   exec gunicorn 'backend.ai_app:app' \
     --bind "0.0.0.0:$AI_CHAT_PORT" \
     --workers 1 \
-    --timeout 300
+    --timeout 300 \
+    --forwarded-allow-ips="$FORWARDED_ALLOW_IPS"
 ) &
 AI_PID=$!
 
@@ -30,7 +35,8 @@ trap 'echo "Shutting down (received signal)"; kill -TERM $AI_PID 2>/dev/null || 
 
 cd "$REPO_ROOT/backend"
 echo "Starting core backend on port $PORT (AI_SERVICE_URL=$AI_SERVICE_URL)"
-gunicorn core_app:app --bind "0.0.0.0:$PORT" --workers 1 --timeout 120 &
+gunicorn core_app:app --bind "0.0.0.0:$PORT" --workers 1 --timeout 120 \
+  --forwarded-allow-ips="$FORWARDED_ALLOW_IPS" &
 CORE_PID=$!
 
 # Wait on whichever exits first; propagate its status.

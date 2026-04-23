@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from flask import Flask, abort, jsonify, make_response, request, send_from_directory
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from api.routes.slack import slack_bp
 from api.routes.slack_interactive import slack_interactive_bp
@@ -38,6 +39,7 @@ from api.routes.metrics import metrics_bp
 from api.routes.google_oauth import google_oauth_bp
 from api.routes.google_calendar import google_calendar_bp
 from api.routes.recent_messages import recent_messages_bp
+from api.routes.user_search import user_search_bp
 from storage.sqlite_db import init_sqlite
 from utils.logger import get_logger
 
@@ -55,6 +57,19 @@ def create_app():
     # Required for /google/auth → Google → /google/oauth2callback (OAuth state in session).
     flask_app.secret_key = (os.getenv("FLASK_SECRET_KEY") or "dev-only-change-FLASK_SECRET_KEY").strip()
     init_sqlite()
+
+    # Railway / reverse proxies: trust X-Forwarded-* so ``request.url_root`` matches the public URL
+    # (fixes OAuth redirect_uri when no explicit GOOGLE_* callback env is set).
+    _trust_proxy = (os.getenv("TRUST_PROXY_HEADERS") or "1").strip().lower()
+    if _trust_proxy not in ("0", "false", "no", "off"):
+        flask_app.wsgi_app = ProxyFix(
+            flask_app.wsgi_app,
+            x_for=1,
+            x_proto=1,
+            x_host=1,
+            x_port=1,
+            x_prefix=1,
+        )
 
     _waitlist_dir = _backend_dir / "static" / "waitlist"
     _web_build_dir = REPO_ROOT / "web-build"
@@ -128,6 +143,7 @@ def create_app():
     flask_app.register_blueprint(google_oauth_bp)
     flask_app.register_blueprint(google_calendar_bp)
     flask_app.register_blueprint(recent_messages_bp)
+    flask_app.register_blueprint(user_search_bp)
 
     @flask_app.get("/<path:spa_path>")
     def spa_or_asset(spa_path: str):

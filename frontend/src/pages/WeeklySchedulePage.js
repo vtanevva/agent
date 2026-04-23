@@ -175,15 +175,35 @@ export default function WeeklySchedulePage() {
     return scheduleItems.filter((it) => it.end > ws && it.start < we);
   }, [scheduleItems, weekStart]);
 
+  const queryNorm = query.trim().toLowerCase();
+  const weekItemsForSearch = useMemo(() => {
+    if (!queryNorm) return weekFilteredItems;
+    return weekFilteredItems.filter((it) => {
+      const blob = [it.summary, it.location, it.description, it.reason, it.priority]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return blob.includes(queryNorm);
+    });
+  }, [weekFilteredItems, queryNorm]);
+
+  const unscheduledFiltered = useMemo(() => {
+    if (!queryNorm) return unscheduled;
+    return (unscheduled || []).filter((t) => {
+      const blob = [t.title, t.reason, t.priority].filter(Boolean).join(' ').toLowerCase();
+      return blob.includes(queryNorm);
+    });
+  }, [unscheduled, queryNorm]);
+
   const dayLayouts = useMemo(() => {
     return weekDays.map((day) => {
       const tlStart = timelineStartForDay(day);
       return {
         date: day,
-        blocks: layoutBlocksForDay(day, weekFilteredItems, tlStart),
+        blocks: layoutBlocksForDay(day, weekItemsForSearch, tlStart),
       };
     });
-  }, [weekDays, weekFilteredItems]);
+  }, [weekDays, weekItemsForSearch]);
 
   const dayColumnWidth = Math.max(DAY_MIN_W, (screenW - TIME_GUTTER_W - 40) / 7);
 
@@ -375,11 +395,11 @@ export default function WeeklySchedulePage() {
           </View>
         </ScrollView>
 
-        {unscheduled.length > 0 && (
+        {unscheduledFiltered.length > 0 && (
           <View style={styles.unCard}>
             <Text style={styles.unCardTitle}>Unscheduled</Text>
             <Text style={styles.unCardHint}>Tasks without a due time stay here.</Text>
-            {unscheduled.slice(0, 24).map((t) => (
+            {unscheduledFiltered.slice(0, 24).map((t) => (
               <View key={String(t._id)} style={styles.unRow}>
                 <Text style={styles.unTitle} numberOfLines={2}>
                   {t.title || '(Untitled)'}

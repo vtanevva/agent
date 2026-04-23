@@ -19,6 +19,7 @@ import {
   mapActionItemToUi,
   markActionItemDone,
 } from '../api/actionItems';
+import {fetchUserSearch} from '../api/userSearch';
 import TopSearchBar from '../components/TopSearchBar';
 import BottomNav from '../components/BottomNav';
 
@@ -71,6 +72,9 @@ export default function HomePage() {
   const [error, setError] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [query, setQuery] = useState('');
+  const [searchHits, setSearchHits] = useState(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState('');
 
   const loadItems = useCallback(async () => {
     if (!userId) {
@@ -112,6 +116,48 @@ export default function HomePage() {
     }
     return out;
   }, [items, hiddenIds]);
+
+  const queryLc = query.trim().toLowerCase();
+  const attentionItems = useMemo(() => {
+    if (!queryLc) return visibleItems;
+    return visibleItems.filter(
+      (it) =>
+        (it.title || '').toLowerCase().includes(queryLc) ||
+        (it.from || '').toLowerCase().includes(queryLc) ||
+        (it.snippet || '').toLowerCase().includes(queryLc),
+    );
+  }, [visibleItems, queryLc]);
+
+  useEffect(() => {
+    const t = query.trim();
+    if (t.length < 2) {
+      setSearchHits(null);
+      setSearchError('');
+      setSearchLoading(false);
+      return undefined;
+    }
+    setSearchLoading(true);
+    const id = setTimeout(() => {
+      (async () => {
+        try {
+          const data = await fetchUserSearch({userId, q: t, limit: 12});
+          setSearchHits(data?.hits || {});
+          setSearchError('');
+        } catch (e) {
+          setSearchError(e?.message || 'Search failed');
+          setSearchHits(null);
+        } finally {
+          setSearchLoading(false);
+        }
+      })();
+    }, 320);
+    return () => clearTimeout(id);
+  }, [query, userId]);
+
+  const searchTotal = useMemo(() => {
+    if (!searchHits) return 0;
+    return Object.values(searchHits).reduce((n, arr) => n + (Array.isArray(arr) ? arr.length : 0), 0);
+  }, [searchHits]);
 
   const displayName = useMemo(() => {
     if (!userId) return 'there';
@@ -179,9 +225,121 @@ export default function HomePage() {
     navigation.navigate('WeeklySchedule', {userId, sessionId});
   };
 
+  const openSearchHit = (hit) => {
+    if (!hit) return;
+    const k = hit.kind;
+    let seed = '';
+    if (k === 'message') {
+      seed =
+        `I searched my data and found this message:\n` +
+        `Subject: ${hit.title || ''}\n` +
+        (hit.subtitle ? `From: ${hit.subtitle}\n` : '') +
+        (hit.snippet ? `Details: ${hit.snippet}\n` : '') +
+        `\nSummarize what matters and what I should do next.`;
+    } else if (k === 'task') {
+      seed =
+        `I found this task in my records:\n` +
+        `${hit.title || ''}\n` +
+        (hit.subtitle ? `${hit.subtitle}\n` : '') +
+        (hit.snippet ? `${hit.snippet}\n` : '') +
+        `\nHelp me plan or complete it.`;
+    } else if (k === 'project') {
+      seed =
+        `Project context:\n` +
+        `${hit.title || ''}` +
+        (hit.subtitle ? ` (${hit.subtitle})` : '') +
+        `\n` +
+        (hit.snippet ? `${hit.snippet}\n` : '') +
+        `\nAnswer my questions about this workstream.`;
+    } else if (k === 'project_note') {
+      seed =
+        `Notes for project "${hit.title || ''}"` +
+        (hit.subtitle ? ` — client: ${hit.subtitle}` : '') +
+        `:\n${hit.snippet || ''}\n\nExplain how this fits the bigger picture.`;
+    } else if (k === 'calendar') {
+      seed =
+        `Calendar entry:\n${hit.title || ''}\n${hit.subtitle || ''}\n` +
+        (hit.snippet ? `${hit.snippet}\n` : '') +
+        `\nHelp me prepare or follow up.`;
+    } else {
+      seed = JSON.stringify(hit, null, 2);
+    }
+    navigation.navigate('QuickChat', {
+      userId,
+      sessionId,
+      seedPrompt: seed,
+      seedThreadId: k === 'message' ? hit.thread_id || null : null,
+    });
+  };
+
+  const SEARCH_SECTIONS = [
+    ['messages', 'Email & messages'],
+    ['tasks', 'Tasks'],
+    ['projects', 'Projects'],
+    ['project_notes', 'Project notes'],
+    ['calendar', 'Calendar'],
+  ];
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <TopSearchBar value={query} onChangeText={setQuery} />
+
+      {query.trim().length >= 2 ? (
+        <View style={styles.searchPanel}>
+          {searchLoading ? (
+            <View style={styles.searchLoadingRow}>
+              <ActivityIndicator color={theme.colors.textPrimary} size="small" />
+              <Text style={styles.searchLoadingText}>Searching your data…</Text>
+            </View>
+          ) : null}
+          {!!searchError ? (
+            <Text style={styles.searchErrorText}>{searchError}</Text>
+          ) : null}
+          {!searchLoading && !searchError && searchHits && searchTotal === 0 ? (
+            <Text style={styles.searchEmptyText}>
+              No matches in saved email, tasks, projects, or calendar. Try different words.
+            </Text>
+          ) : null}
+          {!searchLoading && searchHits && searchTotal > 0 ? (
+            <ScrollView
+              style={styles.searchScroll}
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}>
+              {SEARCH_SECTIONS.map(([key, label]) => {
+                const arr = searchHits[key] || [];
+                if (!arr.length) return null;
+                return (
+                  <View key={key} style={styles.searchSection}>
+                    <Text style={styles.searchSectionTitle}>{label}</Text>
+                    {arr.map((hit, idx) => (
+                      <TouchableOpacity
+                        key={`${key}-${hit.id ?? hit.project_id ?? idx}`}
+                        style={styles.searchHitRow}
+                        activeOpacity={0.85}
+                        onPress={() => openSearchHit(hit)}>
+                        <Text style={styles.searchHitTitle} numberOfLines={2}>
+                          {hit.title}
+                        </Text>
+                        {hit.subtitle ? (
+                          <Text style={styles.searchHitSub} numberOfLines={1}>
+                            {hit.subtitle}
+                          </Text>
+                        ) : null}
+                        {hit.snippet ? (
+                          <Text style={styles.searchHitSnip} numberOfLines={2}>
+                            {hit.snippet}
+                          </Text>
+                        ) : null}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                );
+              })}
+            </ScrollView>
+          ) : null}
+        </View>
+      ) : null}
 
       <View style={styles.scrollWrap}>
         <ScrollView
@@ -197,7 +355,9 @@ export default function HomePage() {
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionHeaderText}>
               Needs your attention{' '}
-              <Text style={styles.sectionHeaderCount}>({visibleItems.length})</Text>
+              <Text style={styles.sectionHeaderCount}>
+                ({queryLc ? attentionItems.length : visibleItems.length})
+              </Text>
             </Text>
           </View>
 
@@ -218,8 +378,15 @@ export default function HomePage() {
                 New action items from email and chat will show up here automatically.
               </Text>
             </View>
+          ) : attentionItems.length === 0 && queryLc ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>No action items match</Text>
+              <Text style={styles.emptyHint}>
+                Your search still runs across email, tasks, projects, and calendar above.
+              </Text>
+            </View>
           ) : (
-            visibleItems.map((item) => (
+            attentionItems.map((item) => (
               <TaskCard
                 key={item.id}
                 item={item}
@@ -317,6 +484,69 @@ const CARD_RADIUS = 20;
 
 const styles = StyleSheet.create({
   container: {flex: 1, backgroundColor: theme.colors.bg},
+  searchPanel: {
+    maxHeight: 220,
+    marginHorizontal: 16,
+    marginBottom: 4,
+    paddingBottom: 6,
+  },
+  searchScroll: {maxHeight: 200},
+  searchLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  searchLoadingText: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    fontFamily: theme.fonts.regular,
+  },
+  searchErrorText: {
+    fontSize: 12,
+    color: '#8A2C2C',
+    paddingHorizontal: 4,
+    marginBottom: 4,
+  },
+  searchEmptyText: {
+    fontSize: 12,
+    color: theme.colors.textSecondary,
+    paddingHorizontal: 4,
+    paddingVertical: 6,
+  },
+  searchSection: {marginBottom: 10},
+  searchSectionTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: theme.colors.textSecondary,
+    marginBottom: 6,
+    marginTop: 4,
+    letterSpacing: 0.4,
+  },
+  searchHitRow: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 8,
+    ...theme.shadow.card,
+  },
+  searchHitTitle: {
+    fontFamily: theme.fonts.semibold,
+    fontSize: 13,
+    color: theme.colors.textPrimary,
+  },
+  searchHitSub: {
+    marginTop: 2,
+    fontSize: 11,
+    color: theme.colors.textSecondary,
+  },
+  searchHitSnip: {
+    marginTop: 4,
+    fontSize: 11,
+    color: theme.colors.textSecondary,
+    lineHeight: 15,
+  },
   scrollWrap: {flex: 1},
   scroll: {flex: 1},
   scrollContent: {paddingHorizontal: 20, paddingBottom: 260},
