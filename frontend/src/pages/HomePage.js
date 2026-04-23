@@ -261,6 +261,20 @@ export default function HomePage() {
         `Calendar entry:\n${hit.title || ''}\n${hit.subtitle || ''}\n` +
         (hit.snippet ? `${hit.snippet}\n` : '') +
         `\nHelp me prepare or follow up.`;
+    } else if (k === 'gmail_live') {
+      seed =
+        `Live Gmail result:\nSubject: ${hit.title || ''}\n` +
+        (hit.subtitle ? `From: ${hit.subtitle}\n` : '') +
+        (hit.snippet ? `Preview: ${hit.snippet}\n` : '') +
+        (hit.thread_id ? `Thread id: ${hit.thread_id}\n` : '') +
+        `\nSummarize, reply, or tell me what to do next.`;
+    } else if (k === 'slack_live') {
+      seed =
+        `Slack search hit (${hit.title || 'channel'}):\n` +
+        (hit.subtitle ? `${hit.subtitle}\n` : '') +
+        (hit.snippet ? `${hit.snippet}\n` : '') +
+        (hit.permalink ? `Link: ${hit.permalink}\n` : '') +
+        `\nHelp me respond or track this.`;
     } else {
       seed = JSON.stringify(hit, null, 2);
     }
@@ -268,12 +282,16 @@ export default function HomePage() {
       userId,
       sessionId,
       seedPrompt: seed,
-      seedThreadId: k === 'message' ? hit.thread_id || null : null,
+      seedThreadId:
+        k === 'message' || k === 'gmail_live' ? hit.thread_id || null : null,
     });
   };
 
   const SEARCH_SECTIONS = [
-    ['messages', 'Email & messages'],
+    ['gmail_live', 'Gmail (inbox)'],
+    ['slack_live', 'Slack'],
+    ['outlook_live', 'Outlook'],
+    ['messages', 'Indexed mail & chat'],
     ['tasks', 'Tasks'],
     ['projects', 'Projects'],
     ['project_notes', 'Project notes'],
@@ -314,7 +332,7 @@ export default function HomePage() {
                     <Text style={styles.searchSectionTitle}>{label}</Text>
                     {arr.map((hit, idx) => (
                       <TouchableOpacity
-                        key={`${key}-${hit.id ?? hit.project_id ?? idx}`}
+                        key={`${key}-${hit.id ?? hit.message_id ?? hit.project_id ?? hit.thread_id ?? idx}`}
                         style={styles.searchHitRow}
                         activeOpacity={0.85}
                         onPress={() => openSearchHit(hit)}>

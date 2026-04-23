@@ -717,9 +717,11 @@ export default function ChatPage() {
                 ) : (
                   <TouchableOpacity
                     onPress={async () => {
+                      // Always return to site root after OAuth so the SPA loads LoginPage, which
+                      // reads ?gmail_oauth=1 and navigates into the app (same host as API).
                       const expoRedirect =
                         Platform.OS === 'web' && typeof window !== 'undefined'
-                          ? `${window.location.origin}${window.location.pathname || '/'}`
+                          ? `${window.location.origin}/`
                           : 'exp://localhost:8081';
                       const authUrl = `${API_BASE_URL}/google/auth/${encodeURIComponent(userId)}?expo_app=true&expo_redirect=${encodeURIComponent(expoRedirect)}`;
                       try {

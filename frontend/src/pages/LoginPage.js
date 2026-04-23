@@ -73,7 +73,10 @@ export default function LoginPage() {
     window.history.replaceState({}, document.title, window.location.pathname || '/');
     if (u) {
       const sessionId = genSession(u);
-      Alert.alert('Gmail connected', 'Your account is linked. You can use inbox features in Chat.');
+      // Web: go straight to Home (no modal) after server redirected back to the SPA.
+      if (Platform.OS !== 'web') {
+        Alert.alert('Gmail connected', 'Your account is linked. You can use inbox features in Chat.');
+      }
       navigation.replace('Home', {userId: u, sessionId});
     }
   }, [navigation]);
@@ -176,9 +179,8 @@ export default function LoginPage() {
   const getGoogleAuthUrl = () => {
     const username = loginName.trim().toLowerCase();
     // Get the current Expo web URL (for web platform)
-    const expoRedirect = Platform.OS === 'web' 
-      ? window.location.origin 
-      : 'exp://localhost:8081';
+    const expoRedirect =
+      Platform.OS === 'web' ? `${window.location.origin}/` : 'exp://localhost:8081';
     return `${API_BASE_URL}/google/auth/${encodeURIComponent(username)}?expo_app=true&expo_redirect=${encodeURIComponent(expoRedirect)}`;
   };
 

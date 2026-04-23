@@ -1,13 +1,17 @@
 """
-Full-text style search across SQLite user data (messages, tasks, projects, calendar).
+Search: SQLite (indexed pipeline data) plus live Gmail + Slack inbox search when OAuth/tokens exist.
+Outlook/Graph is not wired yet — returns an empty bucket until Microsoft auth is implemented.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
+import requests
 from flask import Blueprint, jsonify, request
 
 from storage.sqlite_db import get_conn
@@ -67,6 +71,122 @@ def _workspace_for_payload(payload: dict) -> str:
     ).strip().lower()
 
 
+def _gmail_query_from_tokens(tokens: list[str]) -> str:
+    """Gmail `q` syntax: space-separated terms are ANDed."""
+    return " ".join(t.strip() for t in tokens if t.strip())
+
+
+def _search_gmail_live(*, gmail_q: str, max_results: int) -> list[dict[str, Any]]:
+    """Live Gmail search via users.messages.list (requires token.json + credentials)."""
+    out: list[dict[str, Any]] = []
+    if not gmail_q:
+        return out
+    try:
+        from services.gmail_auth import get_gmail_service
+    except Exception as e:
+        log.warning("[user_search] gmail import failed: %s", e)
+        return out
+    try:
+        service = get_gmail_service()
+    except Exception as e:
+        log.info("[user_search] gmail live skipped (not signed in?): %s", e)
+        return out
+    try:
+        listed = (
+            service.users()
+            .messages()
+            .list(userId="me", q=gmail_q, maxResults=max(1, min(max_results, 25)))
+            .execute()
+        )
+    except Exception as e:
+        log.warning("[user_search] gmail list failed: %s", e)
+        return out
+    for m in listed.get("messages") or []:
+        mid = m.get("id")
+        if not mid:
+            continue
+        try:
+            msg = (
+                service.users()
+                .messages()
+                .get(userId="me", id=mid, format="metadata", metadataHeaders=["Subject", "From", "Date"])
+                .execute()
+            )
+        except Exception:
+            continue
+        headers = {str(h.get("name", "")).lower(): (h.get("value") or "") for h in (msg.get("payload") or {}).get("headers") or []}
+        subject = (headers.get("subject") or "(no subject)").strip()
+        from_h = (headers.get("from") or "").strip()
+        snippet = (msg.get("snippet") or "").strip()[:240]
+        thread_id = msg.get("threadId") or m.get("threadId")
+        out.append(
+            {
+                "kind": "gmail_live",
+                "message_id": mid,
+                "thread_id": str(thread_id) if thread_id else None,
+                "title": subject,
+                "subtitle": from_h,
+                "snippet": snippet,
+            }
+        )
+        if len(out) >= max_results:
+            break
+    return out
+
+
+def _search_slack_live(*, query: str, max_results: int) -> list[dict[str, Any]]:
+    """
+    Slack search.messages (bot needs search:read on the installed app).
+    Uses the same SLACK_BOT_TOKEN as interactive routes.
+    """
+    out: list[dict[str, Any]] = []
+    tok = (os.getenv("SLACK_BOT_TOKEN") or "").strip()
+    if not tok or not (query or "").strip():
+        return out
+    try:
+        r = requests.get(
+            "https://slack.com/api/search.messages",
+            headers={"Authorization": f"Bearer {tok}"},
+            params={"query": query.strip(), "count": max(1, min(max_results, 25))},
+            timeout=25,
+        )
+        data = r.json() if r.content else {}
+    except Exception as e:
+        log.warning("[user_search] slack search request failed: %s", e)
+        return out
+    if not data.get("ok"):
+        log.info("[user_search] slack search not ok: %s", data.get("error"))
+        return out
+    matches = (data.get("messages") or {}).get("matches") or []
+    for m in matches:
+        if not isinstance(m, dict):
+            continue
+        ch = m.get("channel") or {}
+        ch_name = ch.get("name") if isinstance(ch, dict) else ""
+        ch_id = ch.get("id") if isinstance(ch, dict) else ""
+        label = f"#{ch_name}" if ch_name else (f"channel:{ch_id}" if ch_id else "Slack")
+        user_label = (m.get("username") or m.get("user") or "").strip()
+        text = (m.get("text") or "").replace("\n", " ").strip()[:240]
+        out.append(
+            {
+                "kind": "slack_live",
+                "title": label,
+                "subtitle": user_label or "message",
+                "snippet": text,
+                "permalink": m.get("permalink") or "",
+                "ts": m.get("ts"),
+            }
+        )
+        if len(out) >= max_results:
+            break
+    return out
+
+
+def _search_outlook_live_placeholder() -> list[dict[str, Any]]:
+    """Microsoft Graph mail search is not implemented in core_app yet (no token store)."""
+    return []
+
+
 @user_search_bp.get("/api/search")
 def user_search():
     """
@@ -76,10 +196,13 @@ def user_search():
       q — search string (min 2 chars after trim; multi-word = AND on tokens)
       user_id — optional; when it looks like an email, results are scoped to that mailbox/workspace
       limit — max hits per bucket (default 20, max 40)
+      live — if ``0`` / ``false`` / ``no``, skip Gmail/Slack live API calls (default: on)
     """
     q = (request.args.get("q") or "").strip()
     user_id = (request.args.get("user_id") or "").strip().lower()
     should_scope_workspace = bool(user_id and "@" in user_id)
+    live_raw = (request.args.get("live") or "1").strip().lower()
+    want_live = live_raw not in ("0", "false", "no", "off")
     try:
         per_bucket = int(request.args.get("limit") or "20")
     except Exception:
@@ -96,6 +219,9 @@ def user_search():
                     "tokens": [],
                     "hits": {
                         "messages": [],
+                        "gmail_live": [],
+                        "slack_live": [],
+                        "outlook_live": [],
                         "tasks": [],
                         "projects": [],
                         "project_notes": [],
@@ -105,6 +231,8 @@ def user_search():
             ),
             200,
         )
+
+    gmail_q = _gmail_query_from_tokens(tokens)
 
     # LIKE … ESCAPE '\' — bind one pattern per token per bucket
     def like_params(tokens_: list[str]) -> tuple[str, list[Any]]:
@@ -121,6 +249,9 @@ def user_search():
 
     hits: dict[str, list[dict[str, Any]]] = {
         "messages": [],
+        "gmail_live": [],
+        "slack_live": [],
+        "outlook_live": [],
         "tasks": [],
         "projects": [],
         "project_notes": [],
@@ -335,6 +466,26 @@ def user_search():
                     "snippet": (d.get("notes") or "")[:180],
                 }
             )
+
+    if want_live:
+        live_limit = min(per_bucket, 20)
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            f_gmail = ex.submit(_search_gmail_live, gmail_q=gmail_q, max_results=live_limit)
+            f_slack = ex.submit(_search_slack_live, query=q, max_results=live_limit)
+            for fut in as_completed([f_gmail, f_slack]):
+                try:
+                    rows = fut.result()
+                except Exception as e:
+                    log.warning("[user_search] live worker failed: %s", e)
+                    continue
+                if not rows:
+                    continue
+                k = rows[0].get("kind")
+                if k == "gmail_live":
+                    hits["gmail_live"] = rows
+                elif k == "slack_live":
+                    hits["slack_live"] = rows
+        hits["outlook_live"] = _search_outlook_live_placeholder()
 
     total = sum(len(v) for v in hits.values())
     log.info("[user_search] q=%r tokens=%s total=%s", q, tokens, total)

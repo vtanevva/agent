@@ -81,9 +81,14 @@ def create_app():
     @flask_app.get("/")
     def root():
         """
-        OAuth used to redirect here when expo_redirect was ``/`` (same host as API) → confusing 404.
-        If ``web-build`` exists (Expo export, see repo Dockerfile), serve the web app; otherwise a tiny API landing page.
+        If ``web-build`` exists, serve the Expo web SPA (including Gmail OAuth return with
+        ``?gmail_oauth=1`` so ``LoginPage`` can navigate into the app). Without SPA, fall back to
+        small HTML pages for OAuth result or API landing.
         """
+        _has_spa = _web_build_dir.is_dir() and (_web_build_dir / "index.html").is_file()
+        if _has_spa:
+            return send_from_directory(_web_build_dir, "index.html")
+
         if request.args.get("gmail_oauth") == "1":
             user = (request.args.get("oauth_username") or "").strip()
             html = f"""<!DOCTYPE html>
@@ -104,8 +109,6 @@ def create_app():
   <p>Try again from the app, or set <code>OAUTH_FRONTEND_RETURN_URL</code> to your Expo web URL.</p>
 </body></html>"""
         else:
-            if _web_build_dir.is_dir() and (_web_build_dir / "index.html").is_file():
-                return send_from_directory(_web_build_dir, "index.html")
             html = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"/><title>Mental core API</title></head>
 <body style="font-family:system-ui,sans-serif;max-width:36rem;margin:3rem auto;padding:0 1rem">
