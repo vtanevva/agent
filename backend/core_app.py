@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from flask import Flask, jsonify, make_response, request, send_from_directory
+from flask import Flask, abort, jsonify, make_response, request, send_from_directory
 
 from api.routes.slack import slack_bp
 from api.routes.slack_interactive import slack_interactive_bp
@@ -57,6 +57,7 @@ def create_app():
     init_sqlite()
 
     _waitlist_dir = _backend_dir / "static" / "waitlist"
+    _web_build_dir = REPO_ROOT / "web-build"
 
     @flask_app.get("/health")
     def health():
@@ -66,7 +67,7 @@ def create_app():
     def root():
         """
         OAuth used to redirect here when expo_redirect was ``/`` (same host as API) → confusing 404.
-        Also serves a tiny landing page for humans who open the core origin in a browser.
+        If ``web-build`` exists (Expo export, see repo Dockerfile), serve the web app; otherwise a tiny API landing page.
         """
         if request.args.get("gmail_oauth") == "1":
             user = (request.args.get("oauth_username") or "").strip()
@@ -88,6 +89,8 @@ def create_app():
   <p>Try again from the app, or set <code>OAUTH_FRONTEND_RETURN_URL</code> to your Expo web URL.</p>
 </body></html>"""
         else:
+            if _web_build_dir.is_dir() and (_web_build_dir / "index.html").is_file():
+                return send_from_directory(_web_build_dir, "index.html")
             html = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"/><title>Mental core API</title></head>
 <body style="font-family:system-ui,sans-serif;max-width:36rem;margin:3rem auto;padding:0 1rem">
@@ -125,6 +128,22 @@ def create_app():
     flask_app.register_blueprint(google_oauth_bp)
     flask_app.register_blueprint(google_calendar_bp)
     flask_app.register_blueprint(recent_messages_bp)
+
+    @flask_app.get("/<path:spa_path>")
+    def spa_or_asset(spa_path: str):
+        """
+        Serve Expo web static export and SPA deep links. Registered after blueprints so API routes win.
+        """
+        if not _web_build_dir.is_dir() or not (_web_build_dir / "index.html").is_file():
+            abort(404)
+        target = _web_build_dir / spa_path
+        try:
+            target.resolve().relative_to(_web_build_dir.resolve())
+        except ValueError:
+            abort(404)
+        if target.is_file():
+            return send_from_directory(_web_build_dir, spa_path)
+        return send_from_directory(_web_build_dir, "index.html")
 
     @flask_app.before_request
     def _cors_preflight():

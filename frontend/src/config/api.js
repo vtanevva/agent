@@ -128,19 +128,43 @@ const getCoreBackendUrl = () => {
     return envCore;
   }
 
-  // Default local core backend port.
+  const envUseLocal =
+    process.env.EXPO_PUBLIC_USE_LOCAL ||
+    process.env.USE_LOCAL;
+  const USE_LOCAL = envUseLocal === 'true';
+
+  // Web dev: core Flask on :5000 next to the Expo web dev server.
   const webHostCore = getWebHostname();
   if (Platform.OS === 'web' && webHostCore) {
-    const url = `http://${webHostCore}:5000`;
-    console.log('Using local web CORE_BACKEND_URL (derived):', url);
+    const isProdWeb =
+      !!webHostCore &&
+      (webHostCore.includes('railway.app') ||
+        webHostCore.includes('railway') ||
+        webHostCore.includes('aivis.pw'));
+    if (!isProdWeb) {
+      const url = `http://${webHostCore}:5000`;
+      console.log('Using local web CORE_BACKEND_URL (derived):', url);
+      return url;
+    }
+    const origin = getWebOrigin();
+    if (origin) {
+      console.log('Using web production CORE_BACKEND_URL (same origin):', origin);
+      return origin;
+    }
+  }
+
+  // Native Expo: SQLite + calendar live on the same host as chat unless you split with env / USE_LOCAL.
+  if (Platform.OS !== 'web' && USE_LOCAL) {
+    const devHost = getDevHostFromRN();
+    const host = devHost || FALLBACK_LOCAL_IP;
+    const url = `http://${host}:5000`;
+    console.log('Using local device CORE_BACKEND_URL:', url, '(devHost=', devHost, ')');
     return url;
   }
 
-  const devHost = getDevHostFromRN();
-  const host = devHost || FALLBACK_LOCAL_IP;
-  const url = `http://${host}:5000`;
-  console.log('Using local device CORE_BACKEND_URL:', url, '(devHost=', devHost, ')');
-  return url;
+  const aligned = getApiBaseUrl();
+  console.log('Using CORE_BACKEND_URL aligned with API_BASE_URL:', aligned);
+  return aligned;
 };
 
 export const CORE_BACKEND_URL = getCoreBackendUrl();

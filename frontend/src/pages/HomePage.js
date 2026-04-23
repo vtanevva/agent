@@ -101,10 +101,17 @@ export default function HomePage() {
     }, [loadItems])
   );
 
-  const visibleItems = useMemo(
-    () => items.filter((it) => !hiddenIds.has(it.id)),
-    [items, hiddenIds]
-  );
+  const visibleItems = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    for (const it of items) {
+      if (!it || hiddenIds.has(it.id)) continue;
+      if (seen.has(it.id)) continue;
+      seen.add(it.id);
+      out.push(it);
+    }
+    return out;
+  }, [items, hiddenIds]);
 
   const displayName = useMemo(() => {
     if (!userId) return 'there';

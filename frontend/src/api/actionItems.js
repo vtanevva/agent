@@ -58,7 +58,17 @@ export async function markActionItemDone({userId, threadId, source}) {
  */
 export function mapActionItemToUi(item) {
   if (!item) return null;
-  const id = String(item.threadId || item.source_id || `${item.source || 'x'}-${item.ts || ''}`);
+  // Prefer source_id (unique per Gmail message / Slack event), then threadId, then a
+  // source+timestamp fallback. threadId alone is shared by all replies in a thread, so
+  // using it as a React key caused "same key" warnings on Home.
+  const srcPrefix = String(item.source || 'x');
+  const id = String(
+    item.source_id
+      ? `${srcPrefix}-${item.source_id}`
+      : item.threadId
+      ? `${srcPrefix}-${item.threadId}`
+      : `${srcPrefix}-${item.ts || ''}`
+  );
   const title =
     (item.subject && String(item.subject).trim()) ||
     (item.snippet && String(item.snippet).trim()) ||

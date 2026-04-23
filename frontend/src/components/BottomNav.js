@@ -121,7 +121,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     paddingHorizontal: 24,
-    paddingBottom: 18,
+    paddingBottom: 32,
     paddingTop: 8,
   },
   row: {
