@@ -36,6 +36,16 @@ def detect_intent(user_message: str) -> IntentType:
     if any(q in text for q in advice_questions):
         return "general"
 
+    has_email_kw = any(k in text for k in EMAIL_KEYWORDS)
+    has_slack_kw = any(k in text for k in SLACK_KEYWORDS)
+    if has_email_kw and not has_slack_kw:
+        return "email"
+    if has_slack_kw and not has_email_kw:
+        return "slack"
+    if not has_email_kw and not has_slack_kw:
+        return "general"
+
+    # Both keyword families present — disambiguate with a small LLM call.
     try:
         llm_service = get_llm_service()
         prompt = f"""Classify this user message into ONE category:
@@ -60,19 +70,14 @@ Category:"""
         )
         intent = response.strip().lower()
         if intent in {"email", "slack", "general"}:
-            # LLM often returns "general" for read-only inbox questions; keyword override fixes routing.
-            if intent == "general" and any(k in text for k in EMAIL_KEYWORDS):
+            if intent == "general" and has_email_kw:
                 return "email"
-            if intent == "general" and any(k in text for k in SLACK_KEYWORDS):
+            if intent == "general" and has_slack_kw:
                 return "slack"
             return intent  # type: ignore[return-value]
     except Exception as e:
         logger.warning("LLM intent detection failed: %s", e)
 
-    if any(k in text for k in EMAIL_KEYWORDS):
-        return "email"
-    if any(k in text for k in SLACK_KEYWORDS):
-        return "slack"
     return "general"
 
 
@@ -99,7 +104,19 @@ class Orchestrator:
         metadata: Optional[Dict[str, Any]] = None,
         message_type: Optional[IntentType] = None,
     ) -> Tuple[str, str]:
-        intent: IntentType = message_type if message_type in {"email", "slack", "general"} else detect_intent(user_message)
+        md = metadata if isinstance(metadata, dict) else {}
+        rd = md.get("reply_draft")
+        dp = md.get("draft_polish")
+        has_reply_context = isinstance(rd, dict) and bool(
+            (str(rd.get("snippet") or "").strip())
+            or (str(rd.get("subject") or "").strip())
+            or (str(rd.get("from_header") or "").strip())
+        )
+        has_draft_polish = isinstance(dp, dict) and bool(str(dp.get("draft") or "").strip())
+        if has_reply_context or has_draft_polish:
+            intent: IntentType = "general"
+        else:
+            intent = message_type if message_type in {"email", "slack", "general"} else detect_intent(user_message)
         session_memory = self.memory_service.get_session_history(
             user_id=user_id,
             session_id=session_id,
@@ -131,13 +148,20 @@ class Orchestrator:
 
         if intent == "general":
             try:
-                from backend.application.services.calendar_meeting_action import try_create_meeting_from_chat
+                if not has_draft_polish:
+                    from backend.application.services.calendar_meeting_action import try_create_meeting_from_chat
+                    from backend.application.services.chat_task_action import try_create_task_from_chat
 
-                meeting_reply = try_create_meeting_from_chat(user_message, metadata)
-                if meeting_reply:
-                    return intent, meeting_reply
+                    meeting_reply = try_create_meeting_from_chat(user_message, metadata)
+                    if meeting_reply:
+                        return intent, meeting_reply
+                    task_reply = try_create_task_from_chat(
+                        user_message, metadata, session_id=session_id
+                    )
+                    if task_reply:
+                        return intent, task_reply
             except Exception as e:
-                logger.warning("Meeting calendar shortcut skipped: %s", e)
+                logger.warning("Meeting/task chat shortcut skipped: %s", e)
 
         result = self.aivis_core.handle_chat(
             user_id=user_id,

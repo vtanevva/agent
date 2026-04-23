@@ -1,4 +1,5 @@
 import {CORE_BACKEND_URL} from '../config/api';
+import {extractEmailAddress} from '../utils/emailParse';
 
 /**
  * Fetch unified action items from the core backend.
@@ -56,6 +57,45 @@ export async function markActionItemDone({userId, threadId, source}) {
 /**
  * Normalise one raw API item into the shape the Home UI renders.
  */
+/** Display name or local-part from a From header or bare email. */
+export function senderShortName(from) {
+  if (!from) return '';
+  const m = /^([^<]+)<[^>]+>$/.exec(from);
+  if (m && m[1]) return m[1].trim().replace(/(^"|"$)/g, '');
+  const at = from.indexOf('@');
+  if (at > 0) return from.slice(0, at);
+  return from;
+}
+
+/**
+ * Short visible seed for Quick Chat + hidden `reply_draft` payload for the model (snippet, etc.).
+ */
+export function buildReplyDraftNavParams(item) {
+  if (!item) return {seedPrompt: '', replyDraft: null};
+  const from = String(item.from || '').trim();
+  const email = extractEmailAddress(from);
+  const displayTarget = email || senderShortName(from) || 'the sender';
+  const src = String(item.source || '').toLowerCase();
+  const sourceLabel =
+    src === 'gmail' ? 'Gmail' : src === 'slack' ? 'Slack' : src ? src.charAt(0).toUpperCase() + src.slice(1) : 'Message';
+  const seedPrompt = `Draft a concise, warm, professional reply to ${displayTarget}. Source: ${sourceLabel}.`;
+  const tid =
+    item.gmailThreadId != null && String(item.gmailThreadId).trim()
+      ? String(item.gmailThreadId).trim()
+      : item.threadId != null && String(item.threadId).trim()
+        ? String(item.threadId).trim()
+        : null;
+  const replyDraft = {
+    thread_id: tid,
+    source: item.source || '',
+    subject: item.title || '',
+    from_header: from,
+    reply_to_email: email || '',
+    snippet: String(item.snippet || '').slice(0, 4000),
+  };
+  return {seedPrompt, replyDraft};
+}
+
 export function mapActionItemToUi(item) {
   if (!item) return null;
   // Prefer source_id (unique per Gmail message / Slack event), then threadId, then a
@@ -75,9 +115,11 @@ export function mapActionItemToUi(item) {
     '(Untitled)';
   const fromAddr = String(item.from || '').trim();
   const timestamp = item.created_at || item.ts || '';
+  const gt = item.gmailThreadId != null && String(item.gmailThreadId).trim() ? String(item.gmailThreadId).trim() : null;
   return {
     id,
     threadId: item.threadId || null,
+    gmailThreadId: gt,
     source: item.source || '',
     title,
     from: fromAddr,

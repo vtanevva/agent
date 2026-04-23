@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,11 @@ import {colors} from '../styles/colors';
 import {commonStyles} from '../styles/commonStyles';
 import {API_BASE_URL} from '../config/api';
 import {fetchSqliteTasks, mapSqliteTaskToUi} from '../api/sqliteTasks';
+import {
+  fetchActionItems,
+  mapActionItemToUi,
+  buildReplyDraftNavParams,
+} from '../api/actionItems';
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -28,6 +33,21 @@ export default function TasksPage() {
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState('');
+  const [inboxItems, setInboxItems] = useState([]);
+
+  const loadInbox = useCallback(async () => {
+    if (!userId) {
+      setInboxItems([]);
+      return;
+    }
+    try {
+      const raw = await fetchActionItems(userId, 80);
+      const actionable = raw.filter((row) => row?.has_action || row?.hasAction);
+      setInboxItems(actionable.map(mapActionItemToUi).filter(Boolean));
+    } catch {
+      setInboxItems([]);
+    }
+  }, [userId]);
 
   const loadTasks = async () => {
     if (!userId) return;
@@ -55,6 +75,26 @@ export default function TasksPage() {
   useEffect(() => {
     if (userId) loadTasks();
   }, [userId]);
+
+  useEffect(() => {
+    loadInbox();
+  }, [loadInbox]);
+
+  const openReplyDraft = (item) => {
+    const {seedPrompt, replyDraft} = buildReplyDraftNavParams(item);
+    navigation.navigate('QuickChat', {
+      userId,
+      sessionId,
+      seedPrompt,
+      replyDraft,
+      seedThreadId: item.threadId || null,
+    });
+  };
+
+  const replyNeededItems = useMemo(() => {
+    const s = new Set(['gmail', 'slack']);
+    return inboxItems.filter((it) => s.has(String(it.source || '').toLowerCase()));
+  }, [inboxItems]);
 
   // NEW: Group by pipeline priority (NOW/SOON/LATER)
   const priorityGroups = useMemo(() => {
@@ -268,13 +308,48 @@ export default function TasksPage() {
                 <Text style={styles.controlButtonText}>{syncing ? 'Processing…' : '🚀 Process Emails'}</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={loadTasks}
+                onPress={() => {
+                  loadTasks();
+                  loadInbox();
+                }}
                 disabled={syncing || loading}
                 style={[styles.controlButtonAlt, (syncing || loading) && styles.controlButtonDisabled]}>
                 <Text style={styles.controlButtonTextAlt}>{loading ? 'Refreshing…' : 'Refresh'}</Text>
               </TouchableOpacity>
             </View>
           )}
+
+          {userId && replyNeededItems.length > 0 ? (
+            <View style={styles.inboxSection}>
+              <Text style={styles.inboxSectionTitle}>Needs your reply</Text>
+              <Text style={styles.inboxSectionHint}>Gmail and Slack threads waiting on you.</Text>
+              {replyNeededItems.map((it) => {
+                const src = String(it.source || '').toLowerCase();
+                const badge = src === 'gmail' ? 'Gmail' : src === 'slack' ? 'Slack' : src;
+                return (
+                  <View key={it.id} style={styles.inboxRow}>
+                    <View style={styles.inboxRowText}>
+                      <Text style={styles.inboxTitle} numberOfLines={2}>
+                        {it.title}
+                      </Text>
+                      <Text style={styles.inboxFrom} numberOfLines={1}>
+                        {it.from || '—'}
+                      </Text>
+                      {it.snippet ? (
+                        <Text style={styles.inboxSnip} numberOfLines={2}>
+                          {it.snippet}
+                        </Text>
+                      ) : null}
+                      <Text style={styles.inboxBadge}>{badge}</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => openReplyDraft(it)} style={styles.genAnswerBtn}>
+                      <Text style={styles.genAnswerBtnText}>Generate answer</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
 
           {error ? (
             <View style={styles.bannerError}>
@@ -860,6 +935,73 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.accent[600],
     marginTop: 4,
+  },
+  inboxSection: {
+    marginBottom: 14,
+    paddingBottom: 4,
+  },
+  inboxSectionTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.primary[900],
+    marginBottom: 4,
+  },
+  inboxSectionHint: {
+    fontSize: 12,
+    color: colors.primary[900] + '70',
+    marginBottom: 10,
+  },
+  inboxRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: colors.primary[100] + '50',
+    borderWidth: 1,
+    borderColor: colors.dark[500] + '10',
+    marginBottom: 10,
+  },
+  inboxRowText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  inboxTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary[900],
+  },
+  inboxFrom: {
+    marginTop: 4,
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.secondary[700],
+  },
+  inboxSnip: {
+    marginTop: 4,
+    fontSize: 11,
+    color: colors.primary[900] + '85',
+    lineHeight: 15,
+  },
+  inboxBadge: {
+    marginTop: 6,
+    fontSize: 10,
+    fontWeight: '800',
+    color: colors.accent[700],
+    textTransform: 'uppercase',
+  },
+  genAnswerBtn: {
+    alignSelf: 'center',
+    backgroundColor: colors.secondary[500],
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+  },
+  genAnswerBtnText: {
+    color: colors.primary[50],
+    fontSize: 11,
+    fontWeight: '800',
   },
 });
 

@@ -18,6 +18,7 @@ import {
   fetchActionItems,
   mapActionItemToUi,
   markActionItemDone,
+  buildReplyDraftNavParams,
 } from '../api/actionItems';
 import {fetchUserSearch} from '../api/userSearch';
 import TopSearchBar from '../components/TopSearchBar';
@@ -49,16 +50,6 @@ function formatWaiting(iso) {
   if (wasYesterday) return 'Waiting since yesterday';
   const diffDays = Math.max(1, Math.floor((now - d) / 86400000));
   return `Waiting since ${diffDays}d ago`;
-}
-
-function senderShortName(from) {
-  if (!from) return '';
-  // Parse "Name <email>" or bare email
-  const m = /^([^<]+)<[^>]+>$/.exec(from);
-  if (m && m[1]) return m[1].trim().replace(/(^"|"$)/g, '');
-  const at = from.indexOf('@');
-  if (at > 0) return from.slice(0, at);
-  return from;
 }
 
 export default function HomePage() {
@@ -199,16 +190,12 @@ export default function HomePage() {
   };
 
   const handleGenerate = (item) => {
-    const sender = senderShortName(item.from);
-    const snippet = (item.snippet || '').slice(0, 500);
-    const seed =
-      `Draft a concise, warm, professional reply to "${item.title}"` +
-      (sender ? ` from ${sender}` : '') +
-      (snippet ? `\n\n--- original message ---\n${snippet}` : '');
+    const {seedPrompt, replyDraft} = buildReplyDraftNavParams(item);
     navigation.navigate('QuickChat', {
       userId,
       sessionId,
-      seedPrompt: seed,
+      seedPrompt,
+      replyDraft,
       seedThreadId: item.threadId || null,
     });
   };

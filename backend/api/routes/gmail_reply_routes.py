@@ -7,6 +7,7 @@ from email.mime.text import MIMEText
 from typing import Any, Dict, Optional, Tuple
 
 from flask import Blueprint, jsonify, request
+from googleapiclient.errors import HttpError
 
 from services.gmail_auth import get_gmail_service
 from services.gmail_message import extract_plain_text, get_header
@@ -40,6 +41,69 @@ def _safe_json_loads(v: Any) -> dict:
 def _gmail_connect_error(reason: str) -> Tuple[dict, int]:
     # Keep response shape compatible with existing Expo modals.
     return {"success": False, "action": "connect_google", "error": reason}, 200
+
+
+def _obvious_placeholder_gmail_thread_id(tid: str) -> bool:
+    """True when ``tid`` looks like dev/test seed data, not a real Gmail thread id."""
+    t = (tid or "").strip().lower()
+    if not t:
+        return True
+    markers = ("e2e", "demo-thread", "fake-thread", "placeholder", "sample-thread")
+    if any(m in t for m in markers):
+        return True
+    if t.startswith("test-thread") or t.startswith("thread-test"):
+        return True
+    return False
+
+
+def _resolve_gmail_thread_id(service, raw_id: str) -> str:
+    """
+    If ``raw_id`` is already a Gmail thread id, return it.
+    If ``threads.get`` fails with 400, try ``raw_id`` as a **message** id and return ``threadId``.
+    """
+    raw_id = _safe_str(raw_id)
+    if not raw_id:
+        return ""
+    try:
+        service.users().threads().get(userId="me", id=raw_id, format="minimal").execute()
+        return raw_id
+    except HttpError as e:
+        sc = int(getattr(getattr(e, "resp", None), "status", 0) or 0)
+        if sc not in (400, 404):
+            raise
+    try:
+        msg = service.users().messages().get(userId="me", id=raw_id, format="minimal").execute()
+        tid = (msg or {}).get("threadId")
+        if tid and _safe_str(str(tid)):
+            resolved = _safe_str(str(tid))
+            if resolved != raw_id:
+                log.info("gmail: resolved message id to thread id (prefix raw=%s resolved=%s)", raw_id[:16], resolved[:16])
+            return resolved
+    except HttpError:
+        pass
+    return raw_id
+
+
+def _invalid_thread_id_response(err: HttpError) -> Optional[Tuple[dict, int]]:
+    """Map Gmail 400 invalid thread id to a JSON body + HTTP status (not 500)."""
+    status = int(getattr(getattr(err, "resp", None), "status", 0) or 0)
+    if status != 400:
+        return None
+    text = str(err)
+    if "Invalid id value" not in text and "invalidArgument" not in text:
+        return None
+    return (
+        {
+            "success": False,
+            "error": "invalid_gmail_thread_id",
+            "message": (
+                "Gmail does not recognize this thread id. It may be test/seed data in your local "
+                "database, not a real inbox thread. Open the message from your real Gmail inbox "
+                "and use Generate answer from there so the thread id matches your account."
+            ),
+        },
+        400,
+    )
 
 
 def _get_thread_detail(service, thread_id: str, *, prefer_from_email: str | None = None) -> Tuple[dict, Optional[str]]:
@@ -143,11 +207,27 @@ def thread_detail():
     if not thread_id:
         return jsonify({"success": False, "error": "missing_thread_id"}), 400
 
+    if _obvious_placeholder_gmail_thread_id(thread_id):
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "invalid_gmail_thread_id",
+                    "message": (
+                        "This thread id looks like test data, not a Gmail thread in your account."
+                    ),
+                }
+            ),
+            400,
+        )
+
     try:
         service = get_gmail_service()
     except Exception as e:
         body, status = _gmail_connect_error(str(e))
         return jsonify(body), status
+
+    thread_id = _resolve_gmail_thread_id(service, thread_id)
 
     try:
         detail, _last_mid = _get_thread_detail(
@@ -156,6 +236,13 @@ def thread_detail():
             prefer_from_email=prefer_from_email or None,
         )
         return jsonify({"success": True, **detail}), 200
+    except HttpError as e:
+        bad = _invalid_thread_id_response(e)
+        if bad:
+            log.warning("gmail thread-detail: invalid thread_id=%s", thread_id[:24])
+            return jsonify(bad[0]), bad[1]
+        log.exception(f"thread-detail failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
     except Exception as e:
         log.exception(f"thread-detail failed: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -254,13 +341,46 @@ def send_reply():
     to_email = _safe_str(payload.get("to"))
     body_text = _safe_str(payload.get("body"))
     if not thread_id or not to_email or not body_text:
-        return jsonify({"success": False, "error": "missing_thread_id_to_or_body"}), 400
+        log.warning(
+            "gmail reply 400 missing fields thread=%s to=%s body_len=%s",
+            bool(thread_id),
+            bool(to_email),
+            len(body_text or ""),
+        )
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "missing_thread_id_to_or_body",
+                    "message": "Need a non-empty Gmail thread id, recipient (to), and message body.",
+                }
+            ),
+            400,
+        )
+
+    if _obvious_placeholder_gmail_thread_id(thread_id):
+        log.warning("gmail reply 400 placeholder-like thread_id=%r", thread_id[:80])
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "invalid_gmail_thread_id",
+                    "message": (
+                        "This thread id looks like local test data (not a real Gmail thread). "
+                        "Use Generate answer on a real inbox item so Send can thread correctly."
+                    ),
+                }
+            ),
+            400,
+        )
 
     try:
         service = get_gmail_service()
     except Exception as e:
         body, status = _gmail_connect_error(str(e))
         return jsonify(body), status
+
+    thread_id = _resolve_gmail_thread_id(service, thread_id)
 
     try:
         detail, last_mid = _get_thread_detail(service, thread_id)
@@ -281,6 +401,13 @@ def send_reply():
         raw = _encode_mime_message(msg)
         resp = service.users().messages().send(userId="me", body={"raw": raw, "threadId": thread_id}).execute()
         return jsonify({"success": True, "id": resp.get("id")}), 200
+    except HttpError as e:
+        bad = _invalid_thread_id_response(e)
+        if bad:
+            log.warning("gmail reply: invalid thread_id=%s", thread_id)
+            return jsonify(bad[0]), bad[1]
+        log.exception(f"reply send failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
     except Exception as e:
         log.exception(f"reply send failed: {e}")
         return jsonify({"success": False, "error": str(e)}), 500

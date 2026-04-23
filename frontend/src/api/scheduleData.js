@@ -151,6 +151,19 @@ export function buildScheduleItems(events, tasks) {
   return items;
 }
 
+function _eventDedupeKey(ev) {
+  const id = String(ev?.id || '').trim();
+  if (id) return `id:${id}`;
+  const s = String(ev?.start || '');
+  const sum = String(ev?.summary || '');
+  return `t:${s}|${sum}`;
+}
+
+/**
+ * Calendar reads must merge every configured backend. Chat may create events on
+ * ``API_BASE_URL`` (OAuth there) while ``CORE_BACKEND_URL`` is another host with
+ * a different token/DB — the old "first success wins" behavior hid new meetings.
+ */
 async function loadCalendarEvents(userId, {timeMin, timeMax} = {}) {
   const body = {
     user_id: userId,
@@ -159,32 +172,46 @@ async function loadCalendarEvents(userId, {timeMin, timeMax} = {}) {
     ...(timeMax ? {time_max: timeMax} : {}),
   };
 
-  const bases = [...new Set([CORE_BACKEND_URL, API_BASE_URL].filter(Boolean))];
+  const bases = [...new Set([API_BASE_URL, CORE_BACKEND_URL].filter(Boolean))];
 
-  for (const base of bases) {
-    try {
-      const r = await fetch(`${base}/api/calendar/events`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(body),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        continue;
-      }
-      if (data?.success && Array.isArray(data.events)) {
-        const bannerUrl =
+  const chunks = await Promise.all(
+    bases.map(async (base) => {
+      try {
+        const r = await fetch(`${base}/api/calendar/events`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || !data?.success || !Array.isArray(data.events)) {
+          return {events: [], connectUrl: ''};
+        }
+        const connectUrl =
           data?.action === 'connect_google' && data?.connect_url ? data.connect_url : '';
-        return {events: data.events, connectUrl: bannerUrl};
+        return {events: data.events, connectUrl};
+      } catch {
+        return {events: [], connectUrl: ''};
       }
-      if (data?.action === 'connect_google' && data?.connect_url) {
-        return {events: [], connectUrl: data.connect_url};
-      }
-    } catch {
-      continue;
+    }),
+  );
+
+  const merged = new Map();
+  for (const ch of chunks) {
+    for (const ev of ch.events) {
+      const k = _eventDedupeKey(ev);
+      if (!merged.has(k)) merged.set(k, ev);
     }
   }
-  return {events: [], connectUrl: ''};
+  const events = [...merged.values()].sort((a, b) =>
+    String(a.start || '').localeCompare(String(b.start || '')),
+  );
+
+  let connectUrl = '';
+  if (events.length === 0) {
+    connectUrl = chunks.find((c) => c.connectUrl)?.connectUrl || '';
+  }
+
+  return {events, connectUrl};
 }
 
 async function loadTasksFromSqlite() {

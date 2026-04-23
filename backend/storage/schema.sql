@@ -192,3 +192,17 @@ CREATE TABLE IF NOT EXISTS gmail_watch_state (
   updated_at TEXT NOT NULL,
   note TEXT
 );
+
+-- Threads the user has already replied to (used to hide answered items from the tasks list).
+CREATE TABLE IF NOT EXISTS thread_replies (
+  source TEXT NOT NULL,           -- 'gmail' / 'slack'
+  workspace_id TEXT NOT NULL,     -- mailbox email / slack workspace
+  thread_id TEXT NOT NULL,
+  answered_at TEXT NOT NULL,      -- ISO-8601 UTC (when the reply was sent)
+  sent_message_id TEXT,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (source, workspace_id, thread_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_thread_replies_source_workspace
+ON thread_replies(source, workspace_id);

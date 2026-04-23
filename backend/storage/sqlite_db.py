@@ -122,6 +122,25 @@ def _migrate_sqlite(conn: sqlite3.Connection) -> None:
         """
     )
 
+    # Threads the user already replied to (hide answered items from tasks list).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS thread_replies (
+          source TEXT NOT NULL,
+          workspace_id TEXT NOT NULL,
+          thread_id TEXT NOT NULL,
+          answered_at TEXT NOT NULL,
+          sent_message_id TEXT,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (source, workspace_id, thread_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_thread_replies_source_workspace "
+        "ON thread_replies(source, workspace_id)"
+    )
+
 
 # ---------- Gmail watch state (Pub/Sub baseline) ----------
 def get_gmail_watch_state(email_address: str) -> dict[str, Any] | None:
@@ -259,6 +278,82 @@ def set_gmail_draft_result(
             (str(draft_id).strip() if draft_id else None, str(status or "").strip(), (str(error) if error else None), now, message_id),
         )
         conn.commit()
+
+
+# ---------- Thread replies (answered inbound threads) ----------
+def mark_thread_answered(
+    *,
+    source: str,
+    workspace_id: str,
+    thread_id: str,
+    answered_at: str | None = None,
+    sent_message_id: str | None = None,
+) -> None:
+    """
+    Record that the user replied in this thread. Used by the tasks list to
+    hide items that no longer need action.
+
+    Keeps the *latest* answered_at so a reply after a fresh inbound still wins.
+    """
+    source = (str(source or "").strip().lower())
+    workspace_id = (str(workspace_id or "").strip().lower())
+    thread_id = (str(thread_id or "").strip())
+    if not source or not workspace_id or not thread_id:
+        return
+
+    ts = (str(answered_at).strip() if answered_at else "") or utc_iso()
+    now = utc_iso()
+    sid = (str(sent_message_id).strip() if sent_message_id else None)
+
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO thread_replies
+              (source, workspace_id, thread_id, answered_at, sent_message_id, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source, workspace_id, thread_id) DO UPDATE SET
+              answered_at = CASE
+                WHEN excluded.answered_at > thread_replies.answered_at
+                  THEN excluded.answered_at
+                ELSE thread_replies.answered_at
+              END,
+              sent_message_id = COALESCE(excluded.sent_message_id, thread_replies.sent_message_id),
+              updated_at = excluded.updated_at
+            """,
+            (source, workspace_id, thread_id, ts, sid, now),
+        )
+        conn.commit()
+
+
+def get_answered_threads(
+    *,
+    source: str,
+    workspace_id: str | None = None,
+) -> dict[str, str]:
+    """
+    Returns a {thread_id: answered_at} map for the given source (optionally
+    scoped by workspace/mailbox). Callers compare answered_at with the inbound
+    message timestamp to decide whether to hide it.
+    """
+    source = (str(source or "").strip().lower())
+    if not source:
+        return {}
+
+    params: list[Any] = [source]
+    sql = "SELECT thread_id, answered_at FROM thread_replies WHERE source = ?"
+    ws = (str(workspace_id).strip().lower() if workspace_id else "")
+    if ws:
+        sql += " AND workspace_id = ?"
+        params.append(ws)
+
+    out: dict[str, str] = {}
+    with get_conn() as conn:
+        rows = conn.execute(sql, tuple(params)).fetchall()
+    for r in rows or []:
+        tid = str(r["thread_id"] or "")
+        if tid:
+            out[tid] = str(r["answered_at"] or "")
+    return out
 
 
 # ---------- Clients / Projects / Context ----------
@@ -940,7 +1035,7 @@ def list_recent_tasks(limit: int = 20) -> list[dict[str, Any]]:
             SELECT
               t.id, t.source, t.source_id, t.grafik_task_id,
               t.client_id, t.project_id,
-              t.title, t.classification_type,
+              t.title, t.classification_type, t.classification_json,
               t.created_at, t.updated_at,
               c.name AS client_name,
               p.name AS project_name

@@ -5,8 +5,9 @@ from typing import Any, List
 
 from flask import Blueprint, jsonify, request
 
-from storage.sqlite_db import get_conn
+from storage.sqlite_db import get_answered_threads, get_conn, mark_thread_answered
 from utils.logger import get_logger
+from services.marketing_email_signals import should_suppress_as_non_actionable
 
 
 log = get_logger("action_items")
@@ -27,10 +28,23 @@ def _safe_json_loads(v: Any) -> dict:
         return {}
 
 
+_REPLY_TYPES_NEEDING_RESPONSE = {"short", "time_relevant", "context_relevant"}
+
+
 def _as_actionable(*, classification_type: Any, classification: dict) -> bool:
+    """
+    A row deserves a spot in the tasks/action list when it is either:
+      - a concrete action/task (classification_type == 'ACTION' or has_action)
+      - or a message that expects a reply (reply_type != 'none')
+
+    Marketing/newsletters are excluded upstream by ``is_likely_marketing_or_newsletter``.
+    """
     if str(classification_type or "").strip().upper() == "ACTION":
         return True
-    return bool(classification.get("has_action") is True or classification.get("has_action") == 1)
+    if bool(classification.get("has_action") is True or classification.get("has_action") == 1):
+        return True
+    reply_type = str(classification.get("reply_type") or "none").strip().lower()
+    return reply_type in _REPLY_TYPES_NEEDING_RESPONSE
 
 
 def _text_preview(v: Any, limit: int = 180) -> str:
@@ -40,6 +54,31 @@ def _text_preview(v: Any, limit: int = 180) -> str:
     return s[:limit] + ("..." if len(s) > limit else "")
 
 
+def _chat_task_row_to_item(row: dict) -> dict:
+    """Tasks created from chat (``tasks.source='chat'``) for the Home action list."""
+    cls = _safe_json_loads(row.get("classification_json"))
+    tid = row.get("id")
+    due = cls.get("due_datetime") or cls.get("due_datetime_iso") or ""
+    snippet = f"Due {due}" if due else "Chat task"
+    sid = str(row.get("source_id") or tid or "")
+    return {
+        "source": "chat_task",
+        "source_id": sid,
+        "threadId": str(tid) if tid is not None else sid,
+        "from": "Chat",
+        "subject": row.get("title") or "(Task)",
+        "snippet": snippet,
+        "channel": None,
+        "user": None,
+        "ts": row.get("created_at"),
+        "created_at": row.get("created_at"),
+        "classification_type": row.get("classification_type") or "ACTION",
+        "classification": cls,
+        "has_action": True,
+        "hasAction": True,
+    }
+
+
 def _row_to_item(row: dict) -> dict:
     payload = _safe_json_loads(row.get("payload_json"))
     cls = _safe_json_loads(row.get("classification_json"))
@@ -47,14 +86,18 @@ def _row_to_item(row: dict) -> dict:
     source = row.get("source") or ""
 
     # "threadId" is what the Expo UI expects for list identity/actions.
+    gmail_thread_id: str | None = None
     if source == "gmail":
-        thread_id = payload.get("thread_id") or payload.get("threadId") or payload.get("thread_id")
+        _tid = payload.get("thread_id") or payload.get("threadId")
+        if _tid is not None and str(_tid).strip():
+            gmail_thread_id = str(_tid).strip()
+        thread_id = gmail_thread_id
     elif source == "slack":
         thread_id = payload.get("thread_ts") or payload.get("threadTs") or payload.get("ts") or row.get("ts")
     else:
         thread_id = payload.get("thread_id") or payload.get("thread_ts") or row.get("ts")
 
-    # Always fall back to source_id to keep IDs stable.
+    # Fall back to source_id for list identity only (may be a message id, not a Gmail thread id).
     thread_id = thread_id or row.get("source_id")
 
     from_value = (
@@ -72,7 +115,7 @@ def _row_to_item(row: dict) -> dict:
     classification_type = row.get("classification_type")
     actionable = _as_actionable(classification_type=classification_type, classification=cls)
 
-    return {
+    out: dict = {
         "source": source,
         "source_id": row.get("source_id"),
         "threadId": str(thread_id) if thread_id is not None else None,
@@ -88,6 +131,9 @@ def _row_to_item(row: dict) -> dict:
         "has_action": bool(actionable),
         "hasAction": bool(actionable),
     }
+    if source == "gmail":
+        out["gmailThreadId"] = gmail_thread_id
+    return out
 
 
 @action_items_bp.get("/api/action-items")
@@ -132,6 +178,18 @@ def list_action_items():
             (fetch_n,),
         ).fetchall()
 
+    # Threads the user has already replied to — hide messages older than the reply.
+    try:
+        gmail_answered = get_answered_threads(source="gmail")
+    except Exception as e:
+        log.warning("[action-items] get_answered_threads(gmail) failed: %s", e)
+        gmail_answered = {}
+    try:
+        slack_answered = get_answered_threads(source="slack")
+    except Exception as e:
+        log.warning("[action-items] get_answered_threads(slack) failed: %s", e)
+        slack_answered = {}
+
     items: List[dict] = []
     for r in rows:
         row = dict(r)
@@ -147,28 +205,126 @@ def list_action_items():
             if workspace and workspace != user_id:
                 continue
 
+        # Transcript / in-app agent lines are not the mail/Slack action inbox.
+        if str(row.get("source") or "").strip().lower() in ("chat", "gmail_chat", "slack_chat"):
+            continue
+
         if not _as_actionable(classification_type=row.get("classification_type"), classification=cls):
             continue
+
+        src_l = str(row.get("source") or "").strip().lower()
+
+        # Hide marketing / notifications / no-reply / ESP traffic already stored
+        # (no re-ingest required; this is a runtime filter).
+        if src_l == "gmail":
+            subj_g = (payload.get("subject") or cls.get("title") or "").strip()
+            raw_g = (
+                str(row.get("text") or "")
+                or str(payload.get("text") or payload.get("body") or payload.get("snippet") or "")
+            ).strip()
+            sender_g = str(
+                payload.get("from")
+                or payload.get("sender")
+                or row.get("user")
+                or ""
+            )
+            suppress, _reason = should_suppress_as_non_actionable(
+                payload=payload, subject=subj_g, raw_text=raw_g, sender=sender_g,
+            )
+            if suppress:
+                continue
+
+        # Hide items on threads the user already replied to AFTER this message arrived.
+        if src_l in ("gmail", "slack"):
+            answered_map = gmail_answered if src_l == "gmail" else slack_answered
+            if answered_map:
+                thread_id_raw = (
+                    payload.get("thread_id")
+                    or payload.get("threadId")
+                    or payload.get("thread_ts")
+                    or payload.get("threadTs")
+                )
+                tid = str(thread_id_raw) if thread_id_raw else ""
+                if tid:
+                    answered_at = answered_map.get(tid)
+                    if answered_at:
+                        received_at = str(row.get("created_at") or "")
+                        # ISO-8601 UTC strings sort lexicographically — reply after receipt => hide.
+                        if not received_at or answered_at >= received_at:
+                            continue
 
         items.append(_row_to_item(row))
         if len(items) >= limit:
             break
 
-    return jsonify({"success": True, "total": len(items), "items": items}), 200
+    chat_task_rows: List[dict] = []
+    try:
+        with get_conn() as conn:
+            ct = conn.execute(
+                """
+                SELECT id, source, source_id, title, description,
+                       classification_type, classification_json, created_at
+                FROM tasks
+                WHERE lower(trim(source)) = 'chat'
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (min(limit, 100),),
+            ).fetchall()
+        chat_task_rows = [dict(r) for r in ct]
+    except Exception as e:
+        log.warning("[action-items] chat tasks read failed: %s", e)
+
+    chat_items = [_chat_task_row_to_item(r) for r in chat_task_rows]
+    merged = sorted(
+        chat_items + items,
+        key=lambda x: str(x.get("created_at") or x.get("ts") or ""),
+        reverse=True,
+    )[:limit]
+
+    return jsonify({"success": True, "total": len(merged), "items": merged}), 200
+
+
+def _mark_thread_answered_from_payload(payload: dict) -> dict:
+    """
+    Shared handler for 'done' / 'archive'. Treat a user click as an explicit
+    "this thread has been taken care of" and persist it in ``thread_replies``
+    so the tasks list hides it permanently.
+    """
+    source = str(payload.get("source") or "").strip().lower()
+    thread_id = str(payload.get("thread_id") or payload.get("threadId") or "").strip()
+    workspace_id = str(
+        payload.get("workspace_id")
+        or payload.get("workspaceId")
+        or payload.get("email_address")
+        or payload.get("user_id")
+        or ""
+    ).strip().lower()
+
+    if source in ("gmail", "slack") and thread_id and workspace_id:
+        try:
+            mark_thread_answered(
+                source=source,
+                workspace_id=workspace_id,
+                thread_id=thread_id,
+            )
+        except Exception as e:
+            log.warning("[action-items] mark_thread_answered failed: %s", e)
+            return {"success": False, "thread_id": thread_id, "error": str(e)}
+
+    return {"success": True, "thread_id": thread_id or None}
 
 
 @action_items_bp.post("/api/action-items/archive")
 def archive_action_item():
-    # Placeholder (no-op). The UI hides items optimistically.
     payload = request.get_json(silent=True) or {}
-    return jsonify({"success": True, "thread_id": payload.get("thread_id")}), 200
+    return jsonify(_mark_thread_answered_from_payload(payload)), 200
 
 
 @action_items_bp.post("/api/action-items/done")
 def done_action_item():
-    # Placeholder (no-op). The UI hides items optimistically.
     payload = request.get_json(silent=True) or {}
-    return jsonify({"success": True, "thread_id": payload.get("thread_id")}), 200
+    return jsonify(_mark_thread_answered_from_payload(payload)), 200
 
 
 __all__ = ["action_items_bp"]

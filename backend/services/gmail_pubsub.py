@@ -5,6 +5,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Set, Tuple
 
 from googleapiclient.errors import HttpError
@@ -19,6 +20,7 @@ from storage.sqlite_db import (
     get_gmail_watch_state,
     get_gmail_last_history_id,
     log_event,
+    mark_thread_answered,
     set_gmail_last_history_id,
     set_gmail_draft_result,
     try_acquire_gmail_draft_lock,
@@ -267,6 +269,35 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> Dict[str, Any]:
             # (otherwise you can get a "draft loop" on your own replies).
             label_set = {str(x) for x in msg_label_ids if x}
             if "SENT" in label_set:
+                # The user replied in this Gmail thread — record it so the tasks list
+                # can hide the original inbound message as "answered".
+                if thread_id:
+                    internal_ts = msg.get("internalDate")
+                    answered_at_iso: str | None = None
+                    try:
+                        if internal_ts is not None:
+                            answered_at_iso = (
+                                datetime.fromtimestamp(int(internal_ts) / 1000, tz=timezone.utc)
+                                .replace(microsecond=0, tzinfo=None)
+                                .isoformat()
+                                + "Z"
+                            )
+                    except Exception:
+                        answered_at_iso = None
+                    try:
+                        mark_thread_answered(
+                            source="gmail",
+                            workspace_id=email_address,
+                            thread_id=thread_id,
+                            answered_at=answered_at_iso,
+                            sent_message_id=str(mid),
+                        )
+                        log.info(
+                            f"[GMAIL PUSH] thread answered email={email_address} "
+                            f"thread_id={thread_id} message_id={mid} answered_at={answered_at_iso}"
+                        )
+                    except Exception as e:
+                        log.exception(f"[GMAIL PUSH] mark_thread_answered failed: {e}")
                 continue
             if "INBOX" not in label_set:
                 continue

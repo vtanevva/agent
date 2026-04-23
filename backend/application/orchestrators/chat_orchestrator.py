@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from application.orchestrators.event_orchestrator import handle_normalized_event
 from application.services.calendar_meeting_action import try_create_meeting_from_chat
+from application.services.chat_task_action import try_create_task_from_chat
 from application.services.thread_service import store_chat_message
 from utils.logger import get_logger
 from services.ai_chat_client import complete_chat
@@ -105,7 +106,18 @@ def handle_chat_turn(
         extra={"message_type": message_type, "metadata": metadata} if (message_type or metadata) else None,
     )
 
-    shortcut_reply = try_create_meeting_from_chat(user_message, metadata)
+    skip_shortcuts = False
+    if isinstance(metadata, dict):
+        _dp = metadata.get("draft_polish")
+        skip_shortcuts = isinstance(_dp, dict) and bool(str(_dp.get("draft") or "").strip())
+
+    shortcut_reply = None
+    if not skip_shortcuts:
+        shortcut_reply = try_create_meeting_from_chat(user_message, metadata)
+    if not shortcut_reply and not skip_shortcuts:
+        shortcut_reply = try_create_task_from_chat(
+            user_message, metadata, session_id=session_id
+        )
     if shortcut_reply:
         intent, reply = "general", shortcut_reply
     else:

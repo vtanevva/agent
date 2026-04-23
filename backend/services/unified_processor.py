@@ -21,7 +21,7 @@ from services.inbound_reply_service import (
     should_create_gmail_draft,
 )
 from services.metrics_tracker import build_metrics_event
-from services.marketing_email_signals import is_likely_marketing_or_newsletter
+from services.marketing_email_signals import should_suppress_as_non_actionable
 from services.task_service import (
     build_grafik_task_title_and_description,
     create_grafik_task_and_record,
@@ -433,35 +433,55 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
         },
     )
 
-    # 3) Classification
-    classification, classification_input, reply_type, has_action = classify_and_enrich(
-        source=source,
-        source_id=source_id or "",
-        raw_text=raw_text,
-        text_for_classification=text_for_classification,
-        client_name=client_name,
-        project_name=project_name,
-        project_context=project_context,
-        project_resolution_reason=project_resolution_reason,
-        project_confidence=project_confidence,
-        needs_project_review=needs_project_review,
-        force_draft_ready=force_draft_ready,
-    )
+    # 3) Classification (in-app chat ingest skips LLM — assistant reply is handled by AI chat service)
+    if source in ("chat", "gmail_chat", "slack_chat"):
+        classification_input = text_for_classification or raw_text
+        classification = {
+            "has_action": False,
+            "reply_type": "none",
+            "client_name": client_name,
+            "project_name": project_name,
+            "project_resolution_reason": project_resolution_reason,
+            "project_confidence": project_confidence,
+            "needs_project_review": needs_project_review,
+        }
+        reply_type = "none"
+        has_action = False
+    else:
+        classification, classification_input, reply_type, has_action = classify_and_enrich(
+            source=source,
+            source_id=source_id or "",
+            raw_text=raw_text,
+            text_for_classification=text_for_classification,
+            client_name=client_name,
+            project_name=project_name,
+            project_context=project_context,
+            project_resolution_reason=project_resolution_reason,
+            project_confidence=project_confidence,
+            needs_project_review=needs_project_review,
+            force_draft_ready=force_draft_ready,
+        )
 
-    # App chat routed through Gmail/Slack agents uses synthetic sources; never auto-create tasks.
-    if source in ("gmail_chat", "slack_chat"):
+    # In-app user chat (transcript ingest + Gmail/Slack agent delegates) must not become
+    # Grafik tasks or homepage action items — only real inbound mail/Slack should.
+    if source in ("chat", "gmail_chat", "slack_chat"):
         has_action = False
         classification["has_action"] = False
-        classification["suppress_task_reason"] = "app_chat_delegate"
+        classification["suppress_task_reason"] = (
+            "transcript_chat_ingest" if source == "chat" else "app_chat_delegate"
+        )
 
-    elif source == "gmail" and has_action and is_likely_marketing_or_newsletter(
-        payload=payload if isinstance(payload, dict) else {},
-        subject=subject or "",
-        raw_text=raw_text,
-    ):
-        has_action = False
-        classification["has_action"] = False
-        classification["suppress_task_reason"] = "likely_marketing_newsletter"
+    elif source == "gmail" and has_action:
+        suppress, suppress_reason = should_suppress_as_non_actionable(
+            payload=payload if isinstance(payload, dict) else {},
+            subject=subject or "",
+            raw_text=raw_text,
+            sender=sender or "",
+        )
+        if suppress:
+            has_action = False
+            classification["has_action"] = False
+            classification["suppress_task_reason"] = suppress_reason or "non_actionable_sender"
 
     # 4) Project update + project memory update
     project_update_candidate = extract_project_updates(text_for_classification or raw_text)

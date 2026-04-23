@@ -37,6 +37,14 @@ def api_chat():
 
     message_type = payload.get("message_type") or payload.get("messageType")
     metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None
+    reply_draft = payload.get("reply_draft") if isinstance(payload.get("reply_draft"), dict) else None
+    if reply_draft:
+        metadata = dict(metadata or {})
+        metadata["reply_draft"] = reply_draft
+    draft_polish = payload.get("draft_polish") if isinstance(payload.get("draft_polish"), dict) else None
+    if draft_polish:
+        metadata = dict(metadata or {})
+        metadata["draft_polish"] = draft_polish
 
     if not user_id or not session_id:
         return jsonify({"success": False, "error": "missing_user_id_or_session_id"}), 400

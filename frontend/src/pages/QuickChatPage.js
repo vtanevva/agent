@@ -9,13 +9,16 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Alert,
+  Share,
 } from 'react-native';
 import {useRoute, useNavigation} from '@react-navigation/native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Svg, Line, Path} from 'react-native-svg';
 
 import {theme} from '../styles/theme';
-import {API_BASE_URL} from '../config/api';
+import {API_BASE_URL, CORE_BACKEND_URL} from '../config/api';
+import {extractEmailAddress} from '../utils/emailParse';
 
 /**
  * Figma-styled "quick" chat — opened from Home's + button and from
@@ -29,13 +32,52 @@ import {API_BASE_URL} from '../config/api';
 export default function QuickChatPage() {
   const route = useRoute();
   const navigation = useNavigation();
-  const {userId, sessionId, seedPrompt} = route.params || {};
+  const {userId, sessionId, seedPrompt, replyDraft} = route.params || {};
 
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState([]); // [{role:'user'|'assistant', text}]
   const [loading, setLoading] = useState(false);
+  const [editableDraft, setEditableDraft] = useState('');
+  const [showReplyComposer, setShowReplyComposer] = useState(false);
+  /** Gmail Send button: idle → sending → sent (stay on screen until user leaves). */
+  const [gmailReplyBtn, setGmailReplyBtn] = useState('idle');
+  const [rewriteAsInstruction, setRewriteAsInstruction] = useState('');
+  const [polishLoading, setPolishLoading] = useState(false);
   const scrollRef = useRef(null);
   const seedConsumed = useRef(false);
+  const replyDraftRef = useRef(null);
+  const replyDraftAttachedRef = useRef(false);
+  const pendingReplyDraftSendRef = useRef(false);
+
+  // Persist reply-draft payload for the first /api/chat call only (full excerpt for the model).
+  useEffect(() => {
+    if (replyDraft && typeof replyDraft === 'object') {
+      replyDraftRef.current = replyDraft;
+      replyDraftAttachedRef.current = false;
+      pendingReplyDraftSendRef.current = false;
+      setGmailReplyBtn('idle');
+      setRewriteAsInstruction('');
+    }
+    try {
+      if (replyDraft) navigation.setParams({replyDraft: undefined});
+    } catch {
+      // no-op
+    }
+  }, [replyDraft, navigation]);
+
+  useEffect(() => {
+    const unsub = navigation.addListener('beforeRemove', () => {
+      replyDraftRef.current = null;
+      replyDraftAttachedRef.current = false;
+      pendingReplyDraftSendRef.current = false;
+      setShowReplyComposer(false);
+      setEditableDraft('');
+      setGmailReplyBtn('idle');
+      setRewriteAsInstruction('');
+      setPolishLoading(false);
+    });
+    return unsub;
+  }, [navigation]);
 
   // Consume a seeded prompt (e.g. from Home "Generate answer")
   useEffect(() => {
@@ -69,23 +111,41 @@ export default function QuickChatPage() {
     const text = input.trim();
     if (!text || loading) return;
 
+    const attachDraft =
+      replyDraftRef.current &&
+      !replyDraftAttachedRef.current &&
+      (replyDraftRef.current.snippet || replyDraftRef.current.subject || replyDraftRef.current.from_header);
+
+    if (attachDraft) {
+      pendingReplyDraftSendRef.current = true;
+    }
+
     setMessages((prev) => [...prev, {role: 'user', text}]);
     setInput('');
     setLoading(true);
     scrollToBottom();
 
     try {
+      const body = {
+        message: text,
+        user_id: userId,
+        session_id: sessionId,
+      };
+      if (attachDraft) {
+        body.reply_draft = replyDraftRef.current;
+      }
+
       const r = await fetch(`${API_BASE_URL}/api/chat`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          message: text,
-          user_id: userId,
-          session_id: sessionId,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`);
+
+      if (attachDraft) {
+        replyDraftAttachedRef.current = true;
+      }
 
       let reply = data?.reply || '';
       if (typeof reply !== 'string') {
@@ -95,8 +155,21 @@ export default function QuickChatPage() {
           reply = String(reply);
         }
       }
-      setMessages((prev) => [...prev, {role: 'assistant', text: reply || '…'}]);
+
+      const singleDraftUi =
+        pendingReplyDraftSendRef.current && replyDraftRef.current;
+      if (singleDraftUi) {
+        pendingReplyDraftSendRef.current = false;
+        setEditableDraft((reply || '').trim());
+        const src = String(replyDraftRef.current.source || '').toLowerCase();
+        setShowReplyComposer(src === 'gmail' || src === 'slack');
+        setGmailReplyBtn('idle');
+        // Draft appears only in the composer (same bg as screen) — no assistant bubble.
+      } else {
+        setMessages((prev) => [...prev, {role: 'assistant', text: reply || '…'}]);
+      }
     } catch (e) {
+      pendingReplyDraftSendRef.current = false;
       setMessages((prev) => [
         ...prev,
         {role: 'assistant', text: `Sorry — ${String(e?.message || e)}`},
@@ -106,6 +179,103 @@ export default function QuickChatPage() {
       scrollToBottom();
     }
   }, [input, loading, userId, sessionId]);
+
+  const sendGmailReply = useCallback(async () => {
+    const rd = replyDraftRef.current;
+    const bodyText = (editableDraft || '').trim();
+    const threadId = rd?.thread_id != null ? String(rd.thread_id).trim() : '';
+    const toRaw =
+      (rd?.reply_to_email && String(rd.reply_to_email).trim()) ||
+      extractEmailAddress(String(rd?.from_header || ''));
+    const to = (toRaw || '').trim();
+    if (!threadId || !to || !bodyText) {
+      Alert.alert(
+        'Cannot send',
+        !threadId ? 'Missing thread.' : !to ? 'Could not detect recipient email.' : 'Draft is empty.',
+      );
+      return;
+    }
+    setGmailReplyBtn('sending');
+    try {
+      const r = await fetch(`${CORE_BACKEND_URL}/api/gmail/reply`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          user_id: userId,
+          thread_id: threadId,
+          to,
+          body: bodyText,
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (data?.success) {
+        setGmailReplyBtn('sent');
+      } else if (data?.action === 'connect_google') {
+        setGmailReplyBtn('idle');
+        Alert.alert('Google', 'Connect Google in settings, then try again.');
+      } else {
+        setGmailReplyBtn('idle');
+        const msg = data?.message || data?.error || `HTTP ${r.status}`;
+        Alert.alert(data?.error === 'invalid_gmail_thread_id' ? 'Invalid thread' : 'Send failed', String(msg));
+      }
+    } catch (e) {
+      setGmailReplyBtn('idle');
+      Alert.alert('Send failed', String(e?.message || e));
+    }
+  }, [editableDraft, userId]);
+
+  const polishDraftWithAi = useCallback(async () => {
+    const draft = (editableDraft || '').trim();
+    if (!draft) {
+      Alert.alert('No draft', 'Write or generate a draft first.');
+      return;
+    }
+    const instruction = (rewriteAsInstruction || '').trim() || 'Polish for clarity and a professional tone.';
+    setPolishLoading(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/chat`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          message: 'Polish email draft.',
+          user_id: userId,
+          session_id: sessionId,
+          draft_polish: {
+            instruction,
+            draft,
+          },
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`);
+      let reply = data?.reply || '';
+      if (typeof reply !== 'string') {
+        try {
+          reply = JSON.stringify(reply);
+        } catch {
+          reply = String(reply);
+        }
+      }
+      setEditableDraft((reply || '').trim());
+    } catch (e) {
+      Alert.alert('Polish failed', String(e?.message || e));
+    } finally {
+      setPolishLoading(false);
+    }
+  }, [editableDraft, rewriteAsInstruction, userId, sessionId]);
+
+  const shareSlackDraft = useCallback(async () => {
+    const t = (editableDraft || '').trim();
+    if (!t) {
+      Alert.alert('Nothing to share', 'Add text to your draft first.');
+      return;
+    }
+    try {
+      await Share.share({message: t});
+    } catch (e) {
+      Alert.alert('Share', String(e?.message || e));
+    }
+  }, [editableDraft]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -141,12 +311,93 @@ export default function QuickChatPage() {
             messages.map((m, i) => <Bubble key={`${i}-${m.role}`} role={m.role} text={m.text} />)
           )}
 
-          {loading && (
-            <View style={[styles.bubble, styles.bubbleAssistant, styles.bubbleLoading]}>
+          {loading ? (
+            <View style={styles.loadingRow}>
               <ActivityIndicator color={theme.colors.textSecondary} size="small" />
             </View>
-          )}
+          ) : null}
         </ScrollView>
+
+        {showReplyComposer && replyDraftRef.current ? (
+          <View style={styles.replyComposer}>
+            <Text style={styles.replyComposerTitle}>You can edit your reply</Text>
+            <Text style={styles.replyComposerHint}>
+              {String(replyDraftRef.current.source || '').toLowerCase() === 'gmail'
+                ? gmailReplyBtn === 'sent'
+                  ? 'Your reply was sent.'
+                  : 'Send via Gmail when ready.'
+                : 'Share or paste into Slack when ready.'}
+            </Text>
+            <TextInput
+              value={editableDraft}
+              onChangeText={setEditableDraft}
+              multiline
+              editable={gmailReplyBtn !== 'sent'}
+              placeholder="Your draft…"
+              placeholderTextColor={theme.colors.textSecondary}
+              style={[
+                styles.replyComposerInput,
+                Platform.OS === 'web' && {outline: 'none', outlineWidth: 0},
+              ]}
+            />
+            {gmailReplyBtn !== 'sent' ? (
+              <View style={styles.rewriteBlock}>
+                <Text style={styles.rewriteLabel}>Rewrite email as</Text>
+                <TextInput
+                  value={rewriteAsInstruction}
+                  onChangeText={setRewriteAsInstruction}
+                  multiline
+                  placeholder="e.g. shorter, warmer, push back politely, add thanks…"
+                  placeholderTextColor={theme.colors.textSecondary}
+                  style={[
+                    styles.rewriteInput,
+                    Platform.OS === 'web' && {outline: 'none', outlineWidth: 0},
+                  ]}
+                />
+                <TouchableOpacity
+                  onPress={polishDraftWithAi}
+                  disabled={polishLoading || !(editableDraft || '').trim()}
+                  style={[
+                    styles.polishBtn,
+                    (polishLoading || !(editableDraft || '').trim()) && styles.polishBtnDisabled,
+                  ]}
+                  activeOpacity={0.85}>
+                  {polishLoading ? (
+                    <ActivityIndicator color={theme.colors.textPrimary} size="small" />
+                  ) : (
+                    <Text style={styles.polishBtnText}>Polish with AI</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            ) : null}
+            <View style={styles.replyComposerActions}>
+              {String(replyDraftRef.current.source || '').toLowerCase() === 'gmail' ? (
+                <TouchableOpacity
+                  onPress={sendGmailReply}
+                  disabled={
+                    gmailReplyBtn === 'sending' ||
+                    gmailReplyBtn === 'sent' ||
+                    !(editableDraft || '').trim()
+                  }
+                  style={[
+                    styles.sendReplyBtn,
+                    gmailReplyBtn === 'idle' && !(editableDraft || '').trim() && styles.sendReplyBtnDisabled,
+                    gmailReplyBtn === 'sending' && styles.sendReplyBtnDisabled,
+                    gmailReplyBtn === 'sent' && styles.sendReplyBtnSent,
+                  ]}
+                  activeOpacity={0.85}>
+                  <Text style={styles.sendReplyBtnText}>
+                    {gmailReplyBtn === 'sending' ? 'Sending…' : gmailReplyBtn === 'sent' ? 'Sent!' : 'Send'}
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity onPress={shareSlackDraft} style={styles.sendReplyBtn} activeOpacity={0.85}>
+                  <Text style={styles.sendReplyBtnText}>Share draft</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        ) : null}
 
         <View style={styles.inputRow}>
           <View style={styles.pill}>
@@ -315,11 +566,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
     borderBottomLeftRadius: 6,
   },
-  bubbleLoading: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
   bubbleText: {
     fontFamily: theme.fonts.regular,
     fontSize: 14,
@@ -328,6 +574,118 @@ const styles = StyleSheet.create({
   },
   bubbleTextUser: {
     color: theme.colors.textOnDark,
+  },
+
+  loadingRow: {
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    alignItems: 'flex-start',
+  },
+
+  replyComposer: {
+    paddingHorizontal: 20,
+    paddingTop: 4,
+    paddingBottom: 8,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+    backgroundColor: theme.colors.bg,
+  },
+  replyComposerTitle: {
+    ...theme.type.cardSubtitle,
+    color: theme.colors.textPrimary,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  replyComposerHint: {
+    ...theme.type.cardSubtitle,
+    color: theme.colors.textSecondary,
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  rewriteBlock: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+  },
+  rewriteLabel: {
+    ...theme.type.cardSubtitle,
+    color: theme.colors.textPrimary,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  rewriteInput: {
+    minHeight: 56,
+    maxHeight: 100,
+    borderRadius: 0,
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+    marginBottom: 10,
+    backgroundColor: theme.colors.bg,
+    color: theme.colors.textPrimary,
+    fontSize: 13,
+    lineHeight: 18,
+    borderWidth: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+    textAlignVertical: 'top',
+  },
+  polishBtn: {
+    alignSelf: 'flex-start',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.borderStrong,
+    backgroundColor: theme.colors.bg,
+  },
+  polishBtnDisabled: {
+    opacity: 0.45,
+  },
+  polishBtnText: {
+    ...theme.type.cardSubtitle,
+    color: theme.colors.textPrimary,
+    fontWeight: '700',
+    fontSize: 13,
+  },
+
+  replyComposerInput: {
+    minHeight: 100,
+    maxHeight: 200,
+    borderRadius: 0,
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+    backgroundColor: theme.colors.bg,
+    color: theme.colors.textPrimary,
+    fontSize: 14,
+    lineHeight: 22,
+    borderWidth: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+    textAlignVertical: 'top',
+  },
+  replyComposerActions: {
+    marginTop: 10,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  sendReplyBtn: {
+    backgroundColor: theme.colors.textPrimary,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+  },
+  sendReplyBtnDisabled: {
+    opacity: 0.45,
+  },
+  sendReplyBtnSent: {
+    backgroundColor: theme.colors.schedule.emailTaskBorder,
+    opacity: 1,
+  },
+  sendReplyBtnText: {
+    color: theme.colors.textOnDark,
+    fontWeight: '700',
+    fontSize: 14,
   },
 
   inputRow: {

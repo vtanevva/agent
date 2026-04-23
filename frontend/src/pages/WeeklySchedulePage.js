@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useMemo, useState} from 'react';
 import {
   View,
   Text,
@@ -9,8 +9,9 @@ import {
   Linking,
   Alert,
   Dimensions,
+  Modal,
 } from 'react-native';
-import {useRoute, useNavigation} from '@react-navigation/native';
+import {useRoute, useNavigation, useFocusEffect} from '@react-navigation/native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 
 import {theme} from '../styles/theme';
@@ -77,6 +78,25 @@ function formatWeekRangeLabel(weekStart) {
 function formatHourRowLabel(hour24) {
   const h = String(hour24).padStart(2, '0');
   return `${h}:00`;
+}
+
+function formatDetailTimeRange(start, end) {
+  const s = toDateSafe(start);
+  const e = toDateSafe(end);
+  if (!s && !e) return '';
+  if (s && !e) {
+    return `${s.toLocaleDateString(undefined, {weekday: 'short', month: 'short', day: 'numeric'})} · ${s.toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'})}`;
+  }
+  if (!s || !e) return '';
+  const dateLine = s.toLocaleDateString(undefined, {weekday: 'short', month: 'short', day: 'numeric'});
+  const t0 = s.toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'});
+  const t1 = e.toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'});
+  return `${dateLine}\n${t0} – ${t1}`;
+}
+
+function stripHtmlish(s) {
+  const t = String(s || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  return t;
 }
 
 function timelineStartForDay(dayMidnight) {
@@ -166,6 +186,7 @@ export default function WeeklySchedulePage() {
   const [error, setError] = useState('');
   const [connectUrl, setConnectUrl] = useState('');
   const [query, setQuery] = useState('');
+  const [detailItem, setDetailItem] = useState(null);
 
   const screenW = Dimensions.get('window').width;
 
@@ -191,9 +212,11 @@ export default function WeeklySchedulePage() {
     }
   }, [userId, weekStart]);
 
-  useEffect(() => {
-    if (userId) loadAll();
-  }, [userId, weekStart, loadAll]);
+  useFocusEffect(
+    useCallback(() => {
+      if (userId) loadAll();
+    }, [userId, loadAll]),
+  );
 
   const scheduleItems = useMemo(() => buildScheduleItems(events, tasks), [events, tasks]);
 
@@ -265,13 +288,28 @@ export default function WeeklySchedulePage() {
       });
       const data = await r.json();
       if (!r.ok || !data?.success) throw new Error(data?.error || `HTTP ${r.status}`);
+      setDetailItem(null);
       await loadAll();
     } catch (e) {
       if (/^\d+$/.test(String(taskId))) {
         setTasks((prev) => prev.filter((t) => String(t._id) !== String(taskId)));
+        setDetailItem(null);
         return;
       }
       Alert.alert('Failed to complete task', String(e?.message || e));
+    }
+  };
+
+  const openEventLink = async (url) => {
+    if (!url) return;
+    try {
+      if (Platform.OS === 'web') {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      } else {
+        await Linking.openURL(url);
+      }
+    } catch (e) {
+      Alert.alert('Could not open link', String(e?.message || e));
     }
   };
 
@@ -377,28 +415,7 @@ export default function WeeklySchedulePage() {
                         <TouchableOpacity
                           key={`${b.kind}-${idx}-${b.clipStart?.toISOString?.() || idx}`}
                           activeOpacity={0.88}
-                          onPress={() => {
-                            const t0 = toDateSafe(b.clipStart);
-                            const t1 = toDateSafe(b.clipEnd);
-                            const time =
-                              t0 && t1
-                                ? `${t0.toLocaleTimeString(undefined, {
-                                    hour: 'numeric',
-                                    minute: '2-digit',
-                                  })} – ${t1.toLocaleTimeString(undefined, {
-                                    hour: 'numeric',
-                                    minute: '2-digit',
-                                  })}`
-                                : '';
-                            if (b.kind === 'task') {
-                              Alert.alert(b.summary, time, [
-                                {text: 'Cancel', style: 'cancel'},
-                                {text: 'Mark done', onPress: () => markDone(b.task_id)},
-                              ]);
-                            } else {
-                              Alert.alert(b.summary, [b.location, time].filter(Boolean).join('\n'));
-                            }
-                          }}
+                          onPress={() => setDetailItem(b)}
                           style={[
                             styles.block,
                             {
@@ -436,12 +453,28 @@ export default function WeeklySchedulePage() {
             <Text style={styles.unCardTitle}>Unscheduled</Text>
             <Text style={styles.unCardHint}>Tasks without a due time stay here.</Text>
             {unscheduledFiltered.slice(0, 24).map((t) => (
-              <View key={String(t._id)} style={styles.unRow}>
+              <TouchableOpacity
+                key={String(t._id)}
+                style={styles.unRow}
+                activeOpacity={0.88}
+                onPress={() =>
+                  setDetailItem({
+                    kind: 'task',
+                    summary: t.title || '(Untitled)',
+                    task_id: t._id,
+                    priority: t.priority || 'LATER',
+                    priority_score: t.priority_score,
+                    reason: t.reason || '',
+                    source: t.source || '',
+                    unscheduled: true,
+                    _raw: t,
+                  })
+                }>
                 <Text style={styles.unTitle} numberOfLines={2}>
                   {t.title || '(Untitled)'}
                 </Text>
                 <Text style={styles.unMeta}>{t.priority || 'LATER'}</Text>
-              </View>
+              </TouchableOpacity>
             ))}
           </View>
         )}
@@ -455,6 +488,132 @@ export default function WeeklySchedulePage() {
         onCenter={() => navigation.navigate('QuickChat', {userId, sessionId})}
         onRight={() => navigation.navigate('Menu', {userId, sessionId})}
       />
+
+      <Modal
+        visible={!!detailItem}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDetailItem(null)}>
+        <View style={styles.detailOverlay}>
+          <TouchableOpacity
+            style={styles.detailDismissHit}
+            activeOpacity={1}
+            onPress={() => setDetailItem(null)}
+            accessibilityLabel="Dismiss schedule details"
+          />
+          <View style={styles.detailCard}>
+            <View style={styles.detailHeader}>
+              <Text style={styles.detailTitle} numberOfLines={3}>
+                {detailItem?.summary || ''}
+              </Text>
+              <TouchableOpacity
+                onPress={() => setDetailItem(null)}
+                style={styles.detailClose}
+                hitSlop={{top: 8, bottom: 8, left: 8, right: 8}}
+                activeOpacity={0.85}>
+                <Text style={styles.detailCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.detailBody}
+              contentContainerStyle={styles.detailBodyContent}
+              showsVerticalScrollIndicator={false}>
+              {detailItem ? (
+                <>
+                  <View style={styles.detailKindRow}>
+                    <Text style={styles.detailKindPill}>
+                      {detailItem.kind === 'event' ? 'Calendar event' : 'Task'}
+                    </Text>
+                    {detailItem.kind === 'task' && detailItem.priority ? (
+                      <Text style={styles.detailKindPillMuted}>{detailItem.priority}</Text>
+                    ) : null}
+                  </View>
+
+                  {detailItem.unscheduled ? (
+                    <Text style={styles.detailTime}>No time set — appears in Unscheduled.</Text>
+                  ) : (
+                    <Text style={styles.detailTime}>
+                      {formatDetailTimeRange(detailItem.start, detailItem.end)}
+                    </Text>
+                  )}
+
+                  {detailItem.kind === 'event' && !!detailItem.location ? (
+                    <View style={styles.detailSection}>
+                      <Text style={styles.detailLabel}>Location</Text>
+                      <Text style={styles.detailValue}>{detailItem.location}</Text>
+                    </View>
+                  ) : null}
+
+                  {detailItem.kind === 'event' && !!stripHtmlish(detailItem.description) ? (
+                    <View style={styles.detailSection}>
+                      <Text style={styles.detailLabel}>Notes</Text>
+                      <Text style={styles.detailValue}>{stripHtmlish(detailItem.description)}</Text>
+                    </View>
+                  ) : null}
+
+                  {detailItem.kind === 'event' && !!detailItem.provider ? (
+                    <View style={styles.detailSection}>
+                      <Text style={styles.detailLabel}>Calendar</Text>
+                      <Text style={styles.detailValue}>{detailItem.provider}</Text>
+                    </View>
+                  ) : null}
+
+                  {detailItem.kind === 'task' && !!String(detailItem.source || '').trim() ? (
+                    <View style={styles.detailSection}>
+                      <Text style={styles.detailLabel}>Source</Text>
+                      <Text style={styles.detailValue}>{detailItem.source}</Text>
+                    </View>
+                  ) : null}
+
+                  {detailItem.kind === 'task' &&
+                  !!String(detailItem.reason || '').trim() &&
+                  detailItem.reason !== detailItem.priority ? (
+                    <View style={styles.detailSection}>
+                      <Text style={styles.detailLabel}>Classification</Text>
+                      <Text style={styles.detailValue}>{detailItem.reason}</Text>
+                    </View>
+                  ) : null}
+
+                  {detailItem.kind === 'task' &&
+                  detailItem.priority_score != null &&
+                  detailItem.priority_score !== 0 ? (
+                    <View style={styles.detailSection}>
+                      <Text style={styles.detailLabel}>Priority score</Text>
+                      <Text style={styles.detailValue}>{String(detailItem.priority_score)}</Text>
+                    </View>
+                  ) : null}
+                </>
+              ) : null}
+            </ScrollView>
+
+            <View style={styles.detailActions}>
+              {detailItem?.kind === 'event' && detailItem.html_link ? (
+                <TouchableOpacity
+                  style={styles.detailPrimaryBtn}
+                  activeOpacity={0.88}
+                  onPress={() => openEventLink(detailItem.html_link)}>
+                  <Text style={styles.detailPrimaryBtnText}>Open in calendar</Text>
+                </TouchableOpacity>
+              ) : null}
+              {detailItem?.kind === 'task' && detailItem.task_id ? (
+                <TouchableOpacity
+                  style={styles.detailPrimaryBtn}
+                  activeOpacity={0.88}
+                  onPress={() => markDone(detailItem.task_id)}>
+                  <Text style={styles.detailPrimaryBtnText}>Mark done</Text>
+                </TouchableOpacity>
+              ) : null}
+              <TouchableOpacity
+                style={styles.detailSecondaryBtn}
+                activeOpacity={0.88}
+                onPress={() => setDetailItem(null)}>
+                <Text style={styles.detailSecondaryBtnText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -616,4 +775,117 @@ const styles = StyleSheet.create({
   },
   unTitle: {fontSize: 13, fontWeight: '600', color: theme.colors.textPrimary},
   unMeta: {marginTop: 4, fontSize: 11, fontWeight: '600', color: theme.colors.textSecondary},
+
+  detailOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  detailDismissHit: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  detailCard: {
+    width: '100%',
+    maxWidth: 420,
+    maxHeight: '88%',
+    zIndex: 1,
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.xl,
+    overflow: 'hidden',
+    ...theme.shadow.card,
+  },
+  detailHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.lg,
+    paddingBottom: theme.spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border,
+  },
+  detailTitle: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+    lineHeight: 22,
+  },
+  detailClose: {
+    width: 36,
+    height: 36,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailCloseText: {fontSize: 16, fontWeight: '700', color: theme.colors.textPrimary},
+  detailBody: {maxHeight: 360},
+  detailBodyContent: {paddingHorizontal: theme.spacing.lg, paddingTop: theme.spacing.md, paddingBottom: theme.spacing.lg},
+  detailKindRow: {flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10},
+  detailKindPill: {
+    alignSelf: 'flex-start',
+    fontSize: 11,
+    fontWeight: '700',
+    color: theme.colors.textPrimary,
+    backgroundColor: theme.colors.surfaceMuted,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: theme.radius.pill,
+    overflow: 'hidden',
+  },
+  detailKindPillMuted: {
+    alignSelf: 'flex-start',
+    fontSize: 11,
+    fontWeight: '700',
+    color: theme.colors.textSecondary,
+    backgroundColor: theme.colors.surfaceAlt,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: theme.radius.pill,
+    overflow: 'hidden',
+  },
+  detailTime: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.textSecondary,
+    lineHeight: 20,
+    marginBottom: 4,
+  },
+  detailSection: {marginTop: 14},
+  detailLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: theme.colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginBottom: 4,
+  },
+  detailValue: {fontSize: 14, fontWeight: '500', color: theme.colors.textPrimary, lineHeight: 20},
+  detailActions: {
+    padding: theme.spacing.lg,
+    paddingTop: theme.spacing.sm,
+    gap: 10,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+  },
+  detailPrimaryBtn: {
+    borderRadius: theme.radius.pill,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    backgroundColor: theme.colors.textPrimary,
+    alignItems: 'center',
+  },
+  detailPrimaryBtnText: {color: theme.colors.textOnDark, fontSize: 14, fontWeight: '700'},
+  detailSecondaryBtn: {
+    borderRadius: theme.radius.pill,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    backgroundColor: theme.colors.surfaceMuted,
+    alignItems: 'center',
+  },
+  detailSecondaryBtnText: {color: theme.colors.textPrimary, fontSize: 14, fontWeight: '700'},
 });
