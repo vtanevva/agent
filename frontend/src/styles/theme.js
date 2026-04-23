@@ -40,6 +40,18 @@ export const theme = {
       blushBg: '#F1D4D9',
       blushBorder: '#D8A8B1',
     },
+
+    // Weekly schedule: fixed meaning (meetings / email tasks / chat tasks)
+    schedule: {
+      meetingBg: '#D4E8FA',
+      meetingBorder: '#5B8EC9',
+      emailTaskBg: '#D4ECD8',
+      emailTaskBorder: '#5A9B63',
+      chatTaskBg: '#F7DCC4',
+      chatTaskBorder: '#D97A3C',
+      otherTaskBg: '#E6E6E4',
+      otherTaskBorder: '#A8A8A6',
+    },
   },
 
   radius: {

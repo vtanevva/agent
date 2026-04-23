@@ -280,6 +280,11 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> Dict[str, Any]:
 
             payload = msg.get("payload") or {}
             headers = payload.get("headers") or []
+            header_pairs = [
+                {"name": str(h.get("name") or ""), "value": str(h.get("value") or "")}
+                for h in (headers or [])
+                if isinstance(h, dict) and (h.get("name") or h.get("value"))
+            ]
 
             subject = get_header(headers, "Subject") or ""
             sender = get_header(headers, "From") or ""
@@ -320,6 +325,7 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> Dict[str, Any]:
                     "to": recipient,
                     "subject": subject,
                     "body": body,
+                    "headers": header_pairs,
                     "timestamp": msg.get("internalDate"),
                     "emailAddress": email_address,
                     # When the watch is configured with labels, treat matching messages as

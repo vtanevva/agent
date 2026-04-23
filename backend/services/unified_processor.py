@@ -21,6 +21,7 @@ from services.inbound_reply_service import (
     should_create_gmail_draft,
 )
 from services.metrics_tracker import build_metrics_event
+from services.marketing_email_signals import is_likely_marketing_or_newsletter
 from services.task_service import (
     build_grafik_task_title_and_description,
     create_grafik_task_and_record,
@@ -446,6 +447,21 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
         needs_project_review=needs_project_review,
         force_draft_ready=force_draft_ready,
     )
+
+    # App chat routed through Gmail/Slack agents uses synthetic sources; never auto-create tasks.
+    if source in ("gmail_chat", "slack_chat"):
+        has_action = False
+        classification["has_action"] = False
+        classification["suppress_task_reason"] = "app_chat_delegate"
+
+    elif source == "gmail" and has_action and is_likely_marketing_or_newsletter(
+        payload=payload if isinstance(payload, dict) else {},
+        subject=subject or "",
+        raw_text=raw_text,
+    ):
+        has_action = False
+        classification["has_action"] = False
+        classification["suppress_task_reason"] = "likely_marketing_newsletter"
 
     # 4) Project update + project memory update
     project_update_candidate = extract_project_updates(text_for_classification or raw_text)

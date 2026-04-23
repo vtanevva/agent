@@ -13,17 +13,44 @@ import {
 import {useRoute, useNavigation} from '@react-navigation/native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 
-import {theme, pickEventColor} from '../styles/theme';
+import {theme} from '../styles/theme';
 import {API_BASE_URL} from '../config/api';
 import {buildScheduleItems, fetchScheduleSources, toDateSafe} from '../api/scheduleData';
 import TopSearchBar from '../components/TopSearchBar';
 import BottomNav from '../components/BottomNav';
 
 const TIMELINE_START_HOUR = 6;
-const HOUR_HEIGHT = 44;
+const HOUR_HEIGHT = 54;
 const HOURS_SHOWN = 18;
 const TIME_GUTTER_W = 52;
-const DAY_MIN_W = 116;
+const DAY_MIN_W = 140;
+
+/** Calendar events → blue; tasks from email → green; from chat → orange. */
+function paletteForScheduleItem(item) {
+  if (item.kind === 'event') {
+    return {
+      bg: theme.colors.schedule.meetingBg,
+      border: theme.colors.schedule.meetingBorder,
+    };
+  }
+  const s = String(item.source || '').toLowerCase();
+  if (s.includes('chat')) {
+    return {
+      bg: theme.colors.schedule.chatTaskBg,
+      border: theme.colors.schedule.chatTaskBorder,
+    };
+  }
+  if (s === 'gmail' || s.includes('email') || s.includes('mail')) {
+    return {
+      bg: theme.colors.schedule.emailTaskBg,
+      border: theme.colors.schedule.emailTaskBorder,
+    };
+  }
+  return {
+    bg: theme.colors.schedule.otherTaskBg,
+    border: theme.colors.schedule.otherTaskBorder,
+  };
+}
 
 function startOfWeekMonday(d = new Date()) {
   const date = new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -111,9 +138,17 @@ function layoutBlocksForDay(dayMidnight, allItems, tlStart) {
     const hoursFromTl = (it.clipStart - tlStart) / 3600000;
     const durH = (it.clipEnd - it.clipStart) / 3600000;
     const top = hoursFromTl * HOUR_HEIGHT;
-    const height = Math.max(28, durH * HOUR_HEIGHT);
-    const wPct = 100 / it.totalLanes;
-    const leftPct = (it.lane / it.totalLanes) * 100;
+    const height = Math.max(40, durH * HOUR_HEIGHT);
+    const n = it.totalLanes;
+    let wPct = 100;
+    let leftPct = 0;
+    if (n > 1) {
+      // Stacked “cards”: each block stays wide (~72%+) and overlaps horizontally instead of
+      // shrinking to 1/n of the column (unreadable on busy days).
+      wPct = Math.min(92, Math.max(68, 100 / n + 16));
+      const step = (100 - wPct) / (n - 1);
+      leftPct = it.lane * step;
+    }
     return {...it, top, height, wPct, leftPct};
   });
 }
@@ -205,7 +240,7 @@ export default function WeeklySchedulePage() {
     });
   }, [weekDays, weekItemsForSearch]);
 
-  const dayColumnWidth = Math.max(DAY_MIN_W, (screenW - TIME_GUTTER_W - 40) / 7);
+  const dayColumnWidth = Math.max(DAY_MIN_W, (screenW - TIME_GUTTER_W - 40) / 5);
 
   const openConnect = async () => {
     if (!connectUrl) return;
@@ -337,7 +372,7 @@ export default function WeeklySchedulePage() {
                       />
                     ))}
                     {blocks.map((b, idx) => {
-                      const pal = pickEventColor(`${b.kind}-${b.summary || ''}-${idx}`);
+                      const pal = paletteForScheduleItem(b);
                       return (
                         <TouchableOpacity
                           key={`${b.kind}-${idx}-${b.clipStart?.toISOString?.() || idx}`}
@@ -373,9 +408,10 @@ export default function WeeklySchedulePage() {
                               width: `${b.wPct}%`,
                               backgroundColor: pal.bg,
                               borderColor: pal.border,
+                              zIndex: b.lane + 1,
                             },
                           ]}>
-                          <Text style={styles.blockTitle} numberOfLines={3}>
+                          <Text style={styles.blockTitle} numberOfLines={4}>
                             {b.summary}
                           </Text>
                           <Text style={styles.blockTime} numberOfLines={1}>
@@ -545,16 +581,21 @@ const styles = StyleSheet.create({
   block: {
     position: 'absolute',
     borderRadius: 14,
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    borderWidth: 1.5,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     overflow: 'hidden',
   },
-  blockTitle: {...theme.type.eventTitle, color: theme.colors.textPrimary},
+  blockTitle: {
+    ...theme.type.eventTitle,
+    fontSize: 12,
+    lineHeight: 15,
+    color: theme.colors.textPrimary,
+  },
   blockTime: {
-    marginTop: 2,
-    fontSize: 10,
-    fontWeight: '500',
+    marginTop: 4,
+    fontSize: 11,
+    fontWeight: '600',
     color: theme.colors.textSecondary,
   },
 

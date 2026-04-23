@@ -387,6 +387,8 @@ Return ONLY this JSON schema:
 Definitions:
 - has_action = true if the sender asks the recipient to do something concrete
 - has_action = false for pure updates, status checks, greetings, newsletters, or informational content
+- has_action = false when the user is only asking the assistant to show, list, search, open, or fetch
+  emails/messages/inbox/Slack inside the app (UI or assistant navigation), not a real work assignment
 
 Important:
 The input may include project context such as client name, project name, summary, blockers, and next steps.
