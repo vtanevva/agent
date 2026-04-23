@@ -58,6 +58,11 @@ log = get_logger("google_oauth")
 
 google_oauth_bp = Blueprint("google_oauth", __name__)
 
+# ``Flow`` enables PKCE by default (``authorization_url`` sends ``code_challenge``). The callback
+# builds a new ``Flow`` without the original ``code_verifier`` → Google ``invalid_grant`` / missing
+# code verifier. This route uses a confidential Web client with ``client_secret``; PKCE is optional.
+_FLOW_KWARGS = {"autogenerate_code_verifier": False}
+
 
 def default_oauth_frontend_return_url() -> str:
     """
@@ -256,6 +261,7 @@ def google_auth_start(username: str):
             str(cred_path),
             scopes=SCOPES,
             redirect_uri=redirect_uri,
+            **_FLOW_KWARGS,
         )
         authorization_url, state = flow.authorization_url(
             access_type="offline",
@@ -304,6 +310,7 @@ def google_oauth_callback():
             str(cred_path),
             scopes=SCOPES,
             redirect_uri=_redirect_uri(),
+            **_FLOW_KWARGS,
         )
         # Google redirects to the same host/scheme as in the auth request; redirect_uri must match.
         flow.fetch_token(authorization_response=request.url)
