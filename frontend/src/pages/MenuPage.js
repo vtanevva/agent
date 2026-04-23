@@ -126,7 +126,7 @@ export default function MenuPage() {
         centerIcon="plus"
         rightIcon="menu"
         onLeft={goHome}
-        onCenter={() => navigation.navigate('Chat', {userId, sessionId})}
+        onCenter={() => navigation.navigate('QuickChat', {userId, sessionId})}
         onRight={() => {}}
       />
     </SafeAreaView>

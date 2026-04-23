@@ -211,11 +211,11 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   messageBubble: {
-    maxWidth: '80%',
+    maxWidth: '92%',
     minWidth: 60, // Ensure minimum width for visibility
     borderRadius: 16,
     padding: 12,
-    width: 'auto', // Allow natural width on mobile
+    width: 'auto',
     ...commonStyles.shadowMd,
   },
   bubbleUser: {
@@ -229,7 +229,7 @@ const styles = StyleSheet.create({
   messageContent: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    width: '100%', // Ensure full width on mobile
+    minWidth: 0,
   },
   avatar: {
     width: 40,
@@ -247,10 +247,9 @@ const styles = StyleSheet.create({
   },
   messageTextContainer: {
     flex: 1,
-    minWidth: 0, // Ensure flex container can shrink
-    flexShrink: 1, // Allow container to shrink
-    width: '100%', // Explicit width for mobile text rendering
-    flexDirection: 'column', // Ensure proper layout
+    minWidth: 0,
+    flexShrink: 1,
+    flexDirection: 'column',
   },
   messageAuthor: {
     fontSize: 14,
@@ -261,9 +260,10 @@ const styles = StyleSheet.create({
   messageText: {
     fontSize: 15,
     lineHeight: 20,
-    color: '#FFFFFF', // Pure white color for mobile compatibility
-    flexShrink: 1, // Allow text to shrink and wrap
-    backgroundColor: 'transparent', // Ensure text background is transparent
+    color: '#FFFFFF',
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    backgroundColor: 'transparent',
   },
   imagesContainer: {
     flexDirection: 'row',

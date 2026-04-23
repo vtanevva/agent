@@ -11,6 +11,7 @@ import {
 import {useRoute, useNavigation, useFocusEffect} from '@react-navigation/native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Svg, Path} from 'react-native-svg';
+import {LinearGradient} from 'expo-linear-gradient';
 
 import {theme, pickDotColor} from '../styles/theme';
 import {
@@ -151,7 +152,7 @@ export default function HomePage() {
       `Draft a concise, warm, professional reply to "${item.title}"` +
       (sender ? ` from ${sender}` : '') +
       (snippet ? `\n\n--- original message ---\n${snippet}` : '');
-    navigation.navigate('Chat', {
+    navigation.navigate('QuickChat', {
       userId,
       sessionId,
       seedPrompt: seed,
@@ -160,7 +161,7 @@ export default function HomePage() {
   };
 
   const openCenter = () => {
-    navigation.navigate('Chat', {userId, sessionId});
+    navigation.navigate('QuickChat', {userId, sessionId});
   };
 
   const openMenu = () => {
@@ -175,56 +176,67 @@ export default function HomePage() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <TopSearchBar value={query} onChangeText={setQuery} />
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}>
-        <View style={styles.hero}>
-          <Text style={styles.greeting}>
-            {greeting()}, {displayName}
-          </Text>
-        </View>
-
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionHeaderText}>
-            Needs your attention{' '}
-            <Text style={styles.sectionHeaderCount}>({visibleItems.length})</Text>
-          </Text>
-        </View>
-
-        {!!error && (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorBannerText}>{error}</Text>
-          </View>
-        )}
-
-        {loading && items.length === 0 ? (
-          <View style={styles.loadingWrap}>
-            <ActivityIndicator color={theme.colors.textPrimary} />
-          </View>
-        ) : visibleItems.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>You're all caught up</Text>
-            <Text style={styles.emptyHint}>
-              New action items from email and chat will show up here automatically.
+      <View style={styles.scrollWrap}>
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}>
+          <View style={styles.hero}>
+            <Text style={styles.greeting}>
+              {greeting()}, {displayName}
             </Text>
           </View>
-        ) : (
-          visibleItems.map((item) => (
-            <TaskCard
-              key={item.id}
-              item={item}
-              expanded={expandedId === item.id}
-              onToggle={() =>
-                setExpandedId((cur) => (cur === item.id ? null : item.id))
-              }
-              onGenerate={() => handleGenerate(item)}
-              onPostpone={() => handlePostpone(item)}
-              onDone={() => handleDone(item)}
-            />
-          ))
-        )}
-      </ScrollView>
+
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionHeaderText}>
+              Needs your attention{' '}
+              <Text style={styles.sectionHeaderCount}>({visibleItems.length})</Text>
+            </Text>
+          </View>
+
+          {!!error && (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorBannerText}>{error}</Text>
+            </View>
+          )}
+
+          {loading && items.length === 0 ? (
+            <View style={styles.loadingWrap}>
+              <ActivityIndicator color={theme.colors.textPrimary} />
+            </View>
+          ) : visibleItems.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>You're all caught up</Text>
+              <Text style={styles.emptyHint}>
+                New action items from email and chat will show up here automatically.
+              </Text>
+            </View>
+          ) : (
+            visibleItems.map((item) => (
+              <TaskCard
+                key={item.id}
+                item={item}
+                expanded={expandedId === item.id}
+                onToggle={() =>
+                  setExpandedId((cur) => (cur === item.id ? null : item.id))
+                }
+                onGenerate={() => handleGenerate(item)}
+                onPostpone={() => handlePostpone(item)}
+                onDone={() => handleDone(item)}
+              />
+            ))
+          )}
+        </ScrollView>
+
+        {/* Bottom fade — keeps the list scrollable but makes content near
+            the BottomNav melt into the background, matching the Figma. */}
+        <LinearGradient
+          pointerEvents="none"
+          colors={[theme.colors.bg + '00', theme.colors.bg + 'FF', theme.colors.bg + 'FF']}
+          locations={[0, 0.55, 1]}
+          style={styles.fade}
+        />
+      </View>
 
       <BottomNav
         leftIcon="stats"
@@ -294,28 +306,39 @@ function ActionChip({label, onPress}) {
   );
 }
 
-const CARD_RADIUS = 22;
+const CARD_RADIUS = 20;
 
 const styles = StyleSheet.create({
   container: {flex: 1, backgroundColor: theme.colors.bg},
+  scrollWrap: {flex: 1},
   scroll: {flex: 1},
-  scrollContent: {paddingHorizontal: 20, paddingBottom: 140},
+  scrollContent: {paddingHorizontal: 20, paddingBottom: 260},
   hero: {
-    marginTop: 24,
-    marginBottom: 20,
+    marginTop: 56,
+    marginBottom: 14,
   },
   greeting: {
-    ...theme.type.display,
+    fontFamily: theme.fonts.medium,
+    fontSize: 26,
+    letterSpacing: -0.3,
     color: theme.colors.textPrimary,
   },
-  sectionHeader: {marginBottom: 10, marginTop: 4},
+  sectionHeader: {marginBottom: 18, marginTop: 0},
   sectionHeaderText: {
-    ...theme.type.sectionHeader,
+    fontFamily: theme.fonts.regular,
+    fontSize: 13,
     color: theme.colors.textPrimary,
   },
   sectionHeaderCount: {
-    color: theme.colors.textSecondary,
-    fontWeight: '500',
+    color: theme.colors.textPrimary,
+    fontFamily: theme.fonts.regular,
+  },
+  fade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 260,
   },
   errorBanner: {
     backgroundColor: '#F6E0E0',
@@ -348,8 +371,8 @@ const styles = StyleSheet.create({
 
   taskOuter: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 10,
+    alignItems: 'center',
+    marginBottom: 16,
     flexWrap: 'wrap',
   },
   taskCard: {
@@ -358,26 +381,27 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     backgroundColor: theme.colors.surface,
     borderRadius: CARD_RADIUS,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    marginRight: 10,
-    ...theme.shadow.card,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    marginRight: 14,
   },
   taskDot: {
-    width: 8,
-    height: 8,
+    width: 7,
+    height: 7,
     borderRadius: 4,
-    marginTop: 6,
+    marginTop: 7,
     marginRight: 10,
   },
   taskBody: {flex: 1},
   taskTitle: {
-    ...theme.type.cardTitle,
+    fontFamily: theme.fonts.semibold,
+    fontSize: 14,
     color: theme.colors.textPrimary,
   },
   taskSubtitle: {
-    marginTop: 2,
-    ...theme.type.cardSubtitle,
+    marginTop: 3,
+    fontFamily: theme.fonts.regular,
+    fontSize: 11.5,
     color: theme.colors.textSecondary,
   },
   chevBtn: {
@@ -387,7 +411,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    ...theme.shadow.card,
   },
   actionRow: {
     width: '100%',

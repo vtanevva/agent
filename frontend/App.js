@@ -15,6 +15,7 @@ import {theme} from './src/styles/theme';
 import LoginPage from './src/pages/LoginPage';
 import HomePage from './src/pages/HomePage';
 import ChatPage from './src/pages/ChatPage';
+import QuickChatPage from './src/pages/QuickChatPage';
 import VoiceChat from './src/pages/VoiceChat';
 import SettingsPage from './src/pages/SettingsPage';
 import MenuPage from './src/pages/MenuPage';
@@ -133,6 +134,7 @@ export default function App() {
           }}>
           <Stack.Screen name="Login" component={LoginPage} />
           <Stack.Screen name="Home" component={HomePage} />
+          <Stack.Screen name="QuickChat" component={QuickChatPage} />
           <Stack.Screen name="Chat" component={ChatPage} />
           <Stack.Screen name="VoiceChat" component={VoiceChat} />
           <Stack.Screen name="Settings" component={SettingsPage} />

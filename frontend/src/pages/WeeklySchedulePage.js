@@ -396,7 +396,7 @@ export default function WeeklySchedulePage() {
         centerIcon="plus"
         rightIcon="menu"
         onLeft={goHome}
-        onCenter={() => navigation.navigate('Chat', {userId, sessionId})}
+        onCenter={() => navigation.navigate('QuickChat', {userId, sessionId})}
         onRight={() => navigation.navigate('Menu', {userId, sessionId})}
       />
     </SafeAreaView>

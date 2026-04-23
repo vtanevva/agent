@@ -21,13 +21,22 @@ class GmailAgent:
 
     def _detect_email_intent(self, message: str) -> str:
         lower = message.lower()
+        # Prioritize drafting/rewriting replies before inbox listing heuristics.
+        if any(phrase in lower for phrase in [
+            "draft a reply",
+            "draft reply",
+            "write a reply",
+            "help me reply",
+            "reply to",
+            "respond to",
+        ]):
+            return "draft_reply"
         if any(phrase in lower for phrase in [
             "recent email", "last email", "latest email", "show my emails",
             "show inbox", "check emails", "check my emails", "check inbox",
             "past email", "past emails", "old emails", "show me emails", "list emails",
             "emails from", "show emails from", "what emails", "my emails",
             "email history", "inbox messages", "mail i received",
-            "reply to",
         ]):
             return "list"
         if any(phrase in lower for phrase in [
@@ -128,6 +137,29 @@ class GmailAgent:
             logger.warning("User Awareness retrieval failed for GmailAgent: %s", e)
 
         intent = self._detect_email_intent(message)
+        if intent == "draft_reply":
+            system_prompt = (
+                "You are an executive assistant writing concise, warm, professional email replies. "
+                "Keep it brief and actionable. If the user provides an original message, reply directly to that message."
+            )
+            prompt = (
+                "Draft an email reply for this request. "
+                "Return only the draft body text (no markdown, no code fences).\n\n"
+                f"User request:\n{message}"
+            )
+            try:
+                draft = self.llm_service.chat_completion_text(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    max_tokens=250,
+                )
+                return (draft or "").strip() or "I can draft that reply once you share a bit more context."
+            except Exception as e:
+                logger.error("Error drafting reply: %s", e, exc_info=True)
+                return "I had trouble drafting that reply. Please try again."
+
         if intent == "list":
             res = fetch_recent_messages(user_id=user_id or "", limit=30, source="gmail")
             if not res.get("success"):
