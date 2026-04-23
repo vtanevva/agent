@@ -1,4 +1,4 @@
-import {API_BASE_URL} from '../config/api';
+import {API_BASE_URL, CORE_BACKEND_URL} from '../config/api';
 import {fetchSqliteTasks, mapSqliteRowToSchedulerTask} from './sqliteTasks';
 
 export function toDateSafe(value) {
@@ -151,27 +151,40 @@ export function buildScheduleItems(events, tasks) {
   return items;
 }
 
-async function loadCalendarEvents(userId) {
-  try {
-    const r = await fetch(`${API_BASE_URL}/api/calendar/events`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({user_id: userId, max_results: 80}),
-    });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      return {events: [], connectUrl: ''};
+async function loadCalendarEvents(userId, {timeMin, timeMax} = {}) {
+  const body = {
+    user_id: userId,
+    max_results: 250,
+    ...(timeMin ? {time_min: timeMin} : {}),
+    ...(timeMax ? {time_max: timeMax} : {}),
+  };
+
+  const bases = [...new Set([CORE_BACKEND_URL, API_BASE_URL].filter(Boolean))];
+
+  for (const base of bases) {
+    try {
+      const r = await fetch(`${base}/api/calendar/events`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        continue;
+      }
+      if (data?.success && Array.isArray(data.events)) {
+        const bannerUrl =
+          data?.action === 'connect_google' && data?.connect_url ? data.connect_url : '';
+        return {events: data.events, connectUrl: bannerUrl};
+      }
+      if (data?.action === 'connect_google' && data?.connect_url) {
+        return {events: [], connectUrl: data.connect_url};
+      }
+    } catch {
+      continue;
     }
-    if (data?.action === 'connect_google' && data?.connect_url) {
-      return {events: [], connectUrl: data.connect_url};
-    }
-    if (!data?.success) {
-      return {events: [], connectUrl: ''};
-    }
-    return {events: data.events || [], connectUrl: ''};
-  } catch {
-    return {events: [], connectUrl: ''};
   }
+  return {events: [], connectUrl: ''};
 }
 
 async function loadTasksFromSqlite() {
@@ -190,8 +203,16 @@ async function loadTasksFromSqlite() {
   }
 }
 
-export async function fetchScheduleSources(userId) {
-  const [eventsRes, tasksRes] = await Promise.all([loadCalendarEvents(userId), loadTasksFromSqlite()]);
+/**
+ * @param {string} userId
+ * @param {{ timeMin?: string, timeMax?: string }} [range] Optional ISO window for Google + SQLite calendar rows.
+ */
+export async function fetchScheduleSources(userId, range = {}) {
+  const {timeMin, timeMax} = range || {};
+  const [eventsRes, tasksRes] = await Promise.all([
+    loadCalendarEvents(userId, {timeMin, timeMax}),
+    loadTasksFromSqlite(),
+  ]);
   return {
     events: eventsRes.events,
     connectUrl: eventsRes.connectUrl,

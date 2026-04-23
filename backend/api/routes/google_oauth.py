@@ -13,6 +13,9 @@ exact redirect URI in Google Cloud Console → Credentials → Authorized redire
 
 ``FLASK_SECRET_KEY`` must be set in production so OAuth ``state`` survives in the session cookie.
 
+Set ``OAUTH_FRONTEND_RETURN_URL`` to your Expo web origin (e.g. ``http://127.0.0.1:8081/``) so after
+sign-in the browser returns to the app instead of ``GET /`` on the API host (which used to 404).
+
 Local **http** callbacks require oauthlib to allow non-TLS (this module sets it for ``localhost`` /
 ``127.0.0.1`` only). For **LAN IP** (e.g. ``192.168.x.x``) over http, set ``OAUTHLIB_INSECURE_TRANSPORT=1``
 in your environment while testing — do not use that on a public deployment.
@@ -40,6 +43,15 @@ from utils.logger import get_logger
 log = get_logger("google_oauth")
 
 google_oauth_bp = Blueprint("google_oauth", __name__)
+
+
+def default_oauth_frontend_return_url() -> str:
+    """
+    Where the browser goes after Google redirects back to /google/oauth2callback.
+    Must be an absolute URL to your Expo web (or hosted app), not the API origin — otherwise you get GET / on :5000 → 404.
+    """
+    u = (os.getenv("OAUTH_FRONTEND_RETURN_URL") or "http://127.0.0.1:8081/").strip()
+    return u or "http://127.0.0.1:8081/"
 
 
 def _stored_gmail_email() -> str | None:
@@ -119,7 +131,7 @@ def google_auth_start(username: str):
             503,
         )
 
-    expo_redirect = (request.args.get("expo_redirect") or "").strip() or "/"
+    expo_redirect = (request.args.get("expo_redirect") or "").strip() or default_oauth_frontend_return_url()
 
     session["oauth_username"] = username
     session["oauth_expo_redirect"] = expo_redirect
@@ -133,7 +145,6 @@ def google_auth_start(username: str):
         )
         authorization_url, state = flow.authorization_url(
             access_type="offline",
-            include_granted_scopes="true",
             prompt="consent",
         )
     except Exception as e:
@@ -148,7 +159,7 @@ def google_auth_start(username: str):
 @google_oauth_bp.get("/google/oauth2callback")
 def google_oauth_callback():
     err = request.args.get("error")
-    expo_redirect = session.get("oauth_expo_redirect") or "/"
+    expo_redirect = session.get("oauth_expo_redirect") or default_oauth_frontend_return_url()
 
     if err:
         session.pop("oauth_username", None)

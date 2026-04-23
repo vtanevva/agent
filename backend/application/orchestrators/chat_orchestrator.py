@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from application.services.thread_service import store_chat_message
+from application.services.calendar_meeting_action import try_create_meeting_from_chat
 from services.ai_chat_client import complete_chat
 
 
@@ -22,13 +23,17 @@ def handle_chat_turn(
         extra={"message_type": message_type, "metadata": metadata} if (message_type or metadata) else None,
     )
 
-    intent, reply = complete_chat(
-        user_id=user_id,
-        session_id=session_id,
-        user_message=user_message,
-        message_type=message_type,
-        metadata=metadata,
-    )
+    shortcut_reply = try_create_meeting_from_chat(user_message, metadata)
+    if shortcut_reply:
+        intent, reply = "general", shortcut_reply
+    else:
+        intent, reply = complete_chat(
+            user_id=user_id,
+            session_id=session_id,
+            user_message=user_message,
+            message_type=message_type,
+            metadata=metadata,
+        )
 
     store_chat_message(
         user_id=user_id,

@@ -36,6 +36,7 @@ from api.routes.debug_sql import sql_debug_bp
 from api.routes.context import context_bp
 from api.routes.metrics import metrics_bp
 from api.routes.google_oauth import google_oauth_bp
+from api.routes.google_calendar import google_calendar_bp
 from api.routes.recent_messages import recent_messages_bp
 from storage.sqlite_db import init_sqlite
 from utils.logger import get_logger
@@ -61,6 +62,43 @@ def create_app():
     def health():
         return jsonify({"status": "ok"}), 200
 
+    @flask_app.get("/")
+    def root():
+        """
+        OAuth used to redirect here when expo_redirect was ``/`` (same host as API) → confusing 404.
+        Also serves a tiny landing page for humans who open the core origin in a browser.
+        """
+        if request.args.get("gmail_oauth") == "1":
+            user = (request.args.get("oauth_username") or "").strip()
+            html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"/><title>Google connected</title></head>
+<body style="font-family:system-ui,sans-serif;max-width:36rem;margin:3rem auto;padding:0 1rem">
+  <h1>Google account linked</h1>
+  <p>Token saved for this server. You can close this tab and return to the app.</p>
+  {f"<p><small>Username: {user}</small></p>" if user else ""}
+  <p><a href="/health">API health</a></p>
+</body></html>"""
+        elif request.args.get("gmail_oauth_error"):
+            err = (request.args.get("gmail_oauth_error") or "unknown").strip()
+            html = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"/><title>Google sign-in</title></head>
+<body style="font-family:system-ui,sans-serif;max-width:36rem;margin:3rem auto;padding:0 1rem">
+  <h1>Google sign-in did not finish</h1>
+  <p><code>{err}</code></p>
+  <p>Try again from the app, or set <code>OAUTH_FRONTEND_RETURN_URL</code> to your Expo web URL.</p>
+</body></html>"""
+        else:
+            html = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"/><title>Mental core API</title></head>
+<body style="font-family:system-ui,sans-serif;max-width:36rem;margin:3rem auto;padding:0 1rem">
+  <h1>Mental core API</h1>
+  <p>This origin serves Gmail OAuth, webhooks, and SQLite-backed routes. Open the Expo app for the UI.</p>
+  <p><a href="/health">GET /health</a></p>
+</body></html>"""
+        r = make_response(html)
+        r.headers["Content-Type"] = "text/html; charset=utf-8"
+        return r
+
     @flask_app.get("/waitlist-admin")
     @flask_app.get("/waitlist-admin/")
     def waitlist_admin_login():
@@ -85,6 +123,7 @@ def create_app():
     flask_app.register_blueprint(context_bp)
     flask_app.register_blueprint(metrics_bp)
     flask_app.register_blueprint(google_oauth_bp)
+    flask_app.register_blueprint(google_calendar_bp)
     flask_app.register_blueprint(recent_messages_bp)
 
     @flask_app.before_request

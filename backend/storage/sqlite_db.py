@@ -600,6 +600,23 @@ def list_upcoming_calendar_events(limit: int = 20) -> list[dict[str, Any]]:
         ).fetchall()
     return [dict(r) for r in rows]
 
+
+def list_calendar_events_in_range(time_min_iso: str, time_max_iso: str, limit: int = 500) -> list[dict[str, Any]]:
+    """Calendar rows overlapping [time_min, time_max) in ISO UTC string form."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM calendar_events
+            WHERE end_at > ? AND start_at < ?
+            ORDER BY start_at ASC
+            LIMIT ?
+            """,
+            (time_min_iso, time_max_iso, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_project_by_id(project_id: int) -> dict[str, Any] | None:
     with get_conn() as conn:
         row = conn.execute(

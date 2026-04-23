@@ -129,6 +129,16 @@ class Orchestrator:
             )
             return intent, reply
 
+        if intent == "general":
+            try:
+                from backend.application.services.calendar_meeting_action import try_create_meeting_from_chat
+
+                meeting_reply = try_create_meeting_from_chat(user_message, metadata)
+                if meeting_reply:
+                    return intent, meeting_reply
+            except Exception as e:
+                logger.warning("Meeting calendar shortcut skipped: %s", e)
+
         result = self.aivis_core.handle_chat(
             user_id=user_id,
             session_id=session_id,

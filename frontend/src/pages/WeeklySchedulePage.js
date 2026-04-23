@@ -140,7 +140,12 @@ export default function WeeklySchedulePage() {
     setLoading(true);
     setError('');
     try {
-      const data = await fetchScheduleSources(userId);
+      const ws = new Date(weekStart);
+      ws.setHours(0, 0, 0, 0);
+      const weekEnd = addDays(ws, 7);
+      const timeMin = new Date(ws.getTime() - 2 * 86400000).toISOString();
+      const timeMax = new Date(weekEnd.getTime() + 2 * 86400000).toISOString();
+      const data = await fetchScheduleSources(userId, {timeMin, timeMax});
       setEvents(data.events);
       setConnectUrl(data.connectUrl);
       setTasks(data.tasks);
@@ -150,11 +155,11 @@ export default function WeeklySchedulePage() {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, weekStart]);
 
   useEffect(() => {
     if (userId) loadAll();
-  }, [userId, loadAll]);
+  }, [userId, weekStart, loadAll]);
 
   const scheduleItems = useMemo(() => buildScheduleItems(events, tasks), [events, tasks]);
 
@@ -258,7 +263,10 @@ export default function WeeklySchedulePage() {
         {!!connectUrl ? (
           <View style={styles.connectCard}>
             <Text style={styles.connectTitle}>Connect Google Calendar</Text>
-            <Text style={styles.connectHint}>Load meetings into the week grid.</Text>
+            <Text style={styles.connectHint}>
+              Connect Google so the app can read your primary calendar (Gmail uses the same OAuth on port 5000). After
+              upgrading scopes, you may need to sign in again once.
+            </Text>
             <TouchableOpacity onPress={openConnect} style={styles.connectBtn}>
               <LinearGradient colors={[colors.accent[500], colors.secondary[600]]} style={styles.connectBtnGrad}>
                 <Text style={styles.connectBtnText}>Connect Google</Text>
@@ -270,8 +278,9 @@ export default function WeeklySchedulePage() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Weekly timeline</Text>
           <Text style={styles.cardHint}>
-            Each column is one day ({formatWeekRangeLabel(weekStart)}). Rows are hours from 6:00 to midnight. Calendar
-            events and tasks with a due time appear in the grid.
+            Each column is one day ({formatWeekRangeLabel(weekStart)}). Rows run from 6:00 to midnight. Events load
+            from your Google Calendar (same account as Gmail OAuth on the core backend) plus any calendar rows stored
+            in SQLite; tasks with a due time appear when set.
           </Text>
 
           <View style={styles.weekNav}>

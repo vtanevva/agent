@@ -553,8 +553,18 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
             "time_pressure_level": scheduling_result.get("time_pressure_level"),
             "overdue_risk": scheduling_result.get("overdue_risk"),
             "upcoming_risk": scheduling_result.get("upcoming_risk"),
+            "task_due_datetime": scheduling_result.get("task_due_datetime"),
         },
     )
+
+    td_iso = scheduling_result.get("task_due_datetime")
+    if td_iso and not classification.get("due_datetime"):
+        classification["due_datetime"] = td_iso
+        if scheduling_result.get("due_hint_text"):
+            classification["due_hint_text"] = scheduling_result.get("due_hint_text")
+        nd = scheduling_result.get("normalized_due")
+        if isinstance(nd, dict):
+            classification["normalized_due"] = nd
 
     # 7) Reply policy + reply generation (source-specific behavior remains outside)
     reply_policy = compute_reply_policy(

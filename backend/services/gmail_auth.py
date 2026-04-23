@@ -23,6 +23,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     # Draft creation:
     "https://www.googleapis.com/auth/gmail.compose",
+    # Primary calendar: list + create events (weekly schedule + invitations). Re-consent after scope changes.
+    "https://www.googleapis.com/auth/calendar.events",
 ]
 
 BASE_DIR = Path(__file__).resolve().parent.parent

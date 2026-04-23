@@ -28,6 +28,19 @@ export async function fetchSqliteTasks(limit = 200) {
   return Array.isArray(data.tasks) ? data.tasks : [];
 }
 
+function classificationObjectFromRow(row) {
+  const raw = row?.classification_json;
+  if (raw == null || raw === '') return {};
+  if (typeof raw === 'object' && !Array.isArray(raw)) return raw;
+  if (typeof raw !== 'string') return {};
+  try {
+    const o = JSON.parse(raw);
+    return o && typeof o === 'object' ? o : {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Shape a SQLite row like the legacy pipeline task objects used in the UI.
  */
@@ -42,6 +55,9 @@ export function mapSqliteTaskToUi(row) {
     priority = 'SOON';
   }
 
+  const cls = classificationObjectFromRow(row);
+  const dueDatetime = cls.due_datetime || cls.due_datetime_iso || null;
+
   const pipelineLike = {
     _id: id,
     title: row.title || '',
@@ -50,7 +66,7 @@ export function mapSqliteTaskToUi(row) {
     priority_score: 0,
     reason: row.classification_type || '',
     source: row.source || 'sqlite',
-    due_datetime: null,
+    due_datetime: dueDatetime,
     created_at: row.created_at || '',
     actions: [],
   };
@@ -67,7 +83,7 @@ export function mapSqliteTaskToUi(row) {
     source: row.source || 'sqlite',
     meta: {
       description: row.classification_type || '',
-      due_date: null,
+      due_date: dueDatetime,
       source_ref: row.source_id || '',
       created_at: row.created_at || '',
       actions: [],

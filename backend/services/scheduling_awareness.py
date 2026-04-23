@@ -105,6 +105,20 @@ def _normalize_due_hint(due_hint_text: str, now: datetime) -> _NormalizedDue:
     if not hint:
         return _NormalizedDue(type="unknown", value=None, confidence=0.0)
 
+    # Strip leading cue words so "by tomorrow" / "due by Friday" normalize like "tomorrow" / "Friday".
+    for prefix in (
+        "due by ",
+        "needed by ",
+        "need it by ",
+        "need it before ",
+        "before ",
+        "by ",
+        "on ",
+    ):
+        if hint.startswith(prefix):
+            hint = hint[len(prefix) :].strip()
+            break
+
     # Relative anchors
     if hint == "today":
         return _NormalizedDue(type="date", value=now.date().isoformat(), confidence=0.9)
@@ -214,7 +228,9 @@ def analyze_scheduling_signals(
 ) -> dict[str, Any]:
     """
     Extract and conservatively normalize time-related signals.
-    Advisory only: does not change system behavior.
+
+    When a concrete time or calendar day is inferred, ``task_due_datetime`` is an ISO-8601 UTC
+    string (``…Z``) stored on the message classification / SQLite task payload for scheduling UIs.
     """
     text = _safe_str(clean_text)
     now = _parse_now(now_utc)
@@ -308,6 +324,23 @@ def analyze_scheduling_signals(
     )
     time_reasons.extend(reasons)
 
+    # Single ISO instant for task + scheduler UI (SQLite classification_json / Expo).
+    task_due_datetime: str | None = None
+    if due_dt is not None:
+        task_due_datetime = due_dt.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    elif normalized_due.type == "datetime" and normalized_due.value:
+        v = _safe_str(normalized_due.value)
+        if v:
+            task_due_datetime = v if v.endswith("Z") else v.replace("+00:00", "Z")
+    elif normalized_due.type == "date" and normalized_due.value:
+        try:
+            d = datetime.fromisoformat(normalized_due.value).date()
+            # No clock time in text: anchor at noon UTC on that calendar day (week grid + lists).
+            noon = datetime(d.year, d.month, d.day, 12, 0, 0, tzinfo=timezone.utc)
+            task_due_datetime = noon.isoformat().replace("+00:00", "Z")
+        except Exception:
+            task_due_datetime = None
+
     return {
         "has_schedule_signal": has_schedule_signal,
         "schedule_signals": sorted(list(set(schedule_signals))),
@@ -321,5 +354,6 @@ def analyze_scheduling_signals(
         "time_reasons": sorted(list(set(time_reasons))),
         "overdue_risk": bool(overdue_risk),
         "upcoming_risk": bool(upcoming_risk),
+        "task_due_datetime": task_due_datetime,
     }
 
