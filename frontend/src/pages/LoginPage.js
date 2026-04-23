@@ -74,7 +74,7 @@ export default function LoginPage() {
     if (u) {
       const sessionId = genSession(u);
       Alert.alert('Gmail connected', 'Your account is linked. You can use inbox features in Chat.');
-      navigation.replace('Chat', {userId: u, sessionId});
+      navigation.replace('Home', {userId: u, sessionId});
     }
   }, [navigation]);
 
@@ -128,9 +128,9 @@ export default function LoginPage() {
           attempts++;
           const isConnected = await checkGoogleConnection(username);
           if (isConnected) {
-            console.log('Google connected! Navigating to chat...');
+            console.log('Google connected! Navigating to home...');
             const sessionId = genSession(username);
-            navigation.navigate('Chat', {userId: username, sessionId});
+            navigation.navigate('Home', {userId: username, sessionId});
             pendingOAuthUsername.current = null;
             clearInterval(checkInterval);
           } else if (attempts >= maxAttempts) {
@@ -159,9 +159,9 @@ export default function LoginPage() {
           const username = pendingOAuthUsername.current;
           const isConnected = await checkGoogleConnection(username);
           if (isConnected) {
-            console.log('Google connected! Navigating to chat...');
+            console.log('Google connected! Navigating to home...');
             const sessionId = genSession(username);
-            navigation.navigate('Chat', {userId: username, sessionId});
+            navigation.navigate('Home', {userId: username, sessionId});
             pendingOAuthUsername.current = null;
           }
         };
@@ -211,7 +211,7 @@ export default function LoginPage() {
   const handleGuestLogin = () => {
     const id = loginName.trim().toLowerCase();
     const sessionId = genSession(id);
-    navigation.navigate('Chat', {userId: id, sessionId});
+    navigation.navigate('Home', {userId: id, sessionId});
   };
 
   return (

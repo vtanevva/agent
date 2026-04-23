@@ -32,7 +32,8 @@ import {extractEmailAddress} from '../utils/emailParse';
 export default function ChatPage() {
   const route = useRoute();
   const navigation = useNavigation();
-  const {userId, sessionId} = route.params || {};
+  const {userId, sessionId, seedPrompt} = route.params || {};
+  const seedConsumed = useRef(false);
   
   // All state declarations first (React hooks rules)
   const [isParamsReady, setIsParamsReady] = useState(false);
@@ -241,9 +242,11 @@ export default function ChatPage() {
     };
   }, [userId, viewMode, fetchActionInbox]);
 
-  // Default to Action view when Gmail is connected
+  // Default to Action view when Gmail is connected (but not when we arrived
+  // here with a seedPrompt — the user wants to see the prefilled draft).
   useEffect(() => {
     if (!userId) return;
+    if (seedConsumed.current) return;
     if (googleConnected) {
       setViewMode('action');
       fetchActionInbox(true);
@@ -271,6 +274,20 @@ export default function ChatPage() {
       loadSessionChat(sessionId);
     }
   }, [sessionId, userId, loadSessionChat]);
+
+  // Consume any seedPrompt navigation param exactly once: prefill the input
+  // and flip to the chat view so the user sees it immediately.
+  useEffect(() => {
+    if (!seedPrompt || seedConsumed.current) return;
+    seedConsumed.current = true;
+    setInput(String(seedPrompt));
+    setViewMode('chat');
+    try {
+      navigation.setParams({seedPrompt: undefined});
+    } catch {
+      // ignore if navigator doesn't support setParams in this state
+    }
+  }, [seedPrompt, navigation]);
 
   // Send message
   const handleSend = useCallback(async (msg = input) => {

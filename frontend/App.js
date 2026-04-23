@@ -1,10 +1,19 @@
 import React, {useEffect, useRef} from 'react';
-import {Platform, Linking} from 'react-native';
+import {Platform, Linking, View, Text, TextInput} from 'react-native';
 import {NavigationContainer} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
+import {
+  useFonts,
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+} from '@expo-google-fonts/inter';
+import {theme} from './src/styles/theme';
 
 import LoginPage from './src/pages/LoginPage';
+import HomePage from './src/pages/HomePage';
 import ChatPage from './src/pages/ChatPage';
 import VoiceChat from './src/pages/VoiceChat';
 import SettingsPage from './src/pages/SettingsPage';
@@ -25,6 +34,22 @@ const Stack = createNativeStackNavigator();
 export default function App() {
   const navigationRef = useRef(null);
   const isNavigationReady = useRef(false);
+
+  const [fontsLoaded] = useFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+  });
+
+  useEffect(() => {
+    if (!fontsLoaded) return;
+    const base = {fontFamily: theme.fonts.regular};
+    [Text, TextInput].forEach((C) => {
+      C.defaultProps = C.defaultProps || {};
+      C.defaultProps.style = [base, C.defaultProps.style];
+    });
+  }, [fontsLoaded]);
 
   // Helper function to get initial route based on URL
   const getInitialRoute = () => {
@@ -60,6 +85,14 @@ export default function App() {
     }
   }, []);
 
+  if (!fontsLoaded) {
+    return (
+      <SafeAreaProvider>
+        <View style={{flex: 1, backgroundColor: theme.colors.bg}} />
+      </SafeAreaProvider>
+    );
+  }
+
   return (
     <SafeAreaProvider>
       <NavigationContainer
@@ -73,6 +106,13 @@ export default function App() {
             screens: {
               Waitlist: 'waitlist',
               Login: '',
+              Home: {
+                path: 'home',
+                parse: {
+                  userId: (userId) => userId,
+                  sessionId: (sessionId) => sessionId,
+                },
+              },
               Chat: {
                 path: 'chat',
                 parse: {
@@ -92,6 +132,7 @@ export default function App() {
             contentStyle: {backgroundColor: 'transparent'},
           }}>
           <Stack.Screen name="Login" component={LoginPage} />
+          <Stack.Screen name="Home" component={HomePage} />
           <Stack.Screen name="Chat" component={ChatPage} />
           <Stack.Screen name="VoiceChat" component={VoiceChat} />
           <Stack.Screen name="Settings" component={SettingsPage} />

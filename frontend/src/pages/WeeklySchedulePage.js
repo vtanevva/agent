@@ -12,18 +12,18 @@ import {
 } from 'react-native';
 import {useRoute, useNavigation} from '@react-navigation/native';
 import {SafeAreaView} from 'react-native-safe-area-context';
-import {Svg, Path} from 'react-native-svg';
-import {LinearGradient} from 'expo-linear-gradient';
-import {colors} from '../styles/colors';
-import {commonStyles} from '../styles/commonStyles';
+
+import {theme, pickEventColor} from '../styles/theme';
 import {API_BASE_URL} from '../config/api';
 import {buildScheduleItems, fetchScheduleSources, toDateSafe} from '../api/scheduleData';
+import TopSearchBar from '../components/TopSearchBar';
+import BottomNav from '../components/BottomNav';
 
 const TIMELINE_START_HOUR = 6;
-const HOUR_HEIGHT = 38;
-const HOURS_SHOWN = 18; // 6:00 through 23:59 (before next midnight)
-const TIME_GUTTER_W = 46;
-const DAY_MIN_W = 104;
+const HOUR_HEIGHT = 44;
+const HOURS_SHOWN = 18;
+const TIME_GUTTER_W = 52;
+const DAY_MIN_W = 116;
 
 function startOfWeekMonday(d = new Date()) {
   const date = new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -48,8 +48,8 @@ function formatWeekRangeLabel(weekStart) {
 }
 
 function formatHourRowLabel(hour24) {
-  const d = new Date(2000, 0, 1, hour24, 0, 0);
-  return d.toLocaleTimeString(undefined, {hour: 'numeric', hour12: true});
+  const h = String(hour24).padStart(2, '0');
+  return `${h}:00`;
 }
 
 function timelineStartForDay(dayMidnight) {
@@ -65,7 +65,6 @@ function timelineEndForDay(dayMidnight) {
   return t;
 }
 
-/** Clip schedule item to one calendar day and the visible timeline (6am–midnight). */
 function clipItemToDay(item, dayMidnight) {
   const dayStart = new Date(dayMidnight);
   dayStart.setHours(0, 0, 0, 0);
@@ -108,15 +107,14 @@ function layoutBlocksForDay(dayMidnight, allItems, tlStart) {
     if (c) clipped.push(c);
   }
   const withLanes = assignLanes(clipped);
-  const totalH = HOURS_SHOWN * HOUR_HEIGHT;
   return withLanes.map((it) => {
     const hoursFromTl = (it.clipStart - tlStart) / 3600000;
     const durH = (it.clipEnd - it.clipStart) / 3600000;
     const top = hoursFromTl * HOUR_HEIGHT;
-    const height = Math.max(20, durH * HOUR_HEIGHT);
+    const height = Math.max(28, durH * HOUR_HEIGHT);
     const wPct = 100 / it.totalLanes;
     const leftPct = (it.lane / it.totalLanes) * 100;
-    return {...it, top, height, wPct, leftPct, totalH};
+    return {...it, top, height, wPct, leftPct};
   });
 }
 
@@ -132,6 +130,7 @@ export default function WeeklySchedulePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [connectUrl, setConnectUrl] = useState('');
+  const [query, setQuery] = useState('');
 
   const screenW = Dimensions.get('window').width;
 
@@ -186,7 +185,7 @@ export default function WeeklySchedulePage() {
     });
   }, [weekDays, weekFilteredItems]);
 
-  const dayColumnWidth = Math.max(DAY_MIN_W, (screenW - TIME_GUTTER_W - 20) / 7);
+  const dayColumnWidth = Math.max(DAY_MIN_W, (screenW - TIME_GUTTER_W - 40) / 7);
 
   const openConnect = async () => {
     if (!connectUrl) return;
@@ -227,30 +226,30 @@ export default function WeeklySchedulePage() {
 
   const totalGridHeight = HOURS_SHOWN * HOUR_HEIGHT;
 
-  return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Svg width="24" height="24" viewBox="0 0 24 24" fill={colors.primary[900]}>
-            <Path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" />
-          </Svg>
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={styles.title}>Week schedule</Text>
-          <Text style={styles.subtitle}>
-            {userId ? `Hourly view • ${userId}` : 'Sign in'}
-            {sessionId ? ` • …${sessionId.slice(-6)}` : ''}
-          </Text>
-        </View>
-        <TouchableOpacity onPress={loadAll} disabled={!userId || loading} style={styles.refreshButton}>
-          <Text style={styles.refreshText}>{loading ? '…' : '↻'}</Text>
-        </TouchableOpacity>
-      </View>
+  const goHome = () => {
+    if (navigation.canGoBack()) navigation.goBack();
+    else navigation.navigate('Home', {userId, sessionId});
+  };
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <TopSearchBar
+        value={query}
+        onChangeText={setQuery}
+        leading="back"
+        onLeadingPress={goHome}
+        placeholder="Ask Aivis or search for any..."
+      />
+
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}>
         {!userId ? (
           <View style={styles.banner}>
-            <Text style={styles.bannerText}>Missing userId — open this screen from an active session.</Text>
+            <Text style={styles.bannerText}>
+              Missing userId — open this screen from an active session.
+            </Text>
           </View>
         ) : null}
 
@@ -264,65 +263,62 @@ export default function WeeklySchedulePage() {
           <View style={styles.connectCard}>
             <Text style={styles.connectTitle}>Connect Google Calendar</Text>
             <Text style={styles.connectHint}>
-              Connect Google so the app can read your primary calendar (Gmail uses the same OAuth on port 5000). After
-              upgrading scopes, you may need to sign in again once.
+              Connect Google so the app can read your primary calendar. After upgrading scopes you
+              may need to sign in again once.
             </Text>
-            <TouchableOpacity onPress={openConnect} style={styles.connectBtn}>
-              <LinearGradient colors={[colors.accent[500], colors.secondary[600]]} style={styles.connectBtnGrad}>
-                <Text style={styles.connectBtnText}>Connect Google</Text>
-              </LinearGradient>
+            <TouchableOpacity onPress={openConnect} style={styles.connectBtn} activeOpacity={0.85}>
+              <Text style={styles.connectBtnText}>Connect Google</Text>
             </TouchableOpacity>
           </View>
         ) : null}
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Weekly timeline</Text>
-          <Text style={styles.cardHint}>
-            Each column is one day ({formatWeekRangeLabel(weekStart)}). Rows run from 6:00 to midnight. Events load
-            from your Google Calendar (same account as Gmail OAuth on the core backend) plus any calendar rows stored
-            in SQLite; tasks with a due time appear when set.
-          </Text>
+        <View style={styles.weekNav}>
+          <TouchableOpacity onPress={prevWeek} style={styles.weekNavBtn} activeOpacity={0.85}>
+            <Text style={styles.weekNavText}>←</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={thisWeek} style={styles.weekNavBtnMid} activeOpacity={0.85}>
+            <Text style={styles.weekNavTextMid}>{formatWeekRangeLabel(weekStart)}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={nextWeek} style={styles.weekNavBtn} activeOpacity={0.85}>
+            <Text style={styles.weekNavText}>→</Text>
+          </TouchableOpacity>
+        </View>
 
-          <View style={styles.weekNav}>
-            <TouchableOpacity onPress={prevWeek} style={styles.weekNavBtn}>
-              <Text style={styles.weekNavText}>← Prev</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={thisWeek} style={styles.weekNavBtnMid}>
-              <Text style={styles.weekNavTextMid}>This week</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={nextWeek} style={styles.weekNavBtn}>
-              <Text style={styles.weekNavText}>Next →</Text>
-            </TouchableOpacity>
-          </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} nestedScrollEnabled>
+          <View style={styles.gridWrap}>
+            <View style={[styles.timeGutter, {width: TIME_GUTTER_W, height: totalGridHeight + 40}]}>
+              <View style={{height: 40}} />
+              {Array.from({length: HOURS_SHOWN}, (_, i) => (
+                <View key={i} style={[styles.hourRow, {height: HOUR_HEIGHT}]}>
+                  <Text style={styles.hourLabel}>{formatHourRowLabel(TIMELINE_START_HOUR + i)}</Text>
+                </View>
+              ))}
+            </View>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator nestedScrollEnabled>
-            <View style={styles.gridWrap}>
-              <View style={[styles.timeGutter, {width: TIME_GUTTER_W, height: totalGridHeight + 28}]}>
-                <View style={{height: 28}} />
-                {Array.from({length: HOURS_SHOWN}, (_, i) => (
-                  <View key={i} style={[styles.hourRow, {height: HOUR_HEIGHT}]}>
-                    <Text style={styles.hourLabel}>{formatHourRowLabel(TIMELINE_START_HOUR + i)}</Text>
-                  </View>
-                ))}
-              </View>
-
-              {dayLayouts.map(({date, blocks}) => {
-                const tlStart = timelineStartForDay(date);
-                const isToday = new Date().toDateString() === date.toDateString();
-                return (
-                  <View key={String(date.getTime())} style={[styles.dayCol, {width: dayColumnWidth}]}>
-                    <View style={[styles.dayHeader, isToday && styles.dayHeaderToday]}>
-                      <Text style={styles.dayHeaderDow}>{date.toLocaleDateString(undefined, {weekday: 'short'})}</Text>
-                      <Text style={styles.dayHeaderDom}>{date.getDate()}</Text>
+            {dayLayouts.map(({date, blocks}) => {
+              const isToday = new Date().toDateString() === date.toDateString();
+              return (
+                <View key={String(date.getTime())} style={[styles.dayCol, {width: dayColumnWidth}]}>
+                  <View style={styles.dayHeader}>
+                    <Text style={styles.dayHeaderDow}>
+                      {date.toLocaleDateString(undefined, {weekday: 'short'}).toUpperCase()}
+                    </Text>
+                    <View style={[styles.dayDomWrap, isToday && styles.dayDomToday]}>
+                      <Text style={[styles.dayHeaderDom, isToday && styles.dayHeaderDomToday]}>
+                        {date.getDate()}
+                      </Text>
                     </View>
-                    <View style={[styles.dayCanvas, {height: totalGridHeight}]}>
-                      {Array.from({length: HOURS_SHOWN}, (_, i) => (
-                        <View
-                          key={i}
-                          style={[styles.hourLine, {top: i * HOUR_HEIGHT, width: '100%'}]}
-                        />
-                      ))}
-                      {blocks.map((b, idx) => (
+                  </View>
+                  <View style={[styles.dayCanvas, {height: totalGridHeight}]}>
+                    {Array.from({length: HOURS_SHOWN}, (_, i) => (
+                      <View
+                        key={i}
+                        style={[styles.hourLine, {top: i * HOUR_HEIGHT, width: '100%'}]}
+                      />
+                    ))}
+                    {blocks.map((b, idx) => {
+                      const pal = pickEventColor(`${b.kind}-${b.summary || ''}-${idx}`);
+                      return (
                         <TouchableOpacity
                           key={`${b.kind}-${idx}-${b.clipStart?.toISOString?.() || idx}`}
                           activeOpacity={0.88}
@@ -351,20 +347,12 @@ export default function WeeklySchedulePage() {
                           style={[
                             styles.block,
                             {
-                              top: b.top,
-                              height: b.height,
+                              top: b.top + 4,
+                              height: b.height - 6,
                               left: `${b.leftPct}%`,
                               width: `${b.wPct}%`,
-                              backgroundColor:
-                                b.kind === 'event'
-                                  ? colors.secondary[500] + '28'
-                                  : b.priority === 'NOW'
-                                    ? '#EF444428'
-                                    : b.priority === 'SOON'
-                                      ? '#F59E0B28'
-                                      : colors.accent[500] + '28',
-                              borderColor:
-                                b.kind === 'event' ? colors.secondary[600] + '90' : colors.accent[600] + '80',
+                              backgroundColor: pal.bg,
+                              borderColor: pal.border,
                             },
                           ]}>
                           <Text style={styles.blockTitle} numberOfLines={3}>
@@ -372,190 +360,199 @@ export default function WeeklySchedulePage() {
                           </Text>
                           <Text style={styles.blockTime} numberOfLines={1}>
                             {b.clipStart.toLocaleTimeString(undefined, {
-                              hour: 'numeric',
+                              hour: '2-digit',
                               minute: '2-digit',
+                              hour12: false,
                             })}
                           </Text>
                         </TouchableOpacity>
-                      ))}
-                    </View>
+                      );
+                    })}
                   </View>
-                );
-              })}
-            </View>
-          </ScrollView>
-        </View>
+                </View>
+              );
+            })}
+          </View>
+        </ScrollView>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Unscheduled tasks</Text>
-          <Text style={styles.cardHint}>Tasks without a due time stay here (same as the month scheduler).</Text>
-          {unscheduled.length === 0 ? (
-            <Text style={styles.smallEmpty}>None</Text>
-          ) : (
-            unscheduled.slice(0, 24).map((t) => (
+        {unscheduled.length > 0 && (
+          <View style={styles.unCard}>
+            <Text style={styles.unCardTitle}>Unscheduled</Text>
+            <Text style={styles.unCardHint}>Tasks without a due time stay here.</Text>
+            {unscheduled.slice(0, 24).map((t) => (
               <View key={String(t._id)} style={styles.unRow}>
                 <Text style={styles.unTitle} numberOfLines={2}>
                   {t.title || '(Untitled)'}
                 </Text>
                 <Text style={styles.unMeta}>{t.priority || 'LATER'}</Text>
               </View>
-            ))
-          )}
-        </View>
+            ))}
+          </View>
+        )}
       </ScrollView>
+
+      <BottomNav
+        leftIcon="home"
+        centerIcon="plus"
+        rightIcon="menu"
+        onLeft={goHome}
+        onCenter={() => navigation.navigate('Chat', {userId, sessionId})}
+        onRight={() => navigation.navigate('Menu', {userId, sessionId})}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {flex: 1, backgroundColor: colors.primary[50]},
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.dark[500] + '20',
-    backgroundColor: colors.primary[50],
-  },
-  backButton: {padding: 8},
-  headerCenter: {flex: 1, alignItems: 'center'},
-  title: {fontSize: 20, fontWeight: 'bold', color: colors.primary[900]},
-  subtitle: {fontSize: 12, color: colors.primary[900] + '70', marginTop: 2},
-  refreshButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: colors.primary[100],
-    borderWidth: 1,
-    borderColor: colors.dark[500] + '15',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  refreshText: {fontSize: 18, fontWeight: '900', color: colors.primary[900]},
+  container: {flex: 1, backgroundColor: theme.colors.bg},
   scroll: {flex: 1},
-  scrollContent: {padding: 16, paddingBottom: 28},
-  card: {
-    ...commonStyles.glassEffectStrong,
-    padding: 16,
-    borderRadius: 14,
-    marginBottom: 14,
-  },
-  cardTitle: {fontSize: 18, fontWeight: '700', color: colors.primary[900]},
-  cardHint: {marginTop: 6, marginBottom: 12, fontSize: 12, color: colors.primary[900] + '70'},
+  scrollContent: {paddingHorizontal: 20, paddingTop: 8, paddingBottom: 140},
+
   banner: {
-    backgroundColor: colors.primary[100],
+    backgroundColor: theme.colors.surfaceMuted,
     borderRadius: 12,
     padding: 12,
-    borderWidth: 1,
-    borderColor: colors.dark[500] + '10',
     marginBottom: 12,
   },
-  bannerText: {color: colors.primary[900] + '90', fontSize: 12, fontWeight: '600', textAlign: 'center'},
+  bannerText: {
+    color: theme.colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
   bannerError: {
-    backgroundColor: colors.dark[500] + '10',
+    backgroundColor: '#F6E0E0',
     borderRadius: 12,
     padding: 12,
-    borderWidth: 1,
-    borderColor: colors.dark[500] + '25',
     marginBottom: 12,
   },
-  bannerErrorText: {color: colors.dark[600], fontSize: 12, fontWeight: '700', textAlign: 'center'},
+  bannerErrorText: {color: '#8A2C2C', fontSize: 12, fontWeight: '700', textAlign: 'center'},
+
   connectCard: {
     padding: 14,
-    borderRadius: 14,
+    borderRadius: 16,
     marginBottom: 12,
-    borderWidth: 1,
-    borderColor: colors.accent[500] + '35',
-    backgroundColor: colors.primary[100] + '90',
+    backgroundColor: theme.colors.surface,
+    ...theme.shadow.card,
   },
-  connectTitle: {fontSize: 15, fontWeight: '800', color: colors.primary[900]},
-  connectHint: {marginTop: 4, fontSize: 12, color: colors.primary[900] + '70'},
-  connectBtn: {marginTop: 10, borderRadius: 12, overflow: 'hidden', alignSelf: 'flex-start'},
-  connectBtnGrad: {paddingVertical: 10, paddingHorizontal: 16},
-  connectBtnText: {color: colors.primary[50], fontWeight: '800'},
+  connectTitle: {fontSize: 15, fontWeight: '700', color: theme.colors.textPrimary},
+  connectHint: {marginTop: 4, fontSize: 12, color: theme.colors.textSecondary},
+  connectBtn: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    borderRadius: theme.radius.pill,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    backgroundColor: theme.colors.textPrimary,
+  },
+  connectBtnText: {color: theme.colors.textOnDark, fontSize: 13, fontWeight: '700'},
+
   weekNav: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
-    gap: 8,
+    marginVertical: 12,
+    gap: 10,
   },
   weekNavBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    backgroundColor: colors.primary[100],
-    borderWidth: 1,
-    borderColor: colors.dark[500] + '12',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: theme.colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...theme.shadow.card,
   },
   weekNavBtnMid: {
     flex: 1,
-    paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: colors.secondary[500] + '18',
-    borderWidth: 1,
-    borderColor: colors.secondary[500] + '35',
+    height: 40,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.colors.surface,
     alignItems: 'center',
+    justifyContent: 'center',
+    ...theme.shadow.card,
   },
-  weekNavText: {fontSize: 12, fontWeight: '800', color: colors.primary[900]},
-  weekNavTextMid: {fontSize: 12, fontWeight: '900', color: colors.secondary[700]},
+  weekNavText: {fontSize: 18, fontWeight: '700', color: theme.colors.textPrimary},
+  weekNavTextMid: {fontSize: 13, fontWeight: '700', color: theme.colors.textPrimary},
+
   gridWrap: {flexDirection: 'row', alignItems: 'flex-start'},
-  timeGutter: {paddingRight: 4},
+  timeGutter: {paddingRight: 6},
   hourRow: {justifyContent: 'flex-start', paddingTop: 0},
-  hourLabel: {fontSize: 10, fontWeight: '700', color: colors.primary[900] + '65', textAlign: 'right'},
-  dayCol: {marginLeft: 4},
+  hourLabel: {
+    ...theme.type.hourLabel,
+    color: theme.colors.textSecondary,
+    textAlign: 'right',
+  },
+  dayCol: {marginLeft: 6},
   dayHeader: {
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: colors.primary[100],
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 0,
-    borderWidth: 1,
-    borderColor: colors.dark[500] + '10',
   },
-  dayHeaderToday: {
-    backgroundColor: colors.accent[500] + '22',
-    borderColor: colors.accent[500] + '50',
+  dayHeaderDow: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: theme.colors.textSecondary,
+    letterSpacing: 0.6,
   },
-  dayHeaderDow: {fontSize: 10, fontWeight: '800', color: colors.primary[900] + '75'},
-  dayHeaderDom: {fontSize: 13, fontWeight: '900', color: colors.primary[900]},
+  dayDomWrap: {
+    marginTop: 2,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dayDomToday: {
+    backgroundColor: theme.colors.textPrimary,
+  },
+  dayHeaderDom: {fontSize: 13, fontWeight: '700', color: theme.colors.textPrimary},
+  dayHeaderDomToday: {color: theme.colors.textOnDark},
+
   dayCanvas: {
     position: 'relative',
     marginTop: 0,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: colors.dark[500] + '12',
-    backgroundColor: colors.primary[50] + 'cc',
+    backgroundColor: 'transparent',
   },
   hourLine: {
     position: 'absolute',
     left: 0,
     borderTopWidth: 1,
-    borderTopColor: colors.dark[500] + '10',
+    borderTopColor: theme.colors.border,
     height: 1,
   },
   block: {
     position: 'absolute',
-    borderRadius: 6,
+    borderRadius: 14,
     borderWidth: 1,
-    paddingHorizontal: 4,
-    paddingVertical: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
     overflow: 'hidden',
   },
-  blockTitle: {fontSize: 10, fontWeight: '800', color: colors.primary[900]},
-  blockTime: {fontSize: 9, fontWeight: '700', color: colors.primary[900] + '75', marginTop: 2},
-  smallEmpty: {fontSize: 12, color: colors.primary[900] + '60', fontWeight: '600'},
+  blockTitle: {...theme.type.eventTitle, color: theme.colors.textPrimary},
+  blockTime: {
+    marginTop: 2,
+    fontSize: 10,
+    fontWeight: '500',
+    color: theme.colors.textSecondary,
+  },
+
+  unCard: {
+    marginTop: 16,
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: theme.colors.surface,
+    ...theme.shadow.card,
+  },
+  unCardTitle: {fontSize: 15, fontWeight: '700', color: theme.colors.textPrimary},
+  unCardHint: {marginTop: 4, marginBottom: 10, fontSize: 12, color: theme.colors.textSecondary},
   unRow: {
     padding: 10,
-    borderRadius: 10,
-    backgroundColor: colors.primary[50],
-    borderWidth: 1,
-    borderColor: colors.dark[500] + '10',
+    borderRadius: 12,
+    backgroundColor: theme.colors.surfaceAlt,
     marginBottom: 8,
   },
-  unTitle: {fontSize: 13, fontWeight: '700', color: colors.primary[900]},
-  unMeta: {marginTop: 4, fontSize: 11, fontWeight: '700', color: colors.primary[900] + '65'},
+  unTitle: {fontSize: 13, fontWeight: '600', color: theme.colors.textPrimary},
+  unMeta: {marginTop: 4, fontSize: 11, fontWeight: '600', color: theme.colors.textSecondary},
 });
