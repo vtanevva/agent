@@ -2,10 +2,12 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS clients (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  data_owner_key TEXT NOT NULL DEFAULT '__unscoped__',
   description TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  UNIQUE (data_owner_key, name)
 );
 
 CREATE TABLE IF NOT EXISTS projects (
@@ -49,6 +51,7 @@ CREATE TABLE IF NOT EXISTS calendar_events (
   end_at TEXT NOT NULL,
   timezone TEXT,
   source TEXT,               -- google_calendar / reclaim / manual
+  data_owner_key TEXT,       -- same partition as clients (email + login); NULL = legacy
   client_id INTEGER,
   project_id INTEGER,
   notes TEXT,

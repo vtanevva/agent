@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
 
+from services.data_owner_key import data_owner_key_for_session
 from storage.sqlite_db import (
     get_client_by_name,
     get_project_by_name,
@@ -29,7 +30,8 @@ def memory_context():
     client_name = (request.args.get("client_name") or "").strip() or None
     project_name = (request.args.get("project_name") or "").strip() or None
 
-    client = get_client_by_name(client_name) if client_name else None
+    owner_key = data_owner_key_for_session(app_user_id=user_id) if user_id else "__unscoped__"
+    client = get_client_by_name(client_name, data_owner_key=owner_key) if client_name else None
     project = None
     project_context = None
     recent_messages: list[dict] = []

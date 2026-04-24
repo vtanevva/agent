@@ -183,6 +183,9 @@ async function loadCalendarEvents(userId, {timeMin, timeMax} = {}) {
           body: JSON.stringify(body),
         });
         const data = await r.json().catch(() => ({}));
+        if (r.status === 400) {
+          return {events: [], connectUrl: ''};
+        }
         if (!r.ok || !data?.success || !Array.isArray(data.events)) {
           return {events: [], connectUrl: ''};
         }
@@ -214,9 +217,9 @@ async function loadCalendarEvents(userId, {timeMin, timeMax} = {}) {
   return {events, connectUrl};
 }
 
-async function loadTasksFromSqlite() {
+async function loadTasksFromSqlite(userId) {
   try {
-    const rows = await fetchSqliteTasks(200);
+    const rows = await fetchSqliteTasks(200, userId);
     const all = rows.map((row) => mapSqliteRowToSchedulerTask(row)).filter(Boolean);
     const withDue = [];
     const withoutDue = [];
@@ -235,10 +238,13 @@ async function loadTasksFromSqlite() {
  * @param {{ timeMin?: string, timeMax?: string }} [range] Optional ISO window for Google + SQLite calendar rows.
  */
 export async function fetchScheduleSources(userId, range = {}) {
+  if (!String(userId || '').trim()) {
+    return {events: [], connectUrl: '', tasks: [], unscheduled: []};
+  }
   const {timeMin, timeMax} = range || {};
   const [eventsRes, tasksRes] = await Promise.all([
     loadCalendarEvents(userId, {timeMin, timeMax}),
-    loadTasksFromSqlite(),
+    loadTasksFromSqlite(userId),
   ]);
   return {
     events: eventsRes.events,

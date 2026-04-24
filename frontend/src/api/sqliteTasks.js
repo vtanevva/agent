@@ -1,11 +1,19 @@
 import {CORE_BACKEND_URL} from '../config/api';
 
 /**
- * Recent tasks from the core backend SQLite (GET /debug/sql/tasks).
+ * Local tasks for the signed-in user (GET /api/tasks with user_id).
+ * Same data partition as projects / clients.
  */
-export async function fetchSqliteTasks(limit = 200) {
-  const lim = Math.min(200, Math.max(1, Number(limit) || 200));
-  const r = await fetch(`${CORE_BACKEND_URL}/debug/sql/tasks?limit=${encodeURIComponent(String(lim))}`);
+export async function fetchSqliteTasks(limit = 200, userId) {
+  const lim = Math.min(500, Math.max(1, Number(limit) || 200));
+  const uid = String(userId || '').trim();
+  if (!uid) {
+    return [];
+  }
+  const q = new URLSearchParams();
+  q.set('limit', String(lim));
+  q.set('user_id', uid);
+  const r = await fetch(`${CORE_BACKEND_URL}/api/tasks?${q.toString()}`);
   const ct = r.headers.get('content-type') || '';
   if (!r.ok) {
     let detail = '';
@@ -29,7 +37,7 @@ export async function fetchSqliteTasks(limit = 200) {
 }
 
 function classificationObjectFromRow(row) {
-  const raw = row?.classification_json;
+  const raw = row?.classification_json ?? row?.classification;
   if (raw == null || raw === '') return {};
   if (typeof raw === 'object' && !Array.isArray(raw)) return raw;
   if (typeof raw !== 'string') return {};

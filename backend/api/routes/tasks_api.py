@@ -5,6 +5,7 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
+from services.data_owner_key import data_owner_key_for_session
 from storage.sqlite_db import (
     complete_local_task,
     get_task_by_id,
@@ -85,9 +86,11 @@ def _row_to_api(row: dict) -> dict:
 @tasks_api_bp.get("/api/tasks")
 def list_tasks():
     """
-    List local tasks for the Home / Week views. Not scoped per-user yet because
-    the task table does not carry an app user id; filter by ``workspace_id``
-    (Gmail mailbox email, Slack team id) if the caller provides it.
+    List local tasks for the Home / Week views.
+
+    With ``user_id``, tasks are limited to the same data partition as clients/projects
+    (linked email + login), with extra matching for unscoped Gmail/chat rows.
+    ``workspace_id`` still narrows the result when both are present.
     """
     try:
         limit = int(request.args.get("limit") or "200")
@@ -98,9 +101,18 @@ def list_tasks():
         "1", "true", "yes",
     )
     workspace_filter = (request.args.get("workspace_id") or "").strip().lower()
+    session_uid = (request.args.get("user_id") or "").strip()
+    data_owner: str | None = None
+    if session_uid:
+        data_owner = data_owner_key_for_session(app_user_id=session_uid)
 
     try:
-        rows = list_local_tasks(limit=limit, include_completed=include_completed)
+        rows = list_local_tasks(
+            limit=limit,
+            include_completed=include_completed,
+            data_owner_key=data_owner,
+            app_user_id=session_uid or None,
+        )
     except Exception as e:
         log.exception(f"[TASKS] list failed: {e}")
         return jsonify({"success": False, "error": str(e)}), 500

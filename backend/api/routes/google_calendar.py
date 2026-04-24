@@ -11,6 +11,7 @@ from api.routes.google_oauth import default_oauth_frontend_return_url
 from googleapiclient.errors import HttpError
 
 from application.services.calendar_meeting_action import create_event_from_api_payload
+from services.data_owner_key import data_owner_key_for_session
 from services.google_calendar_client import list_primary_calendar_events
 from storage.sqlite_db import list_calendar_events_in_range
 from utils.logger import get_logger
@@ -92,7 +93,7 @@ def api_calendar_events():
     Returns: { success, events: [...] } or { success: false, action: connect_google, connect_url }
     """
     body = request.get_json(silent=True) or {}
-    user_id = (body.get("user_id") or body.get("userId") or "").strip() or "me"
+    user_id = (body.get("user_id") or body.get("userId") or "").strip()
     max_results = int(body.get("max_results") or 250)
     max_results = max(1, min(max_results, 500))
 
@@ -102,9 +103,26 @@ def api_calendar_events():
     if isinstance(body.get("time_max"), str) and body["time_max"].strip():
         t_max = body["time_max"].strip()
 
+    if not user_id:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "user_id is required for per-user schedule data",
+                    "events": [],
+                }
+            ),
+            400,
+        )
+
+    data_owner = data_owner_key_for_session(app_user_id=user_id)
+    g_user = (user_id or "").strip() or None
+
     sqlite_rows: list[dict] = []
     try:
-        sqlite_rows = list_calendar_events_in_range(t_min, t_max, limit=500)
+        sqlite_rows = list_calendar_events_in_range(
+            t_min, t_max, limit=500, data_owner_key=data_owner
+        )
     except Exception as e:
         log.warning("[calendar] sqlite range read failed: %s", e)
 
@@ -116,16 +134,17 @@ def api_calendar_events():
             time_min=t_min,
             time_max=t_max,
             max_results=max_results,
+            user_id=g_user,
         )
     except FileNotFoundError:
         connect_action = "connect_google"
-        connect_url = _connect_url(user_id)
+        connect_url = _connect_url(user_id or "me")
     except HttpError as e:
         status = getattr(e.resp, "status", None) or 0
         if status in (401, 403):
             log.warning("[calendar] Google Calendar HTTP %s: %s", status, e)
             connect_action = "connect_google"
-            connect_url = _connect_url(user_id)
+            connect_url = _connect_url(user_id or "me")
         else:
             log.exception("[calendar] Google Calendar API error")
             return jsonify({"success": False, "error": "calendar_api_error", "detail": str(e)}), 502
@@ -133,7 +152,7 @@ def api_calendar_events():
         err = str(e).lower()
         if "invalid_grant" in err or "invalid_scope" in err or "invalid_google_credentials" in err:
             connect_action = "connect_google"
-            connect_url = _connect_url(user_id)
+            connect_url = _connect_url(user_id or "me")
         else:
             log.exception("[calendar] unexpected error")
             return jsonify({"success": False, "error": "calendar_failed", "detail": str(e)}), 500
@@ -158,7 +177,7 @@ def api_calendar_create():
     """
     body = request.get_json(silent=True) or {}
     user_id = (body.get("user_id") or body.get("userId") or "").strip() or "me"
-    result = create_event_from_api_payload(body)
+    result = create_event_from_api_payload(body, user_id=user_id)
     if not result.get("success"):
         err = str(result.get("error") or "failed")
         if err == "connect_google":

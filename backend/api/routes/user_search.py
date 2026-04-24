@@ -14,6 +14,7 @@ from typing import Any
 import requests
 from flask import Blueprint, jsonify, request
 
+from services.data_owner_key import data_owner_key_for_session
 from storage.sqlite_db import get_conn
 from utils.logger import get_logger
 
@@ -209,6 +210,13 @@ def user_search():
         per_bucket = 20
     per_bucket = max(1, min(per_bucket, 40))
 
+    owner_dk: str | None = None
+    if user_id:
+        try:
+            owner_dk = data_owner_key_for_session(app_user_id=user_id)
+        except Exception:
+            owner_dk = None
+
     tokens = _search_tokens(q)
     if not tokens:
         return (
@@ -335,6 +343,12 @@ def user_search():
             t_clauses.append(f"{task_parts[0]} LIKE ? ESCAPE '\\'")
             t_bind.append(f"%{esc}%")
         t_where = " AND ".join(t_clauses)
+        t_scope = (
+            f" AND (t.client_id IS NULL OR c.data_owner_key = ?)"
+            if owner_dk
+            else ""
+        )
+        t_params = (*t_bind, owner_dk) if owner_dk else t_bind
         for tr in conn.execute(
             f"""
             SELECT t.id, t.title, t.description, t.source, t.source_id, t.created_at,
@@ -342,11 +356,11 @@ def user_search():
             FROM tasks t
             LEFT JOIN clients c ON c.id = t.client_id
             LEFT JOIN projects p ON p.id = t.project_id
-            WHERE {t_where}
+            WHERE {t_where}{t_scope}
             ORDER BY t.id DESC
             LIMIT ?
             """,
-            (*t_bind, per_bucket),
+            (*t_params, per_bucket),
         ).fetchall():
             d = dict(tr)
             meta = " · ".join(
@@ -373,16 +387,18 @@ def user_search():
             p_clauses.append(f"{p_expr} LIKE ? ESCAPE '\\'")
             p_bind.append(f"%{esc}%")
         p_where = " AND ".join(p_clauses)
+        p_scope = f" AND c.data_owner_key = ?" if owner_dk else ""
+        p_params = (*p_bind, owner_dk) if owner_dk else p_bind
         for pr in conn.execute(
             f"""
             SELECT p.id, p.name, p.description, c.name AS client_name
             FROM projects p
             JOIN clients c ON c.id = p.client_id
-            WHERE {p_where}
+            WHERE {p_where}{p_scope}
             ORDER BY p.id DESC
             LIMIT ?
             """,
-            (*p_bind, per_bucket),
+            (*p_params, per_bucket),
         ).fetchall():
             d = dict(pr)
             hits["projects"].append(
@@ -409,6 +425,8 @@ def user_search():
             n_clauses.append(f"{n_expr} LIKE ? ESCAPE '\\'")
             n_bind.append(f"%{esc}%")
         n_where = " AND ".join(n_clauses)
+        n_scope = f" AND c.data_owner_key = ?" if owner_dk else ""
+        n_params = (*n_bind, owner_dk) if owner_dk else n_bind
         for nr in conn.execute(
             f"""
             SELECT pc.project_id, p.name AS project_name, c.name AS client_name,
@@ -416,11 +434,11 @@ def user_search():
             FROM project_context pc
             JOIN projects p ON p.id = pc.project_id
             JOIN clients c ON c.id = p.client_id
-            WHERE {n_where}
+            WHERE {n_where}{n_scope}
             ORDER BY pc.updated_at DESC
             LIMIT ?
             """,
-            (*n_bind, per_bucket),
+            (*n_params, per_bucket),
         ).fetchall():
             d = dict(nr)
             preview = " ".join(
@@ -446,15 +464,17 @@ def user_search():
             cal_clauses.append(f"{cal_expr} LIKE ? ESCAPE '\\'")
             cal_bind.append(f"%{esc}%")
         cal_where = " AND ".join(cal_clauses)
+        cal_scope = f" AND data_owner_key = ?" if owner_dk else ""
+        cal_params = (*cal_bind, owner_dk) if owner_dk else cal_bind
         for cr in conn.execute(
             f"""
             SELECT id, title, notes, start_at, end_at
             FROM calendar_events
-            WHERE {cal_where}
+            WHERE {cal_where}{cal_scope}
             ORDER BY start_at DESC
             LIMIT ?
             """,
-            (*cal_bind, per_bucket),
+            (*cal_params, per_bucket),
         ).fetchall():
             d = dict(cr)
             hits["calendar"].append(

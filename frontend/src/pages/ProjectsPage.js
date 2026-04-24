@@ -67,10 +67,16 @@ export default function ProjectsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
+    if (!userId) {
+      setProjects([]);
+      setError('Sign in to load your projects for this account.');
+      setLoading(false);
+      return;
+    }
     try {
       const [rows, schedule] = await Promise.all([
-        fetchSqliteProjectsOverview(40),
-        fetchScheduleSources(userId || 'me'),
+        fetchSqliteProjectsOverview(40, userId),
+        fetchScheduleSources(userId),
       ]);
       setProjects(rows);
       setCalendarEvents(Array.isArray(schedule?.events) ? schedule.events : []);

@@ -41,21 +41,25 @@ def list_primary_calendar_events(
     time_min: str,
     time_max: str,
     max_results: int = 250,
+    user_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     List timed and all-day events from the user's primary calendar in [time_min, time_max).
 
+    ``user_id`` should match the app login (same as Gmail token path); if omitted, the legacy
+    default token is used (single-user installs).
+
     :raises FileNotFoundError: no stored OAuth token
     :raises HttpError: Google API error (caller may inspect .resp.status)
     """
-    creds = load_google_credentials(None)
+    creds = load_google_credentials((user_id or "").strip() or None)
     if not creds:
         raise FileNotFoundError("no_google_credentials")
 
     if not creds.valid:
         if creds.expired and creds.refresh_token:
             creds.refresh(Request())
-            save_google_credentials(None, creds)
+            save_google_credentials((user_id or "").strip() or None, creds)
     if not creds.valid:
         raise RuntimeError("invalid_google_credentials")
 
@@ -87,6 +91,7 @@ def create_primary_timed_event(
     time_zone: str = "UTC",
     add_google_meet: bool = True,
     send_updates: str | None = None,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Create an event on the user's primary calendar.
@@ -97,14 +102,14 @@ def create_primary_timed_event(
     if start.tzinfo is None or end.tzinfo is None:
         raise ValueError("start and end must be timezone-aware")
 
-    creds = load_google_credentials(None)
+    creds = load_google_credentials((user_id or "").strip() or None)
     if not creds:
         raise FileNotFoundError("no_google_credentials")
 
     if not creds.valid:
         if creds.expired and creds.refresh_token:
             creds.refresh(Request())
-            save_google_credentials(None, creds)
+            save_google_credentials((user_id or "").strip() or None, creds)
     if not creds.valid:
         raise RuntimeError("invalid_google_credentials")
 

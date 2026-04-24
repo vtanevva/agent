@@ -56,7 +56,7 @@ export default function TasksPage() {
     setLoading(true);
     setError('');
     try {
-      const rows = await fetchSqliteTasks(200);
+      const rows = await fetchSqliteTasks(200, userId);
       const mapped = rows.map((row) => mapSqliteTaskToUi(row)).filter(Boolean);
       setTodos(mapped);
     } catch (e) {

@@ -176,14 +176,18 @@ def persist_timed_event(
     time_zone: str,
     attendees: list[str] | None,
     add_google_meet: bool = True,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     """Try Google Calendar first; on any failure fall back to SQLite ``calendar_events`` (weekly grid)."""
+    from services.data_owner_key import data_owner_key_for_session
     from services.google_calendar_client import create_primary_timed_event
     from storage.sqlite_db import create_calendar_event
 
     if start.tzinfo is None or end.tzinfo is None:
         return {"success": False, "error": "internal", "detail": "start/end require tzinfo"}
 
+    uid = (user_id or "").strip() or None
+    cal_owner = data_owner_key_for_session(app_user_id=uid) if uid else None
     google_exc: Exception | None = None
     try:
         ev = create_primary_timed_event(
@@ -194,6 +198,7 @@ def persist_timed_event(
             attendees=attendees,
             time_zone=time_zone,
             add_google_meet=add_google_meet,
+            user_id=uid,
         )
         return {"success": True, "provider": "google_calendar", **ev}
     except (HttpError, FileNotFoundError, OSError, RuntimeError, ValueError) as e:
@@ -210,6 +215,7 @@ def persist_timed_event(
             end_at=end_utc,
             source="chat",
             notes=description or "",
+            data_owner_key=cal_owner,
         )
     except Exception as e:
         return {
@@ -272,6 +278,8 @@ def try_create_meeting_from_chat(user_message: str, metadata: dict[str, Any] | N
         desc_parts.append("Invitees: " + ", ".join(attendees))
     description = " ".join(desc_parts)
 
+    u_meta = (metadata or {}) if isinstance(metadata, dict) else {}
+    chat_uid = str(u_meta.get("user_id") or u_meta.get("app_user_id") or "").strip() or None
     result = persist_timed_event(
         summary=title,
         description=description,
@@ -280,6 +288,7 @@ def try_create_meeting_from_chat(user_message: str, metadata: dict[str, Any] | N
         time_zone=tz_name,
         attendees=attendees or None,
         add_google_meet=True,
+        user_id=chat_uid,
     )
 
     if not result.get("success"):
@@ -325,7 +334,7 @@ def try_create_meeting_from_chat(user_message: str, metadata: dict[str, Any] | N
     return "\n".join(lines)
 
 
-def create_event_from_api_payload(body: dict[str, Any]) -> dict[str, Any]:
+def create_event_from_api_payload(body: dict[str, Any], *, user_id: str | None = None) -> dict[str, Any]:
     """
     Shared handler for ``POST /api/calendar/create`` — body matches SchedulerPage:
     ``summary``, ``start_time``, ``end_time`` (ISO UTC strings), optional ``description``, ``attendees``.
@@ -372,6 +381,8 @@ def create_event_from_api_payload(body: dict[str, Any]) -> dict[str, Any]:
         attendees = [e.strip() for e in attendees_raw.split(",") if e.strip()]
 
     add_meet = bool(body.get("add_google_meet", True))
+    uid_raw = user_id or body.get("user_id") or body.get("userId") or ""
+    uid = str(uid_raw).strip() or None
     return persist_timed_event(
         summary=summary,
         description=description,
@@ -380,4 +391,5 @@ def create_event_from_api_payload(body: dict[str, Any]) -> dict[str, Any]:
         time_zone=tz_name,
         attendees=attendees,
         add_google_meet=add_meet,
+        user_id=uid,
     )

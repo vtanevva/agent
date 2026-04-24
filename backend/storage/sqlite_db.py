@@ -3,6 +3,7 @@ import sqlite3
 from pathlib import Path
 from datetime import datetime
 import json
+from collections import Counter
 from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -176,6 +177,129 @@ def _migrate_sqlite(conn: sqlite3.Connection) -> None:
         ON profile_link(slack_team_id)
         WHERE slack_team_id IS NOT NULL AND trim(slack_team_id) != ''
         """
+    )
+
+    _migrate_clients_data_owner_key(conn)
+    _backfill_client_data_owner_from_messages(conn)
+    _migrate_calendar_events_data_owner_key(conn)
+
+
+def _migrate_clients_data_owner_key(conn: sqlite3.Connection) -> None:
+    """
+    Replace global UNIQUE(name) on ``clients`` with per-user ``UNIQUE(data_owner_key, name)``.
+
+    Old rows are bucketed under ``__unscoped__`` so existing installs keep one global namespace
+    until new mail arrives for a keyed owner.
+    """
+    if not _table_exists(conn, "clients") or _has_column(conn, "clients", "data_owner_key"):
+        return
+    conn.executescript(
+        """
+        PRAGMA foreign_keys = OFF;
+        BEGIN;
+        CREATE TABLE clients__dataowner (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          data_owner_key TEXT NOT NULL DEFAULT '__unscoped__',
+          description TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (data_owner_key, name)
+        );
+        INSERT INTO clients__dataowner (id, name, data_owner_key, description, created_at, updated_at)
+        SELECT id, name, '__unscoped__', description, created_at, updated_at FROM clients;
+        DROP TABLE clients;
+        ALTER TABLE clients__dataowner RENAME TO clients;
+        COMMIT;
+        PRAGMA foreign_keys = ON;
+        """
+    )
+
+
+def _backfill_client_data_owner_from_messages(conn: sqlite3.Connection) -> None:
+    """
+    Move clients still bucketed as ``__unscoped__`` to the data-owner key implied by
+    ``payload.app_user_id`` (and workspace hints) in stored messages, when a clear
+    majority exists for that client.
+    """
+    if not _table_exists(conn, "messages") or not _table_exists(conn, "clients"):
+        return
+    if not _has_column(conn, "clients", "data_owner_key"):
+        return
+    ex = conn.execute(
+        "SELECT 1 AS o FROM clients WHERE data_owner_key = '__unscoped__' LIMIT 1"
+    ).fetchone()
+    if not ex:
+        return
+
+    from services.data_owner_key import data_owner_key_for_ingest  # import after app path stable
+
+    rows = conn.execute(
+        "SELECT client_id, payload_json FROM messages WHERE client_id IS NOT NULL"
+    ).fetchall()
+    by_client: dict[int, list[str]] = {}
+    for r in rows or []:
+        cid = r["client_id"]
+        if cid is None:
+            continue
+        try:
+            cid = int(cid)
+        except (TypeError, ValueError):
+            continue
+        try:
+            p = json.loads(r["payload_json"] or "{}")
+        except Exception:
+            p = {}
+        if not isinstance(p, dict):
+            p = {}
+        uid = (p.get("app_user_id") or "").strip().lower()
+        ws = (p.get("workspace_id") or p.get("workspaceId") or p.get("emailAddress") or "").strip().lower()
+        if not uid and not ws:
+            continue
+        k = data_owner_key_for_ingest(app_user_id=uid or None, workspace_email=ws or None)
+        if not k or k == "__unscoped__":
+            continue
+        by_client.setdefault(cid, []).append(k)
+
+    for cid, keys in by_client.items():
+        if not keys:
+            continue
+        most, n = Counter(keys).most_common(1)[0]
+        if n < max(1, int(0.5 * len(keys)) + 1):
+            continue
+        try:
+            conn.execute(
+                """
+                UPDATE clients
+                SET data_owner_key = ?
+                WHERE id = ? AND data_owner_key = '__unscoped__'
+                """,
+                (most, cid),
+            )
+        except Exception:
+            pass
+
+
+def _migrate_calendar_events_data_owner_key(conn: sqlite3.Connection) -> None:
+    if not _table_exists(conn, "calendar_events") or _has_column(conn, "calendar_events", "data_owner_key"):
+        return
+    conn.execute("ALTER TABLE calendar_events ADD COLUMN data_owner_key TEXT")
+    try:
+        conn.execute(
+            """
+            UPDATE calendar_events
+            SET data_owner_key = (
+                SELECT c.data_owner_key FROM clients c
+                WHERE c.id = calendar_events.client_id
+            )
+            WHERE client_id IS NOT NULL
+            """
+        )
+    except Exception:
+        pass
+    conn.execute(
+        "UPDATE calendar_events SET data_owner_key = '__unscoped__' "
+        "WHERE data_owner_key IS NULL"
     )
 
 
@@ -394,35 +518,42 @@ def get_answered_threads(
 
 
 # ---------- Clients / Projects / Context ----------
-def create_client(name: str, description: str | None = None) -> int:
+def create_client(
+    name: str,
+    description: str | None = None,
+    *,
+    data_owner_key: str = "__unscoped__",
+) -> int:
     now = utc_iso()
+    owner = (data_owner_key or "__unscoped__").strip() or "__unscoped__"
     with get_conn() as conn:
         cur = conn.execute(
             """
-            INSERT INTO clients (name, description, created_at, updated_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(name) DO UPDATE SET
+            INSERT INTO clients (name, data_owner_key, description, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(data_owner_key, name) DO UPDATE SET
               description = COALESCE(excluded.description, clients.description),
               updated_at = excluded.updated_at
             RETURNING id
             """,
-            (name.strip(), description, now, now),
+            (name.strip(), owner, description, now, now),
         )
         row = cur.fetchone()
         conn.commit()
         return int(row["id"])
 
 
-def get_client_by_name(name: str) -> dict[str, Any] | None:
+def get_client_by_name(name: str, data_owner_key: str | None = None) -> dict[str, Any] | None:
+    owner = (data_owner_key if data_owner_key is not None else "__unscoped__").strip() or "__unscoped__"
     with get_conn() as conn:
         row = conn.execute(
             """
             SELECT *
             FROM clients
-            WHERE lower(name) = lower(?)
+            WHERE lower(name) = lower(?) AND data_owner_key = ?
             LIMIT 1
             """,
-            (name.strip(),),
+            (name.strip(), owner),
         ).fetchone()
     return dict(row) if row else None
 
@@ -687,19 +818,21 @@ def create_calendar_event(
     source: str,
     external_id: str | None = None,
     timezone: str | None = None,
+    data_owner_key: str | None = None,
     client_id: int | None = None,
     project_id: int | None = None,
     notes: str | None = None,
 ) -> int:
     now = utc_iso()
+    owner = (data_owner_key or "__unscoped__").strip() or "__unscoped__"
     with get_conn() as conn:
         cur = conn.execute(
             """
             INSERT INTO calendar_events (
               external_id, title, start_at, end_at, timezone, source,
-              client_id, project_id, notes, created_at, updated_at
+              data_owner_key, client_id, project_id, notes, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 external_id,
@@ -708,6 +841,7 @@ def create_calendar_event(
                 end_at,
                 timezone,
                 source,
+                owner,
                 client_id,
                 project_id,
                 notes,
@@ -719,33 +853,67 @@ def create_calendar_event(
         return int(cur.lastrowid)
 
 
-def list_upcoming_calendar_events(limit: int = 20) -> list[dict[str, Any]]:
+def list_upcoming_calendar_events(
+    limit: int = 20, *, data_owner_key: str | None = None
+) -> list[dict[str, Any]]:
+    owner = (data_owner_key or "").strip() or None
     with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT *
-            FROM calendar_events
-            ORDER BY start_at ASC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+        if owner is not None:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM calendar_events
+                WHERE data_owner_key = ?
+                ORDER BY start_at ASC
+                LIMIT ?
+                """,
+                (owner, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM calendar_events
+                ORDER BY start_at ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
     return [dict(r) for r in rows]
 
 
-def list_calendar_events_in_range(time_min_iso: str, time_max_iso: str, limit: int = 500) -> list[dict[str, Any]]:
+def list_calendar_events_in_range(
+    time_min_iso: str,
+    time_max_iso: str,
+    limit: int = 500,
+    *,
+    data_owner_key: str | None = None,
+) -> list[dict[str, Any]]:
     """Calendar rows overlapping [time_min, time_max) in ISO UTC string form."""
+    owner = (data_owner_key or "").strip() or None
     with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT *
-            FROM calendar_events
-            WHERE end_at > ? AND start_at < ?
-            ORDER BY start_at ASC
-            LIMIT ?
-            """,
-            (time_min_iso, time_max_iso, limit),
-        ).fetchall()
+        if owner is not None:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM calendar_events
+                WHERE end_at > ? AND start_at < ? AND data_owner_key = ?
+                ORDER BY start_at ASC
+                LIMIT ?
+                """,
+                (time_min_iso, time_max_iso, owner, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM calendar_events
+                WHERE end_at > ? AND start_at < ?
+                ORDER BY start_at ASC
+                LIMIT ?
+                """,
+                (time_min_iso, time_max_iso, limit),
+            ).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -786,38 +954,67 @@ def list_projects_for_client(client_id: int) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def list_all_projects_with_clients() -> list[dict[str, Any]]:
-    """All projects with their client name, ordered by client then project."""
+def list_all_projects_with_clients(*, data_owner_key: str | None = None) -> list[dict[str, Any]]:
+    """All projects with their client name, ordered by client then project.
+
+    If ``data_owner_key`` is set, only clients for that app user / mailbox are included.
+    """
+    owner = (data_owner_key or "").strip() or None
     with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT
-              p.id,
-              p.client_id,
-              p.name,
-              p.description,
-              p.status,
-              p.priority,
-              p.deadline,
-              p.created_at,
-              p.updated_at,
-              p.last_updated_at,
-              c.name AS client_name
-            FROM projects p
-            JOIN clients c ON c.id = p.client_id
-            ORDER BY c.name ASC, p.name ASC
-            """
-        ).fetchall()
+        if owner is not None:
+            rows = conn.execute(
+                """
+                SELECT
+                  p.id,
+                  p.client_id,
+                  p.name,
+                  p.description,
+                  p.status,
+                  p.priority,
+                  p.deadline,
+                  p.created_at,
+                  p.updated_at,
+                  p.last_updated_at,
+                  c.name AS client_name
+                FROM projects p
+                JOIN clients c ON c.id = p.client_id
+                WHERE c.data_owner_key = ?
+                ORDER BY c.name ASC, p.name ASC
+                """,
+                (owner,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT
+                  p.id,
+                  p.client_id,
+                  p.name,
+                  p.description,
+                  p.status,
+                  p.priority,
+                  p.deadline,
+                  p.created_at,
+                  p.updated_at,
+                  p.last_updated_at,
+                  c.name AS client_name
+                FROM projects p
+                JOIN clients c ON c.id = p.client_id
+                ORDER BY c.name ASC, p.name ASC
+                """
+            ).fetchall()
     return [dict(r) for r in rows]
 
 
-def list_projects_overview(*, tasks_per_project: int = 30) -> list[dict[str, Any]]:
+def list_projects_overview(
+    *, tasks_per_project: int = 30, data_owner_key: str | None = None
+) -> list[dict[str, Any]]:
     """
     Projects with optional SQLite project_context and recent tasks for each.
     Intended for internal dashboards (GET /debug/sql/projects-overview).
     """
     lim = max(1, min(int(tasks_per_project), 100))
-    rows = list_all_projects_with_clients()
+    rows = list_all_projects_with_clients(data_owner_key=data_owner_key)
     out: list[dict[str, Any]] = []
     for p in rows:
         pid = int(p["id"])
@@ -842,6 +1039,26 @@ def list_projects_overview(*, tasks_per_project: int = 30) -> list[dict[str, Any
 
 
 # ---------- Profile link (Expo user ↔ Gmail / Slack for ingest app_user_id) ----------
+def get_gmail_for_app_user(user_id: str) -> str | None:
+    """Return the Gmail address stored in ``profile_link`` for this app login, if any."""
+    uid = (user_id or "").strip().lower()
+    if not uid:
+        return None
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT gmail_address FROM profile_link
+            WHERE lower(trim(user_id)) = ?
+            LIMIT 1
+            """,
+            (uid,),
+        ).fetchone()
+    if not row or not row["gmail_address"]:
+        return None
+    out = str(row["gmail_address"]).strip().lower()
+    return out or None
+
+
 def upsert_profile_link_gmail(*, user_id: str, gmail_address: str) -> None:
     """Record which app user owns a Gmail mailbox (used by Pub/Sub + action-items scoping)."""
     uid = (user_id or "").strip().lower()
@@ -1210,11 +1427,37 @@ def list_local_tasks(
     *,
     limit: int = 200,
     include_completed: bool = False,
+    data_owner_key: str | None = None,
+    app_user_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Tasks for the home/week UI (no Grafik, all local).
+
+    When ``data_owner_key`` is set, restrict to that owner's clients, plus
+    unscoped tasks for the same mailbox (Gmail) or chat session prefix.
     """
-    where = "WHERE COALESCE(t.status, 'pending') != 'completed'" if not include_completed else ""
+    filters: list[str] = []
+    if not include_completed:
+        filters.append("COALESCE(t.status, 'pending') != 'completed'")
+    extra_params: list[Any] = []
+    if data_owner_key is not None:
+        dk = (data_owner_key or "__unscoped__").strip() or "__unscoped__"
+        ors = ["c.data_owner_key = ?"]
+        extra_params.append(dk)
+        uid = (app_user_id or "").strip().lower()
+        mbox = uid if "@" in uid else (get_gmail_for_app_user(uid) or "").strip().lower()
+        if mbox:
+            ors.append(
+                "(t.client_id IS NULL AND t.source = 'gmail' AND lower(trim(coalesce(t.workspace_id, ''))) = ?)"
+            )
+            extra_params.append(mbox)
+        if uid and "@" not in uid:
+            ors.append("(t.client_id IS NULL AND t.source_id LIKE ?)")
+            extra_params.append(f"chat_task:{uid}-%")
+        filters.append("(" + " OR ".join(ors) + ")")
+    where_sql = ("WHERE " + " AND ".join(filters)) if filters else ""
+
+    lim = int(max(1, min(limit, 500)))
     with get_conn() as conn:
         rows = conn.execute(
             f"""
@@ -1231,11 +1474,11 @@ def list_local_tasks(
             FROM tasks t
             LEFT JOIN clients c ON c.id = t.client_id
             LEFT JOIN projects p ON p.id = t.project_id
-            {where}
+            {where_sql}
             ORDER BY t.id DESC
             LIMIT ?
             """,
-            (int(max(1, min(limit, 500))),),
+            (*extra_params, lim),
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -1278,7 +1521,20 @@ def complete_local_task(task_id: int) -> dict[str, Any] | None:
     return get_task_by_id(task_id)
 
 
-def list_recent_tasks(limit: int = 20) -> list[dict[str, Any]]:
+def list_recent_tasks(
+    limit: int = 20,
+    *,
+    data_owner_key: str | None = None,
+    app_user_id: str | None = None,
+) -> list[dict[str, Any]]:
+    if data_owner_key is not None:
+        return list_local_tasks(
+            limit=limit,
+            include_completed=True,
+            data_owner_key=data_owner_key,
+            app_user_id=app_user_id,
+        )
+
     with get_conn() as conn:
         rows = conn.execute(
             """

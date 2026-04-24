@@ -25,46 +25,130 @@ from utils.logger import get_logger
 
 log = get_logger("chat_task_action")
 
+# Verbs / nouns for "this message is asking to record a task" (not the task title itself).
+_TASK_VERB = r"(?:add|create|make|set(?:\s+up)?|start|open|log|track|file|queue)"
+_TASK_ART = r"(?:a\s+|an\s+|the\s+|my\s+|this\s+)?"
+_TASK_NOUN = r"(?:new\s+)?(?:task|todo|to-?do|action\s+item)\b"
+_SCHEDULE_TASK = r"\bschedule\s+(?:me\s+)?(?:a\s+)?task\b"
+
+# After the title, user usually gives a deadline — allow common wordings so we do not
+# require the literal word "by" (e.g. "before Friday", "due by Monday").
+_DEADLINE_BOUNDARY = (
+    r"(?:\s+by\b|\s+before\b|\s+until\b|\s+due\s+by\b|\s+due\s+on\b|\s+no\s+later\s+than\b)"
+)
+# When there is no date phrase, title is the rest of the message (one line); see
+# ``_clean_title`` for trailing thanks / punctuation.
+_TITLE_TO_EOL = r"(.+)$"
+
 
 def _clean_title(raw: str) -> str:
-    s = " ".join((raw or "").strip().split())
-    s = re.sub(r"(?i)^(to|that i|i need to)\s+", "", s).strip()
+    s = (raw or "").strip()
+    s = s.split("\n", 1)[0].strip()
+    s = " ".join(s.split())
+    s = re.sub(r"(?i)^(to|that i|i need to|for me to)\s+", "", s).strip()
+    s = re.sub(r"(?i)\s+(thanks|thank you|thx|cheers|appreciate it)[.!?\s]*$", "", s).strip()
     return (s[:200] or "").strip() or "Task"
 
 
 def _looks_like_task_creation_request(text: str) -> bool:
     t = (text or "").lower()
-    if len(t) < 12 or len(t) > 900:
+    if len(t) < 8 or len(t) > 900:
         return False
-    if re.search(r"\b(meeting|appointment|video call)\b", t) and re.search(
-        r"\b(schedule|book|set up|create|add|reserve)\b", t
+    # Calendar meeting shortcut — let calendar handler win, but not when the user
+    # explicitly asked for a *task* that merely mentions scheduling a meeting.
+    explicit_task_phrase = bool(
+        re.search(rf"\b{_TASK_VERB}\s+{_TASK_ART}{_TASK_NOUN}", t)
+        or re.search(_SCHEDULE_TASK, t)
+        or re.search(r"\bnew\s+task\b", t)
+    )
+    if (
+        re.search(r"\b(meeting|appointment|video call)\b", t)
+        and re.search(r"\b(schedule|book|set up|create|add|reserve)\b", t)
+        and not explicit_task_phrase
     ):
         return False
-    if re.search(r"\b(add|create)\s+(a\s+)?task\b", t):
+    if re.search(rf"\b{_TASK_VERB}\s+{_TASK_ART}{_TASK_NOUN}", t):
         return True
-    if re.search(r"\bschedule\s+(me\s+)?(a\s+)?task\b", t):
+    if re.search(rf"\b(?:throw|stick)\s+(?:this\s+)?(?:on|in)\s+(?:my\s+)?(?:task\s+)?list\b", t):
+        return True
+    if re.search(r"\bnew\s+task\b", t):
+        return True
+    if re.search(_SCHEDULE_TASK, t):
         return True
     if re.search(r"\bremind\s+me\s+to\b", t):
+        return True
+    if re.search(r"\bremember\s+to\b", t):
+        return True
+    if re.search(r"\bi\s+need\s+(?:a\s+|an\s+)?(?:new\s+)?(?:task|todo)\b", t):
+        return True
+    if re.search(r"\bcan\s+you\s+(?:please\s+)?(?:add|create|make)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:task|todo)\b", t):
+        return True
+    if re.search(r"\bplease\s+(?:add|create|make)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:task|todo)\b", t):
+        return True
+    if re.search(r"\bgive\s+me\s+(?:a\s+|an\s+)?(?:new\s+)?(?:task|todo)\b", t):
         return True
     return False
 
 
 def _extract_task_title(text: str) -> str | None:
-    m = re.search(r"(?i)(?:add|create)\s+(?:a\s+)?task\s+to\s+(.+?)\s+by\b", text)
-    if m:
-        return _clean_title(m.group(1))
-    m = re.search(r"(?i)\bschedule\s+(?:me\s+)?(?:a\s+)?task\s+(?:for\s+)?to\s+(.+?)\s+by\b", text)
-    if m:
-        return _clean_title(m.group(1))
-    m = re.search(r"(?i)\bschedule\s+(?:me\s+)?(?:a\s+)?task\s+(.+?)\s+by\b", text)
-    if m:
-        return _clean_title(m.group(1))
-    m = re.search(r"(?i)\bremind\s+me\s+to\s+(.+?)\s+by\b", text)
-    if m:
-        return _clean_title(m.group(1))
-    m = re.search(r"(?i)\bput\s+(.+?)\s+on\s+my\s+(?:task\s+)?list\b", text)
-    if m:
-        return _clean_title(m.group(1))
+    """
+    Pull the human description of the work item. Intentionally allows titles that
+    contain the words \"create a task\" (e.g. meta reminders) as long as a deadline
+    phrase follows later in the message.
+
+    If the user gives no date (e.g. \"add a task to do the dishes\"), we still
+    extract a title and create a task without a due datetime.
+    """
+    with_deadline: list[str] = [
+        # create/make/... a task to <title> by|before|...
+        rf"(?i)\b{_TASK_VERB}\s+{_TASK_ART}{_TASK_NOUN}\s+to\s+(.+?){_DEADLINE_BOUNDARY}",
+        # ... task for <title> ...
+        rf"(?i)\b{_TASK_VERB}\s+{_TASK_ART}{_TASK_NOUN}\s+for\s+(.+?){_DEADLINE_BOUNDARY}",
+        # ... task: <title> ...
+        rf"(?i)\b{_TASK_VERB}\s+{_TASK_ART}{_TASK_NOUN}\s*:\s*(.+?){_DEADLINE_BOUNDARY}",
+        # new task to|for <title> ...
+        rf"(?i)\bnew\s+task\s+(?:to|for)\s+(.+?){_DEADLINE_BOUNDARY}",
+        # I need a task to <title> ...
+        rf"(?i)\bi\s+need\s+(?:a\s+|an\s+)?(?:new\s+)?(?:task|todo)\s+(?:to|for)\s+(.+?){_DEADLINE_BOUNDARY}",
+        # can you / please add a task ...
+        rf"(?i)\b(?:can\s+you\s+(?:please\s+)?|please\s+)(?:add|create|make)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:task|todo)\s+(?:to|for)\s+(.+?){_DEADLINE_BOUNDARY}",
+        # give me a task to ...
+        rf"(?i)\bgive\s+me\s+(?:a\s+|an\s+)?(?:new\s+)?(?:task|todo)\s+(?:to|for)\s+(.+?){_DEADLINE_BOUNDARY}",
+        # schedule a task ...
+        r"(?i)\bschedule\s+(?:me\s+)?(?:a\s+)?task\s+(?:for\s+)?to\s+(.+?)" + _DEADLINE_BOUNDARY,
+        r"(?i)\bschedule\s+(?:me\s+)?(?:a\s+)?task\s+(.+?)" + _DEADLINE_BOUNDARY,
+        # remind / remember
+        r"(?i)\bremind\s+me\s+to\s+(.+?)" + _DEADLINE_BOUNDARY,
+        r"(?i)\bremember\s+to\s+(.+?)" + _DEADLINE_BOUNDARY,
+        # put ... on my list by|before|...
+        rf"(?i)\bput\s+(.+?)\s+on\s+my\s+(?:task\s+)?list\b{_DEADLINE_BOUNDARY}",
+    ]
+
+    for pat in with_deadline:
+        m = re.search(pat, text)
+        if m:
+            return _clean_title(m.group(1))
+
+    # No explicit deadline phrase — title to end of line / message.
+    no_deadline: list[str] = [
+        rf"(?i)\b{_TASK_VERB}\s+{_TASK_ART}{_TASK_NOUN}\s+to\s+{_TITLE_TO_EOL}",
+        rf"(?i)\b{_TASK_VERB}\s+{_TASK_ART}{_TASK_NOUN}\s+for\s+{_TITLE_TO_EOL}",
+        rf"(?i)\b{_TASK_VERB}\s+{_TASK_ART}{_TASK_NOUN}\s*:\s*{_TITLE_TO_EOL}",
+        rf"(?i)\bnew\s+task\s+(?:to|for)\s+{_TITLE_TO_EOL}",
+        rf"(?i)\bi\s+need\s+(?:a\s+|an\s+)?(?:new\s+)?(?:task|todo)\s+(?:to|for)\s+{_TITLE_TO_EOL}",
+        rf"(?i)\b(?:can\s+you\s+(?:please\s+)?|please\s+)(?:add|create|make)\s+(?:a\s+|an\s+)?(?:new\s+)?(?:task|todo)\s+(?:to|for)\s+{_TITLE_TO_EOL}",
+        rf"(?i)\bgive\s+me\s+(?:a\s+|an\s+)?(?:new\s+)?(?:task|todo)\s+(?:to|for)\s+{_TITLE_TO_EOL}",
+        r"(?i)\bschedule\s+(?:me\s+)?(?:a\s+)?task\s+(?:for\s+)?to\s+" + _TITLE_TO_EOL,
+        r"(?i)\bschedule\s+(?:me\s+)?(?:a\s+)?task\s+" + _TITLE_TO_EOL,
+        r"(?i)\bremind\s+me\s+to\s+" + _TITLE_TO_EOL,
+        r"(?i)\bremember\s+to\s+" + _TITLE_TO_EOL,
+    ]
+
+    for pat in no_deadline:
+        m = re.search(pat, text.strip())
+        if m:
+            return _clean_title(m.group(1))
+
     return None
 
 
@@ -97,8 +181,8 @@ def try_create_task_from_chat(
     session_id: str | None = None,
 ) -> str | None:
     """
-    If ``user_message`` is a concrete task-with-deadline request, route it
-    through the unified processor (same path as Gmail / Slack) so project
+    If ``user_message`` is a concrete task request (with or without a due date),
+    route it through the unified processor (same path as Gmail / Slack) so project
     detection and DB writes are consistent across sources. Returns the
     user-visible chat reply on success, otherwise ``None``.
     """
@@ -112,19 +196,18 @@ def try_create_task_from_chat(
 
     tz_name = _tz_name(metadata)
     due = _parse_deadline_local(text, tz_name)
-    if due is None:
-        return None
 
-    due_iso = due.isoformat()
     classification_override: dict[str, Any] = {
         "type": "ACTION",
         "has_action": True,
         "reply_type": "none",
         "title": title,
         "summary": title,
-        "due_datetime": due_iso,
-        "due_datetime_iso": due_iso,
     }
+    if due is not None:
+        due_iso = due.isoformat()
+        classification_override["due_datetime"] = due_iso
+        classification_override["due_datetime_iso"] = due_iso
 
     sid = (session_id or "session").strip() or "session"
     source_id = f"chat_task:{sid}:{uuid4().hex}"
@@ -164,8 +247,13 @@ def try_create_task_from_chat(
         # way, and the error is visible in logs.
         log.warning("chat_task unified ingest failed: %s", e)
 
-    when = due.strftime("%A, %B %d, %Y at %H:%M")
+    if due is not None:
+        when = due.strftime("%A, %B %d, %Y at %H:%M")
+        return (
+            f'I added "{title}" to your tasks with a due time of {when} (your local time). '
+            "You will see it on your home screen and on the weekly schedule."
+        )
     return (
-        f'I added "{title}" to your tasks with a due time of {when} (your local time). '
-        "You will see it on your home screen and on the weekly schedule."
+        f'I added "{title}" to your tasks (no due date yet). '
+        "It shows on your home screen; you can set a deadline from there or on the weekly schedule."
     )

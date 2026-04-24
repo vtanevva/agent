@@ -8,6 +8,7 @@ from utils.logger import get_logger
 from services.chat_project_hint import safe_project_hint
 from services.classification_service import classify_and_enrich
 from services.client_routing import ensure_client
+from services.data_owner_key import data_owner_key_for_ingest
 from services.continuity_context import build_continuity_context
 from services.follow_up_detector import detect_follow_up_candidate
 from services.follow_up_manager import create_follow_up_from_candidate
@@ -382,8 +383,18 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
     project_confidence = normalized.get("project_confidence")
     needs_project_review = bool(normalized.get("needs_project_review", False))
 
+    work_mail = _safe_str(
+        (payload.get("emailAddress") if isinstance(payload, dict) else None)
+        or (payload.get("workspace_id") if isinstance(payload, dict) else None)
+        or workspace_id
+    )
+    owner_key = data_owner_key_for_ingest(
+        app_user_id=app_uid or None,
+        workspace_email=work_mail,
+    )
+
     if client_name and not client_id:
-        client_id = ensure_client(client_name)
+        client_id = ensure_client(client_name, data_owner_key=owner_key)
 
     if client_id and not project_id:
         # If no adapter passed an explicit hint, try to extract one from
