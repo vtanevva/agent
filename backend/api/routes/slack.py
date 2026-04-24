@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify
 
 from utils.logger import get_logger
 from application.orchestrators.event_orchestrator import handle_normalized_event
-from integrations.grafik import resolve_grafik_list_id_from_channel
+from storage.sqlite_db import resolve_slack_app_user_id
 from services.slack_text import (
     extract_payload_parts,
     extract_text,
@@ -141,8 +141,6 @@ def ingest_slack():
         f"[CLASSIFY_INPUT_CLEAN:{ingest_source}] source_id={source_id} "
         f"text={repr(text_for_classification)}"
     )
-    list_id, client_name, routed_project_name = resolve_grafik_list_id_from_channel(channel)
-
     normalized = {
         "source": ingest_source,
         "workspace_id": workspace_id or None,
@@ -157,11 +155,17 @@ def ingest_slack():
         "raw_text": clean_text_value,
         "text_for_classification": text_for_classification,
         "payload": payload,
-        "client_name_hint": client_name,
-        "project_name_hint": routed_project_name,
-        "grafik_list_id_hint": list_id,
+        # Unified single-client model: all mail/Slack/chat tasks live under
+        # one "Inbox" workspace and are routed to projects by the resolver.
+        "client_name_hint": "Inbox",
+        "project_name_hint": None,
         "channel_type": (event.get("channel_type") if event else None),
     }
+
+    slack_event_user = (user_id or user or "").strip()
+    slack_owner = resolve_slack_app_user_id(workspace_id or "", slack_event_user)
+    if slack_owner:
+        normalized["app_user_id"] = slack_owner
 
     result = handle_normalized_event(normalized)
 

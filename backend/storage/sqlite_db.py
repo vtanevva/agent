@@ -63,6 +63,17 @@ def _migrate_sqlite(conn: sqlite3.Connection) -> None:
     if not _has_column(conn, "projects", "last_updated_at"):
         conn.execute("ALTER TABLE projects ADD COLUMN last_updated_at TEXT")
 
+    # Local task lifecycle (replaces Grafik-managed state).
+    if _table_exists(conn, "tasks"):
+        if not _has_column(conn, "tasks", "status"):
+            conn.execute("ALTER TABLE tasks ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'")
+        if not _has_column(conn, "tasks", "completed_at"):
+            conn.execute("ALTER TABLE tasks ADD COLUMN completed_at TEXT")
+        if not _has_column(conn, "tasks", "thread_id"):
+            conn.execute("ALTER TABLE tasks ADD COLUMN thread_id TEXT")
+        if not _has_column(conn, "tasks", "workspace_id"):
+            conn.execute("ALTER TABLE tasks ADD COLUMN workspace_id TEXT")
+
     # Phase 11: metrics_events table (value tracking / observability)
     conn.execute(
         """
@@ -139,6 +150,32 @@ def _migrate_sqlite(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_thread_replies_source_workspace "
         "ON thread_replies(source, workspace_id)"
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS profile_link (
+          user_id TEXT PRIMARY KEY,
+          gmail_address TEXT,
+          slack_team_id TEXT,
+          slack_user_id TEXT,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_profile_link_gmail_lower
+        ON profile_link(lower(trim(gmail_address)))
+        WHERE gmail_address IS NOT NULL AND trim(gmail_address) != ''
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_profile_link_slack_team
+        ON profile_link(slack_team_id)
+        WHERE slack_team_id IS NOT NULL AND trim(slack_team_id) != ''
+        """
     )
 
 
@@ -804,6 +841,130 @@ def list_projects_overview(*, tasks_per_project: int = 30) -> list[dict[str, Any
     return out
 
 
+# ---------- Profile link (Expo user ↔ Gmail / Slack for ingest app_user_id) ----------
+def upsert_profile_link_gmail(*, user_id: str, gmail_address: str) -> None:
+    """Record which app user owns a Gmail mailbox (used by Pub/Sub + action-items scoping)."""
+    uid = (user_id or "").strip().lower()
+    em = (gmail_address or "").strip().lower()
+    if not uid or not em:
+        return
+    now = utc_iso()
+    with get_conn() as conn:
+        conn.execute("BEGIN")
+        try:
+            conn.execute(
+                """
+                UPDATE profile_link
+                SET gmail_address = NULL
+                WHERE lower(trim(gmail_address)) = ? AND lower(trim(user_id)) <> ?
+                """,
+                (em, uid),
+            )
+            conn.execute(
+                """
+                INSERT INTO profile_link (user_id, gmail_address, slack_team_id, slack_user_id, updated_at)
+                VALUES (?, ?, NULL, NULL, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                  gmail_address = excluded.gmail_address,
+                  updated_at = excluded.updated_at
+                """,
+                (uid, em, now),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def upsert_profile_link_slack(
+    *,
+    user_id: str,
+    slack_team_id: str,
+    slack_user_id: str | None = None,
+) -> None:
+    """Link a Slack workspace (team id) to an app user. Clears the same team from other profiles."""
+    uid = (user_id or "").strip().lower()
+    tid = (slack_team_id or "").strip()
+    if not uid or not tid:
+        return
+    sid = (slack_user_id or "").strip() or None
+    now = utc_iso()
+    with get_conn() as conn:
+        conn.execute("BEGIN")
+        try:
+            conn.execute(
+                """
+                UPDATE profile_link
+                SET slack_team_id = NULL, slack_user_id = NULL
+                WHERE trim(slack_team_id) = ? AND lower(trim(user_id)) <> ?
+                """,
+                (tid, uid),
+            )
+            conn.execute(
+                """
+                INSERT INTO profile_link (user_id, gmail_address, slack_team_id, slack_user_id, updated_at)
+                VALUES (?, NULL, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                  slack_team_id = excluded.slack_team_id,
+                  slack_user_id = excluded.slack_user_id,
+                  updated_at = excluded.updated_at
+                """,
+                (uid, tid, sid, now),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def get_user_id_for_gmail_address(gmail_address: str) -> str | None:
+    addr = (gmail_address or "").strip().lower()
+    if not addr:
+        return None
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT user_id FROM profile_link
+            WHERE lower(trim(gmail_address)) = ?
+            LIMIT 1
+            """,
+            (addr,),
+        ).fetchone()
+    return str(row["user_id"]).strip().lower() if row else None
+
+
+def resolve_slack_app_user_id(team_id: str, slack_event_user: str) -> str | None:
+    """
+    Map a Slack team + message author to an app user_id.
+
+    - Single profile linked to this team → all events stamp to that user.
+    - Multiple profiles on the same team → stamp only when exactly one profile's
+      ``slack_user_id`` matches ``slack_event_user`` (Slack member id of the sender).
+    """
+    team = (team_id or "").strip()
+    su = (slack_event_user or "").strip()
+    if not team:
+        return None
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT user_id, slack_user_id FROM profile_link
+            WHERE trim(slack_team_id) = ?
+            """,
+            (team,),
+        ).fetchall()
+    if not rows:
+        return None
+    if len(rows) == 1:
+        return str(rows[0]["user_id"]).strip().lower()
+    if not su:
+        return None
+    hits = [r for r in rows if (r["slack_user_id"] or "").strip() == su]
+    if len(hits) == 1:
+        return str(hits[0]["user_id"]).strip().lower()
+    return None
+
+
 # ---------- Messages (dedup + context) ----------
 def insert_message_if_new(
     *,
@@ -988,7 +1149,14 @@ def upsert_task(
     classification: dict,
     client_id: int | None = None,
     project_id: int | None = None,
-) -> None:
+    thread_id: str | None = None,
+    workspace_id: str | None = None,
+) -> int | None:
+    """
+    Upsert a local task row. ``grafik_task_id`` is kept as a legacy column name
+    (the real ID since Grafik was removed is a local ``aivis-local-<hex>`` UUID).
+    Returns the integer row id.
+    """
     now = utc_iso()
     with get_conn() as conn:
         conn.execute(
@@ -998,9 +1166,10 @@ def upsert_task(
               client_id, project_id,
               title, description,
               classification_type, classification_json,
-              created_at, updated_at
+              created_at, updated_at,
+              status, thread_id, workspace_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
             ON CONFLICT(source, source_id) DO UPDATE SET
               grafik_task_id = excluded.grafik_task_id,
               client_id = COALESCE(excluded.client_id, tasks.client_id),
@@ -1009,6 +1178,8 @@ def upsert_task(
               description = excluded.description,
               classification_type = excluded.classification_type,
               classification_json = excluded.classification_json,
+              thread_id = COALESCE(excluded.thread_id, tasks.thread_id),
+              workspace_id = COALESCE(excluded.workspace_id, tasks.workspace_id),
               updated_at = excluded.updated_at
             """,
             (
@@ -1023,9 +1194,88 @@ def upsert_task(
                 json.dumps(classification, ensure_ascii=False),
                 now,
                 now,
+                (thread_id.strip() if isinstance(thread_id, str) and thread_id.strip() else None),
+                (workspace_id.strip().lower() if isinstance(workspace_id, str) and workspace_id.strip() else None),
             ),
         )
+        row = conn.execute(
+            "SELECT id FROM tasks WHERE source = ? AND source_id = ? LIMIT 1",
+            (source, source_id),
+        ).fetchone()
         conn.commit()
+    return int(row["id"]) if row else None
+
+
+def list_local_tasks(
+    *,
+    limit: int = 200,
+    include_completed: bool = False,
+) -> list[dict[str, Any]]:
+    """
+    Tasks for the home/week UI (no Grafik, all local).
+    """
+    where = "WHERE COALESCE(t.status, 'pending') != 'completed'" if not include_completed else ""
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+              t.id, t.source, t.source_id, t.grafik_task_id,
+              t.client_id, t.project_id, t.thread_id, t.workspace_id,
+              t.title, t.description,
+              t.classification_type, t.classification_json,
+              COALESCE(t.status, 'pending') AS status,
+              t.completed_at,
+              t.created_at, t.updated_at,
+              c.name AS client_name,
+              p.name AS project_name
+            FROM tasks t
+            LEFT JOIN clients c ON c.id = t.client_id
+            LEFT JOIN projects p ON p.id = t.project_id
+            {where}
+            ORDER BY t.id DESC
+            LIMIT ?
+            """,
+            (int(max(1, min(limit, 500))),),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_task_by_id(task_id: int) -> dict[str, Any] | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT
+              t.id, t.source, t.source_id, t.grafik_task_id,
+              t.client_id, t.project_id, t.thread_id, t.workspace_id,
+              t.title, t.description,
+              t.classification_type, t.classification_json,
+              COALESCE(t.status, 'pending') AS status,
+              t.completed_at,
+              t.created_at, t.updated_at
+            FROM tasks
+            WHERE id = ?
+            LIMIT 1
+            """,
+            (int(task_id),),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def complete_local_task(task_id: int) -> dict[str, Any] | None:
+    now = utc_iso()
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE tasks
+               SET status = 'completed',
+                   completed_at = ?,
+                   updated_at = ?
+             WHERE id = ?
+            """,
+            (now, now, int(task_id)),
+        )
+        conn.commit()
+    return get_task_by_id(task_id)
 
 
 def list_recent_tasks(limit: int = 20) -> list[dict[str, Any]]:

@@ -8,6 +8,7 @@ from flask import Blueprint, jsonify, request
 from storage.sqlite_db import get_answered_threads, get_conn, mark_thread_answered
 from utils.logger import get_logger
 from services.marketing_email_signals import should_suppress_as_non_actionable
+from services.gmail_auth import get_linked_gmail_address
 
 
 log = get_logger("action_items")
@@ -28,7 +29,77 @@ def _safe_json_loads(v: Any) -> dict:
         return {}
 
 
-_REPLY_TYPES_NEEDING_RESPONSE = {"short", "time_relevant", "context_relevant"}
+# Messages whose reply_type is ``short`` only need a trivial "ok / alright" answer
+# and should not clutter Home. Only substantive reply types stay in the feed.
+_REPLY_TYPES_NEEDING_RESPONSE = {"time_relevant", "context_relevant"}
+
+# Chat task rows use ``source_id = f"chat_task:{session_id}:{uuid}"`` where ``session_id`` is
+# ``{userId}-{6 random base36 chars}`` (see ``frontend/src/config/api.js`` ``genSession``).
+_CHAT_SESSION_SUFFIX_LEN = 6
+
+
+def _resolve_gmail_mailbox_scope(user_id: str) -> str | None:
+    """
+    Mailbox email used to filter stored Gmail rows.
+
+    If ``user_id`` is already an email, use it. Otherwise resolve from the per-user
+    OAuth token so short login names still see only their linked inbox.
+    """
+    uid = (user_id or "").strip().lower()
+    if not uid:
+        return None
+    if "@" in uid:
+        return uid
+    return get_linked_gmail_address(uid)
+
+
+def _chat_task_source_id_matches_user(source_id: Any, user_id: str) -> bool:
+    if not (user_id or "").strip():
+        return True
+    uid = user_id.strip().lower()
+    sid = str(source_id or "")
+    parts = sid.split(":")
+    if len(parts) < 3 or parts[0] != "chat_task":
+        return True
+    session_id = parts[1]
+    prefix = f"{uid}-"
+    if not session_id.startswith(prefix):
+        return False
+    return len(session_id) == len(uid) + 1 + _CHAT_SESSION_SUFFIX_LEN
+
+
+def _row_visible_for_app_user(
+    *,
+    src: str,
+    payload: dict,
+    request_user: str,
+    mailbox_scope: str | None,
+) -> bool:
+    """
+    Per-profile visibility for stored ``messages`` rows.
+
+    Prefer ``payload.app_user_id`` (stamped by unified ingest). Legacy Gmail rows fall back to
+    mailbox match when the viewer has a resolved mailbox. Unstamped Slack is hidden for
+    logged-in viewers (cannot prove ownership).
+    """
+    ru = (request_user or "").strip().lower()
+    if not ru:
+        return True
+    puid = str(payload.get("app_user_id") or "").strip().lower()
+    if puid:
+        return puid == ru
+    src_l = (src or "").strip().lower()
+    if src_l == "gmail" and mailbox_scope:
+        workspace = str(
+            payload.get("workspace_id")
+            or payload.get("workspaceId")
+            or payload.get("emailAddress")
+            or ""
+        ).strip().lower()
+        return bool(workspace and workspace == mailbox_scope)
+    if src_l == "slack":
+        return False
+    return True
 
 
 def _is_low_signal_stub(*, subject: str, body: str) -> bool:
@@ -91,18 +162,45 @@ def _text_preview(v: Any, limit: int = 180) -> str:
     return s[:limit] + ("..." if len(s) > limit else "")
 
 
-def _chat_task_row_to_item(row: dict) -> dict:
-    """Tasks created from chat (``tasks.source='chat'``) for the Home action list."""
+def _source_label_for_home(source: str) -> str:
+    s = (source or "").strip().lower()
+    if s == "gmail":
+        return "Email"
+    if s == "slack":
+        return "Slack"
+    if s == "chat":
+        return "Chat"
+    return s.capitalize() if s else ""
+
+
+def _task_row_to_item(row: dict) -> dict:
+    """
+    Turn a ``tasks`` row into a Home action item. Works for gmail / slack / chat
+    sources — everything the unified processor creates lives in the same table.
+    """
     cls = _safe_json_loads(row.get("classification_json"))
     tid = row.get("id")
-    due = cls.get("due_datetime") or cls.get("due_datetime_iso") or ""
-    snippet = f"Due {due}" if due else "Chat task"
+    due = (
+        cls.get("due_datetime")
+        or cls.get("due_datetime_iso")
+        or (cls.get("normalized_due") or {}).get("iso")
+    )
+    src = str(row.get("source") or "").strip().lower()
+    label = _source_label_for_home(src)
+    snippet = f"Due {due}" if due else (label or "Task")
     sid = str(row.get("source_id") or tid or "")
+    thread_id = row.get("thread_id") or (str(tid) if tid is not None else sid)
+    # Keep ``source`` semantically aligned with Home UI: chat tasks were using
+    # a synthetic ``chat_task`` source before the merge. Preserve that for chat
+    # so existing UI code paths keep working; everything else stays on its
+    # native source (``gmail`` / ``slack``).
+    api_source = "chat_task" if src == "chat" else src
     return {
-        "source": "chat_task",
+        "source": api_source,
         "source_id": sid,
-        "threadId": str(tid) if tid is not None else sid,
-        "from": "Chat",
+        "task_id": tid,
+        "threadId": str(thread_id) if thread_id else sid,
+        "from": label or "Task",
         "subject": row.get("title") or "(Task)",
         "snippet": snippet,
         "channel": None,
@@ -111,6 +209,7 @@ def _chat_task_row_to_item(row: dict) -> dict:
         "created_at": row.get("created_at"),
         "classification_type": row.get("classification_type") or "ACTION",
         "classification": cls,
+        "due_datetime": due,
         "has_action": True,
         "hasAction": True,
     }
@@ -190,13 +289,15 @@ def list_action_items():
     """
     Unified action items across all sources (gmail, slack, ...).
 
+    Rows are filtered by ``payload.app_user_id`` when present (set by Gmail Pub/Sub / Slack
+    ingest via ``profile_link``). Legacy Gmail without a stamp still matches the viewer's
+    mailbox when known. Chat-sourced tasks match ``user_id`` via ``source_id`` session prefix.
+
     Returns a flat list for the Expo UI:
       { success: true, total: N, items: [...] }
     """
     user_id = (request.args.get("user_id") or "").strip().lower()
-    # Only scope by mailbox/workspace when user_id looks like an email.
-    # In local/dev the app often uses short ids like "v".
-    should_scope_workspace = bool(user_id and "@" in user_id)
+    mailbox_scope = _resolve_gmail_mailbox_scope(user_id)
     try:
         limit = int(request.args.get("limit") or request.args.get("max_results") or "100")
     except Exception:
@@ -239,23 +340,66 @@ def list_action_items():
         log.warning("[action-items] get_answered_threads(slack) failed: %s", e)
         slack_answered = {}
 
+    # Tasks (unified local table: gmail / slack / chat). Loaded first so we can
+    # dedupe the messages list: if a thread already became a task, the message
+    # should not also appear as an "unanswered message" on Home.
+    task_rows: List[dict] = []
+    try:
+        with get_conn() as conn:
+            tr = conn.execute(
+                """
+                SELECT id, source, source_id, thread_id, workspace_id,
+                       title, description,
+                       classification_type, classification_json,
+                       status, created_at
+                FROM tasks
+                WHERE COALESCE(status, 'pending') != 'completed'
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (min(max(limit * 2, 200), 1000),),
+            ).fetchall()
+        task_rows = [dict(r) for r in tr]
+    except Exception as e:
+        log.warning("[action-items] tasks read failed: %s", e)
+
+    task_items: List[dict] = []
+    task_thread_keys: set[tuple[str, str]] = set()
+    for r in task_rows:
+        src = str(r.get("source") or "").strip().lower()
+
+        # Per-user scoping:
+        #   - chat tasks use ``source_id = chat_task:<session>:<uuid>``
+        #   - gmail tasks carry ``workspace_id = mailbox email``
+        #   - slack tasks are not user-scoped yet (single workspace assumption)
+        if src == "chat":
+            if not _chat_task_source_id_matches_user(r.get("source_id"), user_id):
+                continue
+        elif src == "gmail" and mailbox_scope:
+            wid = str(r.get("workspace_id") or "").strip().lower()
+            if wid and wid != mailbox_scope:
+                continue
+
+        task_items.append(_task_row_to_item(r))
+
+        tid = str(r.get("thread_id") or "").strip()
+        if src and tid:
+            task_thread_keys.add((src, tid))
+
     items: List[dict] = []
     for r in rows:
         row = dict(r)
         payload = _safe_json_loads(row.get("payload_json"))
         cls = _safe_json_loads(row.get("classification_json"))
-
-        # Optional scoping: if user_id matches a workspace/mailbox in payload.
-        if should_scope_workspace:
-            workspace = (
-                (payload.get("workspace_id") or payload.get("workspaceId") or payload.get("emailAddress") or "")
-            )
-            workspace = str(workspace or "").strip().lower()
-            if workspace and workspace != user_id:
-                continue
+        src_l = str(row.get("source") or "").strip().lower()
 
         # Transcript / in-app agent lines are not the mail/Slack action inbox.
-        if str(row.get("source") or "").strip().lower() in ("chat", "gmail_chat", "slack_chat"):
+        if src_l in ("chat", "gmail_chat", "slack_chat"):
+            continue
+
+        if not _row_visible_for_app_user(
+            src=src_l, payload=payload, request_user=user_id, mailbox_scope=mailbox_scope
+        ):
             continue
 
         subj_for_check = (payload.get("subject") or cls.get("title") or "").strip()
@@ -274,8 +418,6 @@ def list_action_items():
             body=body_for_check,
         ):
             continue
-
-        src_l = str(row.get("source") or "").strip().lower()
 
         # Hide marketing / notifications / no-reply / ESP traffic already stored
         # (no re-ingest required; this is a runtime filter).
@@ -298,47 +440,31 @@ def list_action_items():
         # Hide items on threads the user already replied to AFTER this message arrived.
         if src_l in ("gmail", "slack"):
             answered_map = gmail_answered if src_l == "gmail" else slack_answered
-            if answered_map:
-                thread_id_raw = (
-                    payload.get("thread_id")
-                    or payload.get("threadId")
-                    or payload.get("thread_ts")
-                    or payload.get("threadTs")
-                )
-                tid = str(thread_id_raw) if thread_id_raw else ""
-                if tid:
-                    answered_at = answered_map.get(tid)
-                    if answered_at:
-                        received_at = str(row.get("created_at") or "")
-                        # ISO-8601 UTC strings sort lexicographically — reply after receipt => hide.
-                        if not received_at or answered_at >= received_at:
-                            continue
+            thread_id_raw = (
+                payload.get("thread_id")
+                or payload.get("threadId")
+                or payload.get("thread_ts")
+                or payload.get("threadTs")
+            )
+            tid = str(thread_id_raw) if thread_id_raw else ""
+            if answered_map and tid:
+                answered_at = answered_map.get(tid)
+                if answered_at:
+                    received_at = str(row.get("created_at") or "")
+                    # ISO-8601 UTC strings sort lexicographically — reply after receipt => hide.
+                    if not received_at or answered_at >= received_at:
+                        continue
+            # Dedupe: if this thread already became a task (shown above),
+            # don't also list the raw message here.
+            if tid and (src_l, tid) in task_thread_keys:
+                continue
 
         items.append(_row_to_item(row))
         if len(items) >= limit:
             break
 
-    chat_task_rows: List[dict] = []
-    try:
-        with get_conn() as conn:
-            ct = conn.execute(
-                """
-                SELECT id, source, source_id, title, description,
-                       classification_type, classification_json, created_at
-                FROM tasks
-                WHERE lower(trim(source)) = 'chat'
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (min(limit, 100),),
-            ).fetchall()
-        chat_task_rows = [dict(r) for r in ct]
-    except Exception as e:
-        log.warning("[action-items] chat tasks read failed: %s", e)
-
-    chat_items = [_chat_task_row_to_item(r) for r in chat_task_rows]
     merged = sorted(
-        chat_items + items,
+        task_items + items,
         key=lambda x: str(x.get("created_at") or x.get("ts") or ""),
         reverse=True,
     )[:limit]

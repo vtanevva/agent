@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from typing import Any, Optional, Tuple
+from uuid import uuid4
 
-from integrations.grafik import create_grafik_task
 from services.task_linker import find_existing_task_for_message
 from storage.sqlite_db import upsert_task
 
@@ -46,7 +46,7 @@ def run_task_link_phase(
     return task_link_result, False, None
 
 
-def build_grafik_task_title_and_description(
+def build_task_title_and_description(
     *,
     source: str,
     classification: dict[str, Any],
@@ -76,7 +76,7 @@ def build_grafik_task_title_and_description(
         if (subject or text_for_classification or raw_text)
         else f"{source.capitalize()}: (no text)"
     )
-    title = f"[{client_name}] {base_title}" if client_name else base_title
+    title = base_title
 
     context_block = ""
     if project_context:
@@ -116,26 +116,33 @@ def build_grafik_task_title_and_description(
     return title, description
 
 
-def create_grafik_task_and_record(
+def create_local_task_and_record(
     *,
     source: str,
     source_id: str,
-    list_id: str,
     title: str,
     description: str,
     classification: dict[str, Any],
     client_id: Optional[int],
     project_id: Optional[int],
+    thread_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
 ) -> str:
-    grafik_task_id = create_grafik_task(list_id, title, description)
+    """
+    Create a local task (no external tracker). Returns the local task id
+    stored in ``tasks.grafik_task_id`` (kept as column name for back-compat).
+    """
+    local_task_id = f"aivis-local-{uuid4().hex}"
     upsert_task(
         source=source,
         source_id=source_id,
-        grafik_task_id=grafik_task_id,
+        grafik_task_id=local_task_id,
         title=title,
         description=description,
         classification=classification,
         client_id=client_id,
         project_id=project_id,
+        thread_id=thread_id,
+        workspace_id=workspace_id,
     )
-    return str(grafik_task_id)
+    return local_task_id

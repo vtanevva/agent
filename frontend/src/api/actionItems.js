@@ -116,16 +116,29 @@ export function mapActionItemToUi(item) {
   const fromAddr = String(item.from || '').trim();
   const timestamp = item.created_at || item.ts || '';
   const gt = item.gmailThreadId != null && String(item.gmailThreadId).trim() ? String(item.gmailThreadId).trim() : null;
+  const cls = item.classification || {};
+  const normalizedDue =
+    cls && typeof cls.normalized_due === 'object' && cls.normalized_due
+      ? cls.normalized_due.iso || ''
+      : '';
+  const due =
+    item.due_datetime ||
+    cls.due_datetime ||
+    cls.due_datetime_iso ||
+    normalizedDue ||
+    null;
   return {
     id,
     threadId: item.threadId || null,
     gmailThreadId: gt,
     source: item.source || '',
+    taskId: item.task_id != null ? item.task_id : null,
     title,
     from: fromAddr,
     snippet: String(item.snippet || ''),
     createdAt: timestamp,
-    classification: item.classification || {},
+    dueDatetime: due,
+    classification: cls,
     classificationType: item.classification_type || '',
   };
 }

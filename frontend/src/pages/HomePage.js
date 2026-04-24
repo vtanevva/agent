@@ -21,6 +21,7 @@ import {
   buildReplyDraftNavParams,
 } from '../api/actionItems';
 import {fetchUserSearch} from '../api/userSearch';
+import {CORE_BACKEND_URL} from '../config/api';
 import TopSearchBar from '../components/TopSearchBar';
 import BottomNav from '../components/BottomNav';
 
@@ -50,6 +51,27 @@ function formatWaiting(iso) {
   if (wasYesterday) return 'Waiting since yesterday';
   const diffDays = Math.max(1, Math.floor((now - d) / 86400000));
   return `Waiting since ${diffDays}d ago`;
+}
+
+function formatDueBadge(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const time = d.toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'});
+  if (sameDay) return `Due today · ${time}`;
+  const diffMs = d.getTime() - now.getTime();
+  const diffDays = Math.round(diffMs / 86400000);
+  if (diffDays === 1) return `Due tomorrow · ${time}`;
+  if (diffDays > 1 && diffDays < 7) {
+    return `Due ${d.toLocaleDateString(undefined, {weekday: 'short'})} · ${time}`;
+  }
+  if (diffDays < 0) return `Overdue · ${d.toLocaleDateString(undefined, {month: 'short', day: 'numeric'})}`;
+  return `Due ${d.toLocaleDateString(undefined, {month: 'short', day: 'numeric'})} · ${time}`;
 }
 
 export default function HomePage() {
@@ -172,11 +194,20 @@ export default function HomePage() {
   const handleDone = async (item) => {
     hideLocally(item.id);
     try {
-      await markActionItemDone({
-        userId,
-        threadId: item.threadId || item.id,
-        source: item.source,
-      });
+      if (item.taskId) {
+        // Real task row in the `tasks` table — complete it on the backend.
+        const r = await fetch(
+          `${CORE_BACKEND_URL}/api/tasks/${encodeURIComponent(item.taskId)}/complete`,
+          {method: 'POST', headers: {'Content-Type': 'application/json'}},
+        );
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      } else {
+        await markActionItemDone({
+          userId,
+          threadId: item.threadId || item.id,
+          source: item.source,
+        });
+      }
     } catch (e) {
       Alert.alert('Could not mark done', String(e?.message || e));
     }
@@ -432,6 +463,7 @@ export default function HomePage() {
 function TaskCard({item, expanded, onToggle, onGenerate, onPostpone, onDone}) {
   const dotColor = pickDotColor(item.id || item.title || '');
   const subtitle = formatWaiting(item.createdAt);
+  const dueLabel = formatDueBadge(item.dueDatetime);
 
   return (
     <View style={styles.taskOuter}>
@@ -447,6 +479,13 @@ function TaskCard({item, expanded, onToggle, onGenerate, onPostpone, onDone}) {
           <Text style={styles.taskSubtitle} numberOfLines={1}>
             {subtitle}
           </Text>
+          {dueLabel ? (
+            <View style={styles.dueBadge}>
+              <Text style={styles.dueBadgeText} numberOfLines={1}>
+                {dueLabel}
+              </Text>
+            </View>
+          ) : null}
         </View>
       </TouchableOpacity>
 
@@ -645,6 +684,19 @@ const styles = StyleSheet.create({
     fontFamily: theme.fonts.regular,
     fontSize: 11.5,
     color: theme.colors.textSecondary,
+  },
+  dueBadge: {
+    alignSelf: 'flex-start',
+    marginTop: 6,
+    backgroundColor: theme.colors.bg,
+    borderRadius: 999,
+    paddingVertical: 3,
+    paddingHorizontal: 10,
+  },
+  dueBadgeText: {
+    fontFamily: theme.fonts.medium,
+    fontSize: 11,
+    color: theme.colors.textPrimary,
   },
   chevBtn: {
     width: 44,

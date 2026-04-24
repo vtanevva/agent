@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   Alert,
   Linking,
-  PermissionsAndroid,
   Platform,
   Animated,
   KeyboardAvoidingView,
@@ -17,7 +16,6 @@ import {LinearGradient} from 'expo-linear-gradient';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Svg, Path} from 'react-native-svg';
 import * as Speech from 'expo-speech';
-import {Audio} from 'expo-av';
 import {colors} from '../styles/colors';
 import {commonStyles} from '../styles/commonStyles';
 import MessageList from '../components/MessageList';
@@ -28,6 +26,8 @@ import {API_BASE_URL} from '../config/api';
 import EmailReplyModal from '../components/EmailReplyModal';
 import ComposeEmailModal from '../components/ComposeEmailModal';
 import {extractEmailAddress} from '../utils/emailParse';
+import {buildChatMetadata} from '../utils/chatClientMetadata';
+import {useVoiceCapture} from '../hooks/useVoiceCapture';
 
 export default function VoiceChat() {
   const route = useRoute();
@@ -37,9 +37,7 @@ export default function VoiceChat() {
   const [chat, setChat] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [isSupported, setIsSupported] = useState(false);
   const [showChat, setShowChat] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [selectedSession, setSelectedSession] = useState(sessionId);
@@ -56,10 +54,9 @@ export default function VoiceChat() {
   const [currentEmailIndex, setCurrentEmailIndex] = useState(0);
   const [showCalendar, setShowCalendar] = useState(false);
   const [calendarEvents, setCalendarEvents] = useState([]);
-  const [transcribing, setTranscribing] = useState(false);
   const lastUserMessage = useRef('');
   const sidebarAnim = useRef(new Animated.Value(-280)).current;
-  const recordingRef = useRef(null);
+  const handleSendRef = useRef(async () => {});
 
   // Initialize TTS with Expo Speech
   useEffect(() => {
@@ -67,54 +64,6 @@ export default function VoiceChat() {
     console.log('TTS initialized with Expo Speech');
     return () => {
       Speech.stop();
-    };
-  }, []);
-
-  // Mobile: request microphone permission up-front so the first tap on the mic
-  // doesn't silently fail. Web permission is prompted by the browser on record.
-  useEffect(() => {
-    if (Platform.OS === 'web') return;
-    let cancelled = false;
-    (async () => {
-      try {
-        // expo-av asks the OS for microphone access on both iOS and Android.
-        const {status} = await Audio.requestPermissionsAsync();
-        if (cancelled) return;
-        if (status === 'granted') {
-          setIsSupported(true);
-          try {
-            await Audio.setAudioModeAsync({
-              allowsRecordingIOS: true,
-              playsInSilentModeIOS: true,
-              staysActiveInBackground: false,
-              shouldDuckAndroid: true,
-            });
-          } catch (e) {
-            console.warn('Audio mode setup failed:', e);
-          }
-        } else {
-          setIsSupported(false);
-          Alert.alert(
-            'Microphone permission',
-            'Please allow microphone access in system settings to use voice chat.',
-          );
-        }
-      } catch (err) {
-        console.error('Permission error:', err);
-        setIsSupported(false);
-      }
-
-      // Android also has runtime permissions exposed via React Native — belt & suspenders.
-      if (Platform.OS === 'android') {
-        try {
-          await PermissionsAndroid.request(
-            PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-          );
-        } catch {}
-      }
-    })();
-    return () => {
-      cancelled = true;
     };
   }, []);
 
@@ -244,6 +193,72 @@ export default function VoiceChat() {
     }
   }, [chat]);
 
+  const handleEmailSelect = (threadId, from) => {
+    const addr = extractEmailAddress(from);
+    setReplyThreadId(threadId);
+    setReplyTo(addr || (from && String(from).trim()) || '');
+    setReplyOpen(true);
+    setEmailChoices(null);
+  };
+
+  const archiveThreadOptimistic = async (threadId) => {
+    if (!threadId) return;
+    setHiddenThreads((prev) => Array.from(new Set([...prev, threadId])));
+    try {
+      await fetch(`${API_BASE_URL}/api/gmail/archive`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({user_id: userId, thread_id: threadId}),
+      });
+    } catch (e) {
+      setHiddenThreads((prev) => prev.filter((t) => t !== threadId));
+      console.error('Failed to archive thread:', e);
+    }
+  };
+
+  const markHandledOptimistic = async (threadId) => {
+    if (!threadId) return;
+    setHiddenThreads((prev) => Array.from(new Set([...prev, threadId])));
+    try {
+      await fetch(`${API_BASE_URL}/api/gmail/mark-handled`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({user_id: userId, thread_id: threadId}),
+      });
+    } catch (e) {
+      setHiddenThreads((prev) => prev.filter((t) => t !== threadId));
+      console.error('Failed to mark handled:', e);
+    }
+  };
+
+  // Web-only keyboard shortcuts: j,k,r,e
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const handleKeyDown = (e) => {
+      const tag = (e.target?.tagName || '').toUpperCase();
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (!emailChoices || emailChoices.length === 0) return;
+      if (e.key === 'j') {
+        setCurrentEmailIndex((i) => (i + 1) % emailChoices.length);
+      } else if (e.key === 'k') {
+        setCurrentEmailIndex((i) => (i - 1 + emailChoices.length) % emailChoices.length);
+      } else if (e.key === 'r') {
+        const sel = emailChoices[currentEmailIndex];
+        if (sel) {
+          const toVal = sel.from;
+          handleEmailSelect(sel.threadId, toVal);
+        }
+      } else if (e.key === 'e') {
+        const sel = emailChoices[currentEmailIndex];
+        if (sel) {
+          archiveThreadOptimistic(sel.threadId);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [emailChoices, currentEmailIndex]);
+
   // Send message
   const handleSend = async (msg = input) => {
     if (!msg.trim()) return;
@@ -254,14 +269,18 @@ export default function VoiceChat() {
     setLoading(true);
     
     try {
+      const chatPayload = {
+        message: msg,
+        user_id: userId,
+        session_id: sessionId,
+      };
+      const meta = buildChatMetadata();
+      if (meta) chatPayload.metadata = meta;
+
       const res = await fetch(`${API_BASE_URL}/api/chat`, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-          message: msg,
-          user_id: userId,
-          session_id: sessionId,
-        }),
+        body: JSON.stringify(chatPayload),
       });
       
       const data = await res.json();
@@ -356,220 +375,30 @@ export default function VoiceChat() {
     }
   };
 
-  // Voice controls
-  const recognitionRef = useRef(null);
+  handleSendRef.current = handleSend;
 
-  // Initialize Web Speech Recognition for web platform. If the Web Speech API is
-  // unavailable (Safari/Firefox) we still mark voice as supported because we fall
-  // back to MediaRecorder + server-side Whisper in startListening().
-  useEffect(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  const {
+    isSupported,
+    isListening,
+    transcribing,
+    startListening,
+    stopListening,
+  } = useVoiceCapture({
+    apiBaseUrl: API_BASE_URL,
+    transcriptHandlerRef: handleSendRef,
+    languageCode: voiceAccent,
+  });
 
-    const hasMediaRecorder =
-      typeof navigator !== 'undefined' &&
-      !!navigator.mediaDevices?.getUserMedia &&
-      typeof window.MediaRecorder !== 'undefined';
-
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      setIsSupported(true);
-      recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = false;
-      recognitionRef.current.interimResults = false;
-      recognitionRef.current.lang = voiceAccent || 'en-US';
-
-      recognitionRef.current.onresult = (event) => {
-        const transcript = event.results[0][0].transcript;
-        setInput(transcript);
-        setIsListening(false);
-        setTimeout(() => handleSend(transcript), 100);
-      };
-
-      recognitionRef.current.onerror = (event) => {
-        console.error('Speech recognition error:', event);
-        setIsListening(false);
-        // Chrome often fires "no-speech" — don't spam the user for that.
-        const errType = event?.error || '';
-        if (errType && errType !== 'no-speech' && errType !== 'aborted') {
-          Alert.alert('Speech Recognition Error', 'Failed to recognize speech. Please try again.');
-        }
-      };
-
-      recognitionRef.current.onend = () => {
-        setIsListening(false);
-      };
-    } else if (hasMediaRecorder) {
-      // No Web Speech API but we can still record + transcribe server-side.
-      setIsSupported(true);
-    } else {
-      setIsSupported(false);
-    }
-  }, [voiceAccent]);
-
-  // Upload a recorded audio clip to the backend Whisper endpoint and feed the
-  // transcript into the same chat entry point as typing.
-  const transcribeAndSend = useCallback(async (uri) => {
-    if (!uri) return;
-    setTranscribing(true);
-    try {
-      const form = new FormData();
-      const filename = uri.split('/').pop() || 'recording.m4a';
-      // Best-effort MIME: iOS records .m4a, Android defaults to .m4a too with HIGH_QUALITY
-      const ext = (filename.split('.').pop() || 'm4a').toLowerCase();
-      const mime =
-        ext === 'wav' ? 'audio/wav' :
-        ext === 'webm' ? 'audio/webm' :
-        ext === 'mp3' ? 'audio/mpeg' :
-        ext === 'ogg' ? 'audio/ogg' :
-        'audio/m4a';
-
-      if (Platform.OS === 'web') {
-        // On web, `uri` is actually a Blob we stashed on the ref.
-        const blob = recordingRef.current?.webBlob;
-        if (!blob) throw new Error('No audio blob');
-        form.append('file', blob, `recording.${ext}`);
-      } else {
-        form.append('file', {uri, name: filename, type: mime});
-      }
-
-      const res = await fetch(`${API_BASE_URL}/api/transcribe`, {
-        method: 'POST',
-        body: form,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.success) {
-        throw new Error(data?.error || `HTTP ${res.status}`);
-      }
-      const text = (data.text || '').trim();
-      if (!text) {
-        Alert.alert('No speech detected', 'I could not hear anything. Please try again.');
-        return;
-      }
-      setInput(text);
-      await handleSend(text);
-    } catch (err) {
-      console.error('transcribe error:', err);
-      Alert.alert('Voice error', 'Could not transcribe audio. Please try again.');
-    } finally {
-      setTranscribing(false);
-    }
-  }, [handleSend, userId, sessionId]);
-
-  const startListening = async () => {
-    if (isListening || transcribing) return;
-
-    // Web path: prefer the native Web Speech API when available (instant,
-    // no server round-trip). Fall back to MediaRecorder + Whisper otherwise.
-    if (Platform.OS === 'web') {
-      if (recognitionRef.current) {
-        try {
-          setIsListening(true);
-          recognitionRef.current.start();
-          return;
-        } catch (error) {
-          console.warn('Web Speech API failed, falling back to recording:', error);
-        }
-      }
-      // MediaRecorder fallback (Safari, Firefox on some platforms)
-      try {
-        if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
-          Alert.alert('Voice not supported', 'This browser does not support voice input.');
-          return;
-        }
-        const stream = await navigator.mediaDevices.getUserMedia({audio: true});
-        const mimeType = (window.MediaRecorder && MediaRecorder.isTypeSupported?.('audio/webm'))
-          ? 'audio/webm'
-          : '';
-        const mr = mimeType ? new MediaRecorder(stream, {mimeType}) : new MediaRecorder(stream);
-        const chunks = [];
-        mr.ondataavailable = (ev) => {
-          if (ev.data && ev.data.size > 0) chunks.push(ev.data);
-        };
-        mr.onstop = async () => {
-          try {
-            const blob = new Blob(chunks, {type: mimeType || 'audio/webm'});
-            recordingRef.current = {webBlob: blob};
-            await transcribeAndSend('recording.webm');
-          } finally {
-            stream.getTracks().forEach((t) => t.stop());
-          }
-        };
-        recordingRef.current = {webRecorder: mr, webStream: stream, webBlob: null};
-        mr.start();
-        setIsListening(true);
-      } catch (err) {
-        console.error('Web record start failed:', err);
-        setIsListening(false);
-        Alert.alert('Microphone error', 'Could not access microphone. Please check browser permissions.');
-      }
+  const toggleVoiceInput = async () => {
+    if (isListening) {
+      await stopListening();
       return;
     }
-
-    // Mobile path: record with expo-av, then POST to /api/transcribe.
-    try {
-      const {status} = await Audio.getPermissionsAsync();
-      let granted = status === 'granted';
-      if (!granted) {
-        const req = await Audio.requestPermissionsAsync();
-        granted = req.status === 'granted';
-      }
-      if (!granted) {
-        Alert.alert('Microphone permission', 'Please enable microphone access in settings.');
-        return;
-      }
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
-      });
-      const rec = new Audio.Recording();
-      await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-      await rec.startAsync();
-      recordingRef.current = rec;
-      setIsListening(true);
-    } catch (err) {
-      console.error('Mobile record start failed:', err);
-      setIsListening(false);
-      Alert.alert('Recording error', 'Could not start recording. Please try again.');
+    if (isSpeaking) {
+      Speech.stop();
+      setIsSpeaking(false);
     }
-  };
-
-  const stopListening = async () => {
-    if (!isListening) return;
-    setIsListening(false);
-
-    if (Platform.OS === 'web') {
-      // Web Speech API path — nothing to upload, result comes via onresult.
-      if (recognitionRef.current && !recordingRef.current?.webRecorder) {
-        try { recognitionRef.current.stop(); } catch {}
-        return;
-      }
-      // MediaRecorder fallback — trigger onstop which transcribes.
-      const mr = recordingRef.current?.webRecorder;
-      if (mr && mr.state !== 'inactive') {
-        try { mr.stop(); } catch {}
-      }
-      return;
-    }
-
-    const rec = recordingRef.current;
-    if (!rec || typeof rec.stopAndUnloadAsync !== 'function') return;
-    try {
-      await rec.stopAndUnloadAsync();
-      const uri = rec.getURI();
-      recordingRef.current = null;
-      // Reset iOS audio routing so TTS playback is loud again.
-      try {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-          playsInSilentModeIOS: true,
-        });
-      } catch {}
-      await transcribeAndSend(uri);
-    } catch (err) {
-      console.error('Mobile record stop failed:', err);
-      recordingRef.current = null;
-    }
+    await startListening();
   };
 
   const stopSpeaking = () => {
@@ -597,73 +426,6 @@ export default function VoiceChat() {
     }
     navigation.reset({index: 0, routes: [{name: 'Login'}]});
   };
-
-  const handleEmailSelect = (threadId, from) => {
-    const addr = extractEmailAddress(from);
-    setReplyThreadId(threadId);
-    setReplyTo(addr || (from && String(from).trim()) || '');
-    setReplyOpen(true);
-    setEmailChoices(null);
-  };
-
-  // Optimistic archive/done
-  const archiveThreadOptimistic = async (threadId) => {
-    if (!threadId) return;
-    setHiddenThreads((prev) => Array.from(new Set([...prev, threadId])));
-    try {
-      await fetch(`${API_BASE_URL}/api/gmail/archive`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({user_id: userId, thread_id: threadId}),
-      });
-    } catch (e) {
-      setHiddenThreads((prev) => prev.filter((t) => t !== threadId));
-      console.error('Failed to archive thread:', e);
-    }
-  };
-
-  const markHandledOptimistic = async (threadId) => {
-    if (!threadId) return;
-    setHiddenThreads((prev) => Array.from(new Set([...prev, threadId])));
-    try {
-      await fetch(`${API_BASE_URL}/api/gmail/mark-handled`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({user_id: userId, thread_id: threadId}),
-      });
-    } catch (e) {
-      setHiddenThreads((prev) => prev.filter((t) => t !== threadId));
-      console.error('Failed to mark handled:', e);
-    }
-  };
-
-  // Web-only keyboard shortcuts: j,k,r,e
-  useEffect(() => {
-    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
-    const handleKeyDown = (e) => {
-      const tag = (e.target?.tagName || '').toUpperCase();
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (!emailChoices || emailChoices.length === 0) return;
-      if (e.key === 'j') {
-        setCurrentEmailIndex((i) => (i + 1) % emailChoices.length);
-      } else if (e.key === 'k') {
-        setCurrentEmailIndex((i) => (i - 1 + emailChoices.length) % emailChoices.length);
-      } else if (e.key === 'r') {
-        const sel = emailChoices[currentEmailIndex];
-        if (sel) {
-          const toVal = sel.from;
-          handleEmailSelect(sel.threadId, toVal);
-        }
-      } else if (e.key === 'e') {
-        const sel = emailChoices[currentEmailIndex];
-        if (sel) {
-          archiveThreadOptimistic(sel.threadId);
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [emailChoices, currentEmailIndex]);
 
   const handleCheckEmails = async () => {
     await handleSend('Check my emails');
@@ -776,11 +538,7 @@ export default function VoiceChat() {
               <View style={styles.voiceControlsContainer}>
               <TouchableOpacity
                   onPress={() => {
-                    if (isListening) {
-                      stopListening();
-                    } else {
-                      startListening();
-                    }
+                    toggleVoiceInput();
                     setShowSidebar(false);
                   }}
                 disabled={!isSupported}
@@ -1084,34 +842,34 @@ export default function VoiceChat() {
             />
           )}
 
-          {/* AI Speaking Animation (when chat is hidden) */}
-          {!showChat && isSpeaking && (
+          {!showChat && (
             <View style={styles.voiceStatus}>
-                <View style={styles.statusContent}>
-                  <View style={styles.speakingIndicator} />
-                  <Text style={styles.statusText}>AI is speaking...</Text>
-                </View>
-            </View>
-          )}
-
-          {/* Placeholder when chat is hidden and AI is not speaking */}
-          {!showChat && !isSpeaking && (
-            <View style={styles.voiceStatus}>
-                <View style={styles.statusContent}>
-                <View style={styles.placeholderCircle} />
+              <View style={styles.statusContent}>
+                {isSpeaking ? (
+                  <>
+                    <View style={styles.speakingIndicator} />
+                    <Text style={styles.statusText}>AI is speaking…</Text>
+                  </>
+                ) : (
+                  <View style={styles.placeholderCircle} />
+                )}
                 <Text style={styles.placeholderText}>
-                  {isListening ? 'Listening… tap mic again to send' : transcribing ? 'Transcribing your voice…' : 'Tap the mic to speak'}
+                  {isListening
+                    ? 'Listening… tap mic again to send'
+                    : transcribing
+                      ? 'Transcribing your voice…'
+                      : isSpeaking
+                        ? 'Tap the mic to interrupt and speak'
+                        : 'Tap the mic to speak'}
                 </Text>
-                
-                {/* Microphone Section */}
                 <View style={styles.micSection}>
                   <TouchableOpacity
-                    onPress={isListening ? stopListening : startListening}
-                    disabled={!isSupported}
+                    onPress={toggleVoiceInput}
+                    disabled={!isSupported || loading}
                     style={[
                       styles.micButton,
                       isListening && styles.micButtonActive,
-                      !isSupported && styles.micButtonDisabled,
+                      (!isSupported || loading) && styles.micButtonDisabled,
                     ]}>
                     <LinearGradient
                       colors={

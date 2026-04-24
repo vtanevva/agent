@@ -19,6 +19,7 @@ from utils.logger import get_logger
 from storage.sqlite_db import (
     get_gmail_watch_state,
     get_gmail_last_history_id,
+    get_user_id_for_gmail_address,
     log_event,
     mark_thread_answered,
     set_gmail_last_history_id,
@@ -363,14 +364,17 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> Dict[str, Any]:
                     # explicit triggers (Zapier-style): generate a draft immediately.
                     "force_draft_ready": bool(watch_label_ids),
                 },
-                "client_name_hint": "Email",
-                "project_name_hint": "General",
-                "grafik_list_id_hint": None,
+                "client_name_hint": "Inbox",
+                "project_name_hint": None,
                 "channel_type": None,
-                "project_resolution_reason": "fallback_general",
-                "project_confidence": 0.3,
+                "project_resolution_reason": None,
+                "project_confidence": None,
                 "needs_project_review": False,
             }
+
+            owner_uid = get_user_id_for_gmail_address(email_address or "")
+            if owner_uid:
+                normalized["app_user_id"] = owner_uid
 
             result = process_normalized_message(normalized) or {}
 

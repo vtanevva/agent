@@ -19,11 +19,7 @@ load_dotenv()
 class Config:
     """Application + integrations configuration (core backend + memory/LLM settings)."""
 
-    # --- Core backend (SQLite / Grafik) ---
-    GRAFIK_TOKEN: Optional[str] = os.getenv("GRAFIK_TOKEN")
-    GRAFIK_LIST_ID: Optional[str] = os.getenv("GRAFIK_LIST_ID")
-    GRAFIK_LIST2_ID: Optional[str] = os.getenv("GRAFIK_LIST2_ID")
-    GRAFIK_LIST3_ID: Optional[str] = os.getenv("GRAFIK_LIST3_ID")
+    # --- Core backend (local SQLite tasks) ---
     SQLITE_PATH: str = os.getenv("SQLITE_PATH", "storage/aivis.db")
 
     # --- Environment & app ---

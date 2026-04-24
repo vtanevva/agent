@@ -33,6 +33,8 @@ def _looks_like_task_creation_request(text: str) -> bool:
         return False
     if re.search(r"\b(add|create)\s+(a\s+)?task\b", t):
         return True
+    if re.search(r"\bschedule\s+(me\s+)?(a\s+)?task\b", t):
+        return True
     if re.search(r"\bremind\s+me\s+to\b", t):
         return True
     return False
@@ -40,6 +42,12 @@ def _looks_like_task_creation_request(text: str) -> bool:
 
 def _extract_task_title(text: str) -> str | None:
     m = re.search(r"(?i)(?:add|create)\s+(?:a\s+)?task\s+to\s+(.+?)\s+by\b", text)
+    if m:
+        return _clean_title(m.group(1))
+    m = re.search(r"(?i)\bschedule\s+(?:me\s+)?(?:a\s+)?task\s+(?:for\s+)?to\s+(.+?)\s+by\b", text)
+    if m:
+        return _clean_title(m.group(1))
+    m = re.search(r"(?i)\bschedule\s+(?:me\s+)?(?:a\s+)?task\s+(.+?)\s+by\b", text)
     if m:
         return _clean_title(m.group(1))
     m = re.search(r"(?i)\bremind\s+me\s+to\s+(.+?)\s+by\b", text)

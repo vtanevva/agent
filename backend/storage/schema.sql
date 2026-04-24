@@ -206,3 +206,20 @@ CREATE TABLE IF NOT EXISTS thread_replies (
 
 CREATE INDEX IF NOT EXISTS idx_thread_replies_source_workspace
 ON thread_replies(source, workspace_id);
+
+-- Maps Expo app login (user_id) to provider identities for ingest stamping (app_user_id on messages).
+CREATE TABLE IF NOT EXISTS profile_link (
+  user_id TEXT PRIMARY KEY,
+  gmail_address TEXT,
+  slack_team_id TEXT,
+  slack_user_id TEXT,
+  updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_profile_link_gmail_lower
+ON profile_link(lower(trim(gmail_address)))
+WHERE gmail_address IS NOT NULL AND trim(gmail_address) != '';
+
+CREATE INDEX IF NOT EXISTS idx_profile_link_slack_team
+ON profile_link(slack_team_id)
+WHERE slack_team_id IS NOT NULL AND trim(slack_team_id) != '';

@@ -51,6 +51,21 @@ def _get_token_path() -> Path:
     return _resolve_config_path("GMAIL_TOKEN_PATH", DEFAULT_BACKEND_TOKEN_PATH)
 
 
+def _user_token_path(user_id: Optional[str]) -> Path:
+    """
+    Resolve token path for a specific app user.
+
+    - No user_id -> legacy shared ``token.json``
+    - user_id    -> ``token_<normalized_user_id>.json`` in the same directory
+    """
+    base = _get_token_path()
+    uid = (user_id or "").strip().lower()
+    if not uid:
+        return base
+    safe_uid = "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in uid)
+    return base.with_name(f"{base.stem}_{safe_uid}{base.suffix}")
+
+
 def _get_credentials_path() -> Path:
     return _resolve_config_path("GMAIL_CREDENTIALS_PATH", DEFAULT_BACKEND_CREDENTIALS_PATH)
 
@@ -157,9 +172,8 @@ def get_client_secrets_path() -> Path:
 
 
 def load_google_credentials(user_id: Optional[str] = None) -> Optional[Credentials]:
-    """Load stored Gmail OAuth credentials (single ``token.json``; ``user_id`` is unused for now)."""
-    _ = user_id
-    token_path = _get_token_path()
+    """Load stored Gmail OAuth credentials for a specific app user."""
+    token_path = _user_token_path(user_id)
     if not token_path.exists():
         return None
     try:
@@ -169,12 +183,34 @@ def load_google_credentials(user_id: Optional[str] = None) -> Optional[Credentia
 
 
 def save_google_credentials(user_id: Optional[str], creds: Credentials) -> None:
-    """Persist Gmail OAuth credentials to the configured token path."""
-    _ = user_id
-    token_path = _get_token_path()
+    """Persist Gmail OAuth credentials to a user-scoped token path."""
+    token_path = _user_token_path(user_id)
     token_path.parent.mkdir(parents=True, exist_ok=True)
     with open(token_path, "w", encoding="utf-8") as f:
         f.write(creds.to_json())
+
+
+def get_linked_gmail_address(user_id: Optional[str] = None) -> Optional[str]:
+    """Primary Gmail address for the OAuth token stored for this app user, or ``None``."""
+    creds = load_google_credentials(user_id)
+    if not creds:
+        return None
+    try:
+        if not creds.valid:
+            if creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+                save_google_credentials(user_id, creds)
+    except Exception:
+        return None
+    if not creds.valid:
+        return None
+    try:
+        service = build("gmail", "v1", credentials=creds)
+        profile = service.users().getProfile(userId="me").execute()
+        addr = (profile.get("emailAddress") or "").strip().lower()
+        return addr or None
+    except Exception:
+        return None
 
 
 def get_gmail_service():

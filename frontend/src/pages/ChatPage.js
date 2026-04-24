@@ -28,6 +28,7 @@ import {API_BASE_URL, CORE_BACKEND_URL} from '../config/api';
 import EmailReplyModal from '../components/EmailReplyModal';
 import ComposeEmailModal from '../components/ComposeEmailModal';
 import {extractEmailAddress} from '../utils/emailParse';
+import {buildChatMetadata} from '../utils/chatClientMetadata';
 
 export default function ChatPage() {
   const route = useRoute();
@@ -322,6 +323,8 @@ export default function ChatPage() {
         user_id: userId,
         session_id: sessionId,
       };
+      const meta = buildChatMetadata();
+      if (meta) requestBody.metadata = meta;
       
       // Only add images if there are any (don't send undefined)
       if (selectedImages.length > 0) {

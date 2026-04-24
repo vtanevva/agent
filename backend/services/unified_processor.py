@@ -23,8 +23,8 @@ from services.inbound_reply_service import (
 from services.metrics_tracker import build_metrics_event
 from services.marketing_email_signals import should_suppress_as_non_actionable
 from services.task_service import (
-    build_grafik_task_title_and_description,
-    create_grafik_task_and_record,
+    build_task_title_and_description,
+    create_local_task_and_record,
     run_task_link_phase,
 )
 
@@ -123,7 +123,15 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
     source = _norm_source(normalized.get("source"))
     workspace_id = _safe_str(normalized.get("workspace_id"))
     source_id = _safe_str(normalized.get("source_id"))
-    payload = normalized.get("payload") or {}
+    raw_payload = normalized.get("payload")
+    payload: dict[str, Any] = {**raw_payload} if isinstance(raw_payload, dict) else {}
+    if workspace_id and not (
+        str(payload.get("workspace_id") or "").strip() or str(payload.get("workspaceId") or "").strip()
+    ):
+        payload["workspace_id"] = workspace_id
+    app_uid = _safe_str(normalized.get("app_user_id")).strip().lower()
+    if app_uid:
+        payload["app_user_id"] = app_uid
     always_draft_reply = _as_bool(os.getenv("GMAIL_ALWAYS_DRAFT_REPLY", ""))
     payload_force_draft_ready = _as_bool(payload.get("force_draft_ready", False))
     force_draft_ready = payload_force_draft_ready or (
@@ -861,61 +869,9 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
             "error": None,
         })
 
-    # 12) Decide Grafik task creation
-    if not list_id:
-        reason = "missing_grafik_list_id" if source == "gmail" else f"unmapped_channel:{channel}"
-        log.info(f"[IGNORE:{source}] source_id={source_id} -> {reason}")
-
-        log_event(
-            source=source,
-            source_id=source_id,
-            step="routing_skip",
-            status="ignored",
-            data={
-                "workspace_id": workspace_id,
-                "reason": reason,
-                "channel": channel,
-                "classification": classification,
-            },
-        )
-
-        return _finalize_result({
-            "status": "ignored",
-            "source_id": source_id,
-            "reason": reason,
-            "classification": classification,
-            "client_name": client_name,
-            "project_name": project_name,
-            "client_id": client_id,
-            "project_id": project_id,
-            "project_resolution_reason": project_resolution_reason,
-            "project_confidence": project_confidence,
-            "needs_project_review": needs_project_review,
-            "continuity_context": continuity_context,
-            "importance_result": importance_result,
-            "scheduling_result": scheduling_result,
-            "project_update_candidate": project_update_candidate,
-            "project_context_update_result": project_context_update_result,
-            "updated_project_context": project_context if project_context_update_result.get("updated") else None,
-            "follow_up_candidate": follow_up_candidate,
-            "follow_up_created": bool(follow_up_create_result.get("created")),
-            "follow_up_id": follow_up_create_result.get("follow_up_id"),
-            "task_link_result": task_link_result,
-            "task_link_skipped": task_link_skipped,
-            "task_link_skip_reason": task_link_skip_reason,
-            "reply_policy": reply_policy,
-            "reply_text": reply_text,
-            "should_create_reply": should_create_reply,
-            "should_create_draft": should_create_draft,
-            "draft_status": None,
-            "draft_id": None,
-            "grafik_task_id": None,
-            "linked_grafik_task_id": None,
-            "list_id": list_id,
-            "error": None,
-        })
-
-    title, description = build_grafik_task_title_and_description(
+    # 12) Create the local task (no external tracker). Project resolution above
+    # already picked the right client/project (or the "General" fallback).
+    title, description = build_task_title_and_description(
         source=source,
         classification=classification,
         subject=subject,
@@ -941,24 +897,25 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
     )
 
     try:
-        grafik_task_id = create_grafik_task_and_record(
+        grafik_task_id = create_local_task_and_record(
             source=source,
             source_id=source_id,
-            list_id=list_id,
             title=title,
             description=description,
             classification=classification,
             client_id=int(client_id) if client_id else None,
             project_id=int(project_id) if project_id else None,
+            thread_id=thread_id,
+            workspace_id=workspace_id,
         )
         log.info(
-            f"[GRAFIK:{source}] source_id={source_id} -> created task_id={grafik_task_id} list_id={list_id}"
+            f"[TASK:{source}] source_id={source_id} -> created local_task_id={grafik_task_id}"
         )
 
         log_event(
             source=source,
             source_id=source_id,
-            step="grafik_create",
+            step="local_task_create",
             status="ok",
             data={
                 "workspace_id": workspace_id,

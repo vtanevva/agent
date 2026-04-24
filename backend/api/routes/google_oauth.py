@@ -52,6 +52,7 @@ from services.gmail_auth import (
     load_google_credentials,
     save_google_credentials,
 )
+from storage.sqlite_db import upsert_profile_link_gmail
 from utils.logger import get_logger
 
 log = get_logger("google_oauth")
@@ -73,16 +74,16 @@ def default_oauth_frontend_return_url() -> str:
     return u or "http://127.0.0.1:8081/"
 
 
-def _stored_gmail_email() -> str | None:
-    """Gmail address for the single stored ``token.json``, or ``None`` if missing/invalid."""
-    creds: Credentials | None = load_google_credentials(None)
+def _stored_gmail_email(user_id: str | None = None) -> str | None:
+    """Gmail address for the provided app user, or ``None`` if missing/invalid."""
+    creds: Credentials | None = load_google_credentials(user_id)
     if not creds:
         return None
     try:
         if not creds.valid:
             if creds.expired and creds.refresh_token:
                 creds.refresh(Request())
-                save_google_credentials(None, creds)
+                save_google_credentials(user_id, creds)
     except Exception as e:
         log.warning("[OAuth] credential refresh: %s", e)
         return None
@@ -342,6 +343,16 @@ def google_oauth_callback():
             )
         )
 
+    try:
+        oauth_email = _stored_gmail_email((username or "").strip().lower() or None)
+        if oauth_email:
+            upsert_profile_link_gmail(
+                user_id=(username or "").strip().lower(),
+                gmail_address=oauth_email,
+            )
+    except Exception as e:
+        log.warning("[OAuth] profile_link gmail upsert failed: %s", e)
+
     log.info("[OAuth] success for user=%s", username)
     return redirect(
         _append_query(
@@ -356,11 +367,11 @@ def google_oauth_callback():
 
 @google_oauth_bp.post("/api/google-profile")
 def google_profile():
-    """Return Gmail address for the stored token (single-account ``token.json``)."""
+    """Return Gmail address for the provided ``user_id`` token."""
     body = request.get_json(silent=True) or {}
-    _ = (body.get("user_id") or "").strip()
+    user_id = (body.get("user_id") or "").strip().lower()
 
-    email = _stored_gmail_email()
+    email = _stored_gmail_email(user_id or None)
     return jsonify({"email": email}), 200
 
 
@@ -369,13 +380,13 @@ def email_connections():
     """
     Provider connection flags for the chat UI.
 
-    This backend uses a single ``token.json`` (not per ``user_id``). If a token exists and is
-    valid, Gmail is reported connected so the app shows the linked address after OAuth.
+    Uses per-user OAuth tokens. If the provided ``user_id`` has a valid token, Gmail is
+    reported connected and the linked address is returned.
     """
     body = request.get_json(silent=True) or {}
-    _ = (body.get("user_id") or "").strip()
+    user_id = (body.get("user_id") or "").strip().lower()
 
-    gmail_email = _stored_gmail_email()
+    gmail_email = _stored_gmail_email(user_id or None)
     gmail_connected = bool(gmail_email)
     return jsonify(
         {

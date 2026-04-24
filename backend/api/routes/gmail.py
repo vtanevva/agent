@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 
 from application.orchestrators.event_orchestrator import handle_normalized_event
 from application.services.reply_service import maybe_create_gmail_draft
+from storage.sqlite_db import get_user_id_for_gmail_address
 from utils.logger import get_logger
 from services.gmail_text import (
     extract_gmail_fields,
@@ -61,9 +62,11 @@ def ingest_gmail():
     source_id = build_gmail_source_id(message_id, thread_id, sender, subject)
 
     text_for_classification = prepare_email_for_classification(subject, body)
-    client_name = (payload.get("client_name") or "Email").strip()
-    project_name = (payload.get("project_name") or "General").strip()
-    list_id = (payload.get("grafik_list_id") or "").strip() or None
+    # Callers may still pass ``client_name`` / ``project_name`` for testing;
+    # otherwise we let the unified processor's project resolver pick the right
+    # project (by name match in text, single-known, or the "General" fallback).
+    client_name = (payload.get("client_name") or "Inbox").strip()
+    project_name = (payload.get("project_name") or "").strip() or None
 
     normalized = {
         "source": ingest_source,
@@ -81,15 +84,17 @@ def ingest_gmail():
         "payload": payload,
         "client_name_hint": client_name,
         "project_name_hint": project_name,
-        "grafik_list_id_hint": list_id,
         "channel_type": None,
-        # Preserve legacy Gmail project resolution semantics (incremental refactor):
-        "project_resolution_reason": (
-            "explicit_project_name" if project_name and project_name != "General" else "fallback_general"
-        ),
-        "project_confidence": 1.0 if project_name and project_name != "General" else 0.3,
+        "project_resolution_reason": None,
+        "project_confidence": None,
         "needs_project_review": False,
     }
+
+    wid = (workspace_id or "").strip().lower()
+    if wid:
+        owner_uid = get_user_id_for_gmail_address(wid)
+        if owner_uid:
+            normalized["app_user_id"] = owner_uid
 
     result = handle_normalized_event(normalized)
     draft_result = maybe_create_gmail_draft(

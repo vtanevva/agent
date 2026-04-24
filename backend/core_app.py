@@ -9,8 +9,8 @@ from pathlib import Path
 # Gunicorn (see start.sh, cwd=backend): `gunicorn core_app:app`
 BACKEND_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BACKEND_DIR.parent
-# Repo root first for assets and ``from backend.*`` when cwd is backend; ``integrations.grafik`` lives in
-# ``backend/integrations/grafik`` so it resolves whether ``sys.path[0]`` is repo root or backend (Gunicorn).
+# Repo root first for assets and ``from backend.*`` when cwd is backend; backend/ on path resolves
+# both import styles whether ``sys.path[0]`` is repo root or backend (Gunicorn).
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 if str(REPO_ROOT) not in sys.path:
@@ -28,6 +28,7 @@ from api.routes.slack_interactive import slack_interactive_bp
 from api.routes.gmail import gmail_bp
 from api.routes.gmail_watch import gmail_watch_bp
 from api.routes.action_items import action_items_bp
+from api.routes.tasks_api import tasks_api_bp
 from api.routes.chat_api import chat_api_bp
 from api.routes.gmail_reply_routes import gmail_reply_bp
 from api.routes.webhooks import webhooks_bp
@@ -40,6 +41,7 @@ from api.routes.google_oauth import google_oauth_bp
 from api.routes.google_calendar import google_calendar_bp
 from api.routes.recent_messages import recent_messages_bp
 from api.routes.user_search import user_search_bp
+from api.routes.profile_link import profile_link_bp
 from storage.sqlite_db import init_sqlite
 from utils.logger import get_logger
 
@@ -135,6 +137,7 @@ def create_app():
     flask_app.register_blueprint(gmail_bp)
     flask_app.register_blueprint(gmail_watch_bp)
     flask_app.register_blueprint(action_items_bp)
+    flask_app.register_blueprint(tasks_api_bp)
     flask_app.register_blueprint(chat_api_bp)
     flask_app.register_blueprint(gmail_reply_bp)
     flask_app.register_blueprint(webhooks_bp)
@@ -147,6 +150,7 @@ def create_app():
     flask_app.register_blueprint(google_calendar_bp)
     flask_app.register_blueprint(recent_messages_bp)
     flask_app.register_blueprint(user_search_bp)
+    flask_app.register_blueprint(profile_link_bp)
 
     @flask_app.get("/<path:spa_path>")
     def spa_or_asset(spa_path: str):

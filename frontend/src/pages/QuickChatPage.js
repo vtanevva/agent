@@ -20,6 +20,8 @@ import {Svg, Line, Path} from 'react-native-svg';
 import {theme} from '../styles/theme';
 import {API_BASE_URL} from '../config/api';
 import {extractEmailAddress} from '../utils/emailParse';
+import {buildChatMetadata} from '../utils/chatClientMetadata';
+import {useVoiceCapture} from '../hooks/useVoiceCapture';
 
 /** Keep GET URL under a safe length; Gmail compose uses query params. */
 const GMAIL_COMPOSE_URL_MAX = 7200;
@@ -70,6 +72,7 @@ export default function QuickChatPage() {
   const [rewriteAsInstruction, setRewriteAsInstruction] = useState('');
   const [polishLoading, setPolishLoading] = useState(false);
   const scrollRef = useRef(null);
+  const sendHandlerRef = useRef(async () => {});
   const seedConsumed = useRef(false);
   const replyDraftRef = useRef(null);
   const replyDraftAttachedRef = useRef(false);
@@ -133,8 +136,11 @@ export default function QuickChatPage() {
     else goBack();
   };
 
-  const send = useCallback(async () => {
-    const text = input.trim();
+  const send = useCallback(async (messageOverride) => {
+    const text =
+      messageOverride !== undefined && messageOverride !== null
+        ? String(messageOverride).trim()
+        : input.trim();
     if (!text || loading) return;
 
     const attachDraft =
@@ -157,6 +163,8 @@ export default function QuickChatPage() {
         user_id: userId,
         session_id: sessionId,
       };
+      const meta = buildChatMetadata();
+      if (meta) body.metadata = meta;
       if (attachDraft) {
         body.reply_draft = replyDraftRef.current;
       }
@@ -287,6 +295,25 @@ export default function QuickChatPage() {
     }
   }, [editableDraft]);
 
+  sendHandlerRef.current = send;
+
+  const {
+    isSupported: voiceSupported,
+    isListening,
+    transcribing,
+    startListening,
+    stopListening,
+  } = useVoiceCapture({
+    apiBaseUrl: API_BASE_URL,
+    transcriptHandlerRef: sendHandlerRef,
+    languageCode: 'en-US',
+  });
+
+  const toggleQuickVoice = async () => {
+    if (isListening) await stopListening();
+    else await startListening();
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
@@ -414,12 +441,39 @@ export default function QuickChatPage() {
         ) : null}
 
         <View style={styles.inputRow}>
+          <TouchableOpacity
+            onPress={() => {
+              void toggleQuickVoice();
+            }}
+            disabled={!voiceSupported || loading || transcribing}
+            style={[
+              styles.micPillBtn,
+              isListening && styles.micPillBtnActive,
+              (!voiceSupported || loading || transcribing) && styles.micPillBtnDisabled,
+            ]}
+            activeOpacity={0.85}
+            accessibilityLabel={isListening ? 'Stop recording' : 'Speak'}>
+            <Svg
+              width={20}
+              height={20}
+              viewBox="0 0 24 24"
+              fill={isListening ? theme.colors.textOnDark : theme.colors.textSecondary}>
+              <Path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
+              <Path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+            </Svg>
+          </TouchableOpacity>
           <View style={styles.pill}>
             <TextInput
               value={input}
               onChangeText={setInput}
-              onSubmitEditing={send}
-              placeholder="Schedule or add new task..."
+              onSubmitEditing={() => send()}
+              placeholder={
+                transcribing
+                  ? 'Transcribing…'
+                  : isListening
+                    ? 'Listening…'
+                    : 'Schedule or add new task...'
+              }
               placeholderTextColor={theme.colors.textSecondary}
               style={[
                 styles.input,
@@ -428,6 +482,7 @@ export default function QuickChatPage() {
               returnKeyType="send"
               blurOnSubmit={false}
               multiline={false}
+              editable={!isListening && !transcribing}
             />
             <TouchableOpacity
               onPress={onTrailingPress}
@@ -706,6 +761,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  micPillBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: 10,
+    backgroundColor: theme.colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...theme.shadow.card,
+  },
+  micPillBtnActive: {
+    backgroundColor: theme.colors.textPrimary,
+  },
+  micPillBtnDisabled: {
+    opacity: 0.4,
   },
   pill: {
     flexDirection: 'row',
