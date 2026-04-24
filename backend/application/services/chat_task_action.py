@@ -1,6 +1,10 @@
 """
-Detect simple \"add a task … by Sunday\" chat lines and persist ``tasks`` rows
+Detect simple \"add a task ... by Sunday\" chat lines and persist ``tasks`` rows
 so the weekly schedule and home action list can show them.
+
+The actual write goes through the same unified processor used for Gmail /
+Slack, so project detection (existing-project match, new-project creation,
+or the ``General`` fallback) is identical for every task source.
 """
 
 from __future__ import annotations
@@ -15,6 +19,11 @@ from application.services.calendar_meeting_action import (
     _clock_from_text,
     _tz_name,
 )
+from services.chat_project_hint import safe_project_hint
+from utils.logger import get_logger
+
+
+log = get_logger("chat_task_action")
 
 
 def _clean_title(raw: str) -> str:
@@ -88,8 +97,10 @@ def try_create_task_from_chat(
     session_id: str | None = None,
 ) -> str | None:
     """
-    If ``user_message`` is a concrete task-with-deadline request, upsert a SQLite task
-    and return a user-facing reply. Otherwise ``None``.
+    If ``user_message`` is a concrete task-with-deadline request, route it
+    through the unified processor (same path as Gmail / Slack) so project
+    detection and DB writes are consistent across sources. Returns the
+    user-visible chat reply on success, otherwise ``None``.
     """
     text = (user_message or "").strip()
     if not _looks_like_task_creation_request(text):
@@ -105,30 +116,53 @@ def try_create_task_from_chat(
         return None
 
     due_iso = due.isoformat()
-    classification: dict[str, Any] = {
+    classification_override: dict[str, Any] = {
         "type": "ACTION",
         "has_action": True,
+        "reply_type": "none",
+        "title": title,
+        "summary": title,
         "due_datetime": due_iso,
         "due_datetime_iso": due_iso,
-        "summary": title,
     }
 
     sid = (session_id or "session").strip() or "session"
     source_id = f"chat_task:{sid}:{uuid4().hex}"
-    grafik_task_id = f"aivis-local-{uuid4().hex}"
+    now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    project_hint = safe_project_hint(text)
 
-    from storage.sqlite_db import upsert_task
+    normalized = {
+        "source": "chat_task",
+        "workspace_id": None,
+        "source_id": source_id,
+        "channel": f"chat:{sid}",
+        "thread_id": sid,
+        "ts": now_iso,
+        "sender": sid,
+        "user_id": sid,
+        "recipient": None,
+        "subject": title,
+        "raw_text": text,
+        "text_for_classification": text,
+        "payload": {
+            "skip_task_link": True,
+            "skip_draft": True,
+            "classification_override": classification_override,
+            "metadata": metadata or {},
+        },
+        "client_name_hint": "Inbox",
+        "project_name_hint": project_hint,
+        "channel_type": "chat",
+    }
 
-    upsert_task(
-        source="chat",
-        source_id=source_id,
-        grafik_task_id=grafik_task_id,
-        title=title,
-        description=f"Created from chat. Original: {text[:500]}",
-        classification=classification,
-        client_id=None,
-        project_id=None,
-    )
+    try:
+        from application.orchestrators.event_orchestrator import handle_normalized_event
+        handle_normalized_event(normalized)
+    except Exception as e:
+        # Never block the user-facing reply on a backend write failure; the
+        # chat orchestrator returns a confirmation string to the UI either
+        # way, and the error is visible in logs.
+        log.warning("chat_task unified ingest failed: %s", e)
 
     when = due.strftime("%A, %B %d, %Y at %H:%M")
     return (

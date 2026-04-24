@@ -168,7 +168,7 @@ def _source_label_for_home(source: str) -> str:
         return "Email"
     if s == "slack":
         return "Slack"
-    if s == "chat":
+    if s in ("chat", "chat_task"):
         return "Chat"
     return s.capitalize() if s else ""
 
@@ -190,10 +190,10 @@ def _task_row_to_item(row: dict) -> dict:
     snippet = f"Due {due}" if due else (label or "Task")
     sid = str(row.get("source_id") or tid or "")
     thread_id = row.get("thread_id") or (str(tid) if tid is not None else sid)
-    # Keep ``source`` semantically aligned with Home UI: chat tasks were using
-    # a synthetic ``chat_task`` source before the merge. Preserve that for chat
-    # so existing UI code paths keep working; everything else stays on its
-    # native source (``gmail`` / ``slack``).
+    # Keep ``source`` semantically aligned with Home UI. The unified processor
+    # now writes chat-created tasks with ``source="chat_task"`` directly, so
+    # we just pass it through. Older rows written as ``source="chat"`` are
+    # rewritten to ``chat_task`` for UI consistency.
     api_source = "chat_task" if src == "chat" else src
     return {
         "source": api_source,
@@ -372,7 +372,7 @@ def list_action_items():
         #   - chat tasks use ``source_id = chat_task:<session>:<uuid>``
         #   - gmail tasks carry ``workspace_id = mailbox email``
         #   - slack tasks are not user-scoped yet (single workspace assumption)
-        if src == "chat":
+        if src in ("chat", "chat_task"):
             if not _chat_task_source_id_matches_user(r.get("source_id"), user_id):
                 continue
         elif src == "gmail" and mailbox_scope:
@@ -393,8 +393,10 @@ def list_action_items():
         cls = _safe_json_loads(row.get("classification_json"))
         src_l = str(row.get("source") or "").strip().lower()
 
-        # Transcript / in-app agent lines are not the mail/Slack action inbox.
-        if src_l in ("chat", "gmail_chat", "slack_chat"):
+        # Transcript / in-app agent lines and the raw ``chat_task`` ingest line
+        # are not direct Home items — the resulting task row (loaded above)
+        # already represents them in the feed.
+        if src_l in ("chat", "gmail_chat", "slack_chat", "chat_task"):
             continue
 
         if not _row_visible_for_app_user(

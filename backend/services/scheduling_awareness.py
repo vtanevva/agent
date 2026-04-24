@@ -90,6 +90,24 @@ def _extract_time(text: str) -> tuple[int, int] | None:
             h += 12
         return h, minute
 
+    # "by Sunday at 9" / "at 9:30" with no am/pm — treat as 24h if hour>=13, else morning 1–11, noon for 12.
+    m_bare = re.search(r"\bat\s+(?P<h>\d{1,2})(?::(?P<m>\d{2}))?\b", t, re.IGNORECASE)
+    if m_bare:
+        rest = (t[m_bare.end() :] or "").lstrip()
+        if re.match(r"^(am|pm|a\.m\.|p\.m\.)\b", rest, re.IGNORECASE):
+            return None
+        h = int(m_bare.group("h"))
+        minute = int(m_bare.group("m") or "0")
+        if minute > 59 or h < 0 or h > 23:
+            return None
+        if h >= 13:
+            return h, minute
+        if 1 <= h <= 11:
+            return h, minute
+        if h == 12:
+            return 12, minute
+        return None
+
     return None
 
 
@@ -253,7 +271,10 @@ def analyze_scheduling_signals(
     if m_due:
         kw = _safe_str(m_due.group(1)).lower()
         when = _safe_str(m_due.group("when"))
-        time_part = _safe_str(m_due.group("time"))
+        # Do not ``strip()`` the ``time`` group: it begins with ``\\s+`` from the regex; stripping
+        # would glue ``when`` + ``at`` (e.g. ``Sunday`` + ``at 9`` → ``Sundayat``).
+        raw_time = m_due.group("time")
+        time_part = raw_time if raw_time is not None else ""
         due_hint_text = f"{kw} {when}{time_part}".strip()
         schedule_signals.append("due_phrase")
     else:

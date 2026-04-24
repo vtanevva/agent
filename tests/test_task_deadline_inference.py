@@ -80,11 +80,28 @@ def test_due_by_prefix_stripped_for_weekday() -> None:
     assert r.get("task_due_datetime") == "2026-04-24T12:00:00Z"
 
 
+def test_by_sunday_at_bare_hour_is_datetime() -> None:
+    """Phrases like 'by Sunday at 9' must yield a clock time (bare hour after 'at'), not date-only."""
+    _bootstrap_backend_path()
+    from services.scheduling_awareness import analyze_scheduling_signals
+
+    r = analyze_scheduling_signals(
+        clean_text="Please finish the Lucient project by Sunday at 9 — thanks!",
+        classification=None,
+        now_utc="2026-04-20T12:00:00Z",  # Monday; next calendar Sunday is 2026-04-26
+    )
+    hint = (r.get("due_hint_text") or "").lower()
+    assert hint.startswith("by sunday at 9")
+    assert r.get("normalized_due", {}).get("type") == "datetime"
+    assert r.get("task_due_datetime") == "2026-04-26T09:00:00Z"
+
+
 def main() -> None:
     test_finish_by_tomorrow_maps_to_next_day_noon_utc()
     test_by_today_with_clock_time_is_datetime()
     test_vague_message_has_no_task_due_datetime()
     test_due_by_prefix_stripped_for_weekday()
+    test_by_sunday_at_bare_hour_is_datetime()
     print("test_task_deadline_inference: all passed")
 
 

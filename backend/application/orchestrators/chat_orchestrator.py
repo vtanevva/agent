@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -11,34 +10,9 @@ from application.services.chat_task_action import try_create_task_from_chat
 from application.services.thread_service import store_chat_message
 from utils.logger import get_logger
 from services.ai_chat_client import complete_chat
+from services.chat_project_hint import safe_project_hint
 
 log = get_logger("chat_orchestrator")
-
-
-def _safe_project_hint(text: str) -> str | None:
-    msg = (text or "").strip()
-    if not msg:
-        return None
-
-    m = re.search(r"(?i)\b([a-z][a-z0-9 _-]{1,80}\s+project)\b", msg)
-    if m:
-        raw = " ".join((m.group(1) or "").strip().split())
-        cleaned = re.sub(r"(?i)^(about|for|on|re|regarding)\s+", "", raw).strip()
-        return cleaned or None
-
-    m = re.search(
-        r"(?i)\b(?:about|for|on|re|regarding)\s+([a-z][a-z0-9 _-]{1,80})\b(?:\s+project\b)?",
-        msg,
-    )
-    if not m:
-        return None
-
-    candidate = " ".join((m.group(1) or "").strip().split())
-    if len(candidate) < 2:
-        return None
-    if not candidate.lower().endswith("project"):
-        candidate = f"{candidate} project"
-    return candidate[:120]
 
 
 def _ingest_chat_for_project_tracking(
@@ -52,7 +26,7 @@ def _ingest_chat_for_project_tracking(
     Run chat text through unified ingest so project mention resolution/creation matches Gmail/Slack.
     Best-effort only; must never block the chat reply.
     """
-    project_hint = _safe_project_hint(user_message)
+    project_hint = safe_project_hint(user_message)
     normalized = {
         "source": "chat",
         "workspace_id": None,

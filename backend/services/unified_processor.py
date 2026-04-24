@@ -5,6 +5,7 @@ from typing import Any
 
 from utils.logger import get_logger
 
+from services.chat_project_hint import safe_project_hint
 from services.classification_service import classify_and_enrich
 from services.client_routing import ensure_client
 from services.continuity_context import build_continuity_context
@@ -129,7 +130,7 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
         str(payload.get("workspace_id") or "").strip() or str(payload.get("workspaceId") or "").strip()
     ):
         payload["workspace_id"] = workspace_id
-    app_uid = _safe_str(normalized.get("app_user_id")).strip().lower()
+    app_uid = (_safe_str(normalized.get("app_user_id")) or "").strip().lower()
     if app_uid:
         payload["app_user_id"] = app_uid
     always_draft_reply = _as_bool(os.getenv("GMAIL_ALWAYS_DRAFT_REPLY", ""))
@@ -385,12 +386,26 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
         client_id = ensure_client(client_name)
 
     if client_id and not project_id:
-        # Slack may pass an explicit override in payload.project_name.
-        # Gmail historically treats payload/default project as explicit; keep that behavior.
-        explicit_project_name = _safe_str(payload.get("project_name")) or (
-            project_name_hint if source == "gmail" else None
-        )
-        fallback_project_name = (project_name_hint or "General").strip()
+        # If no adapter passed an explicit hint, try to extract one from
+        # the message body. This lets Gmail / Slack ingest create or
+        # reuse a project when the sender mentions it by name (e.g.
+        # "please finish the Vana project") instead of defaulting every
+        # inbound message into the single-known-project heuristic.
+        if not project_name_hint:
+            try:
+                auto_hint = safe_project_hint(text_for_classification or raw_text)
+            except Exception:
+                auto_hint = None
+            if auto_hint:
+                project_name_hint = auto_hint
+
+        # A ``project_name_hint`` -- whether from the adapter or the
+        # extractor above -- represents a user-mentioned project name
+        # and is always treated as the explicit hint for the resolver.
+        # The resolver creates the project on demand when it doesn't
+        # already exist and reuses the existing row when it does.
+        explicit_project_name = _safe_str(payload.get("project_name")) or project_name_hint
+        fallback_project_name = "General"
         pid, pname, reason, confidence, needs_review = resolve_project_for_client(
             client_id=int(client_id),
             text=text_for_classification or raw_text,
@@ -441,20 +456,48 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
         },
     )
 
-    # 3) Classification (in-app chat ingest skips LLM — assistant reply is handled by AI chat service)
-    if source in ("chat", "gmail_chat", "slack_chat"):
+    # 3) Classification
+    # Chat-family sources skip the LLM classifier:
+    #   - ``chat`` / ``gmail_chat`` / ``slack_chat`` are passive transcripts that must
+    #     never become tasks (see step below that forces ``has_action=False``).
+    #   - ``chat_task`` is the explicit "add a task ..." chat command path. The caller
+    #     (``chat_task_action.try_create_task_from_chat``) has already pulled out the
+    #     title + deadline, so we use the provided ``classification_override`` instead
+    #     of asking the LLM, and we force ``has_action=True``.
+    if source in ("chat", "gmail_chat", "slack_chat", "chat_task"):
         classification_input = text_for_classification or raw_text
-        classification = {
-            "has_action": False,
-            "reply_type": "none",
-            "client_name": client_name,
-            "project_name": project_name,
-            "project_resolution_reason": project_resolution_reason,
-            "project_confidence": project_confidence,
-            "needs_project_review": needs_project_review,
-        }
-        reply_type = "none"
-        has_action = False
+        if source == "chat_task":
+            override = payload.get("classification_override") if isinstance(payload, dict) else None
+            base: dict[str, Any] = {
+                "type": "ACTION",
+                "has_action": True,
+                "reply_type": "none",
+                "client_name": client_name,
+                "project_name": project_name,
+                "project_resolution_reason": project_resolution_reason,
+                "project_confidence": project_confidence,
+                "needs_project_review": needs_project_review,
+            }
+            if isinstance(override, dict):
+                for k, v in override.items():
+                    if v is not None:
+                        base[k] = v
+            base["has_action"] = True
+            classification = base
+            reply_type = "none"
+            has_action = True
+        else:
+            classification = {
+                "has_action": False,
+                "reply_type": "none",
+                "client_name": client_name,
+                "project_name": project_name,
+                "project_resolution_reason": project_resolution_reason,
+                "project_confidence": project_confidence,
+                "needs_project_review": needs_project_review,
+            }
+            reply_type = "none"
+            has_action = False
     else:
         classification, classification_input, reply_type, has_action = classify_and_enrich(
             source=source,
@@ -470,8 +513,8 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
             force_draft_ready=force_draft_ready,
         )
 
-    # In-app user chat (transcript ingest + Gmail/Slack agent delegates) must not become
-    # Grafik tasks or homepage action items — only real inbound mail/Slack should.
+    # Passive chat ingest (transcripts + agent delegates) must not become tasks.
+    # ``chat_task`` is explicitly excluded here: the user literally asked for a task.
     if source in ("chat", "gmail_chat", "slack_chat"):
         has_action = False
         classification["has_action"] = False
