@@ -71,11 +71,20 @@ def build_task_title_and_description(
     project_context: dict[str, Any] | None,
     classification_input: Any,
 ) -> Tuple[str, str]:
-    base_title = classification.get("title") or (
-        f"{source.capitalize()}: {(subject or text_for_classification or raw_text)[:50]}"
-        if (subject or text_for_classification or raw_text)
-        else f"{source.capitalize()}: (no text)"
-    )
+    # Fallback chain for the task title:
+    #   1. Classifier-provided title (best — it's a summary of the ask).
+    #   2. Email subject / chat subject.
+    #   3. First line of the clean body (``raw_text``).
+    # We deliberately skip ``text_for_classification`` because it's wrapped as
+    # ``"Subject: <s>\nBody: <b>"`` by ``prepare_email_for_classification`` and
+    # collapsing whitespace turns it into a title like "Gmail: Subject: Body: ..."
+    # when the subject is empty (see screenshot in docs/task-titles.md).
+    subj_clean = (subject or "").strip()
+    body_clean = (raw_text or "").strip()
+    body_first_line = body_clean.split("\n", 1)[0].strip() if body_clean else ""
+    body_candidate = (body_first_line or body_clean)[:80]
+
+    base_title = classification.get("title") or subj_clean or body_candidate or f"{source.capitalize()}: (no text)"
     title = base_title
 
     context_block = ""

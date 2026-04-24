@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, List
 
 from flask import Blueprint, jsonify, request
@@ -162,6 +163,33 @@ def _text_preview(v: Any, limit: int = 180) -> str:
     return s[:limit] + ("..." if len(s) > limit else "")
 
 
+# Titles for tasks created before the ``build_task_title_and_description`` fix
+# were built as ``"Gmail: Subject: Body: <first 50 chars of wrapped classifier
+# input>"`` when both the classifier title and the subject were empty. Strip
+# those labels at read time so the UI shows the actual task text.
+_LEADING_SOURCE_PREFIX_RE = re.compile(
+    r"^\s*(?:gmail|slack|chat(?:_task)?|outlook|email)\s*:\s*",
+    re.IGNORECASE,
+)
+_LEADING_SUBJECT_EMPTY_RE = re.compile(r"^\s*subject\s*:\s*(?=body\s*:)", re.IGNORECASE)
+_LEADING_BODY_RE = re.compile(r"^\s*body\s*:\s*", re.IGNORECASE)
+
+
+def _clean_task_title(raw: Any) -> str:
+    """Drop stale ``"<Source>: Subject: Body: ..."`` prefixes left on older rows."""
+    s = (str(raw) if raw is not None else "").strip()
+    if not s:
+        return ""
+    prev = None
+    # Iterate because some rows accumulated multiple prefixes (e.g. re-ingest).
+    while prev != s:
+        prev = s
+        s = _LEADING_SOURCE_PREFIX_RE.sub("", s, count=1).strip()
+        s = _LEADING_SUBJECT_EMPTY_RE.sub("", s, count=1).strip()
+        s = _LEADING_BODY_RE.sub("", s, count=1).strip()
+    return s or str(raw).strip()
+
+
 def _source_label_for_home(source: str) -> str:
     s = (source or "").strip().lower()
     if s == "gmail":
@@ -201,7 +229,7 @@ def _task_row_to_item(row: dict) -> dict:
         "task_id": tid,
         "threadId": str(thread_id) if thread_id else sid,
         "from": label or "Task",
-        "subject": row.get("title") or "(Task)",
+        "subject": _clean_task_title(row.get("title")) or "(Task)",
         "snippet": snippet,
         "channel": None,
         "user": None,
@@ -245,7 +273,7 @@ def _row_to_item(row: dict) -> dict:
         or ""
     )
 
-    subject = payload.get("subject") or cls.get("title") or ""
+    subject = _clean_task_title(payload.get("subject") or cls.get("title") or "")
     snippet = payload.get("snippet") or _text_preview(payload.get("text") or row.get("text") or "")
     body_for_check = str(
         row.get("text")

@@ -1,4 +1,4 @@
-import React, {useCallback, useState} from 'react';
+import React, {useCallback, useMemo, useState} from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,9 @@ import {
   ActivityIndicator,
   Platform,
   Linking,
+  Modal,
+  Pressable,
+  useWindowDimensions,
 } from 'react-native';
 import {useRoute, useNavigation} from '@react-navigation/native';
 import {SafeAreaView} from 'react-native-safe-area-context';
@@ -52,12 +55,13 @@ function inferProjectMeetings(projectName, events) {
 export default function ProjectsPage() {
   const route = useRoute();
   const navigation = useNavigation();
+  const {width: windowWidth} = useWindowDimensions();
   const {userId, sessionId} = route.params || {};
 
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [expanded, setExpanded] = useState({});
+  const [selected, setSelected] = useState(null);
   const [calendarEvents, setCalendarEvents] = useState([]);
 
   const load = useCallback(async () => {
@@ -70,18 +74,19 @@ export default function ProjectsPage() {
       ]);
       setProjects(rows);
       setCalendarEvents(Array.isArray(schedule?.events) ? schedule.events : []);
-      // Preserve the user's expand/collapse choices across auto-refreshes, and
-      // default newly-discovered projects to expanded so they pop into view.
-      setExpanded((prev) => {
-        const next = {...prev};
-        for (const p of rows) {
-          if (next[p.id] === undefined) next[p.id] = true;
-        }
-        return next;
+      setSelected((prev) => {
+        if (!prev?.project?.id) return prev;
+        const next = rows.find((r) => r.id === prev.project.id);
+        if (!next) return null;
+        return {
+          project: next,
+          meetings: inferProjectMeetings(next.name, Array.isArray(schedule?.events) ? schedule.events : []),
+        };
       });
     } catch (e) {
       setError(e?.message || 'Failed to load projects');
       setProjects([]);
+      setSelected(null);
     } finally {
       setLoading(false);
     }
@@ -89,9 +94,16 @@ export default function ProjectsPage() {
 
   useAutoRefresh(load);
 
-  const toggle = (id) => {
-    setExpanded((prev) => ({...prev, [id]: !prev[id]}));
-  };
+  const gridLayout = useMemo(() => {
+    const scrollPad = 16;
+    const cardPad = 16;
+    const gap = 12;
+    const totalHPadding = scrollPad * 2 + cardPad * 2;
+    const usableW = Math.max(260, windowWidth - totalHPadding);
+    const colCount = usableW >= 720 ? 3 : usableW >= 420 ? 2 : 1;
+    const tileW = (usableW - gap * (colCount - 1)) / colCount;
+    return {colCount, tileW, gap};
+  }, [windowWidth]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -117,8 +129,7 @@ export default function ProjectsPage() {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Active workstreams</Text>
           <Text style={styles.cardHint}>
-            Each card is a project from the core SQLite store, with saved context (when available) and the most recent
-            tasks linked to that project.
+            Tap a tile to open full details: project memory, recent tasks, and calendar meetings inferred from titles.
           </Text>
 
           {error ? (
@@ -138,131 +149,194 @@ export default function ProjectsPage() {
             <Text style={styles.empty}>No projects yet. They appear as messages are classified per client.</Text>
           ) : null}
 
-          {projects.map((p) => (
-            <ProjectCard
-              key={String(p.id)}
-              project={p}
-              meetings={inferProjectMeetings(p.name, calendarEvents)}
-              expanded={!!expanded[p.id]}
-              onToggle={() => toggle(p.id)}
-            />
-          ))}
+          <View style={styles.grid}>
+            {projects.map((p, idx) => {
+              const meetings = inferProjectMeetings(p.name, calendarEvents);
+              const isEndOfRow = (idx + 1) % gridLayout.colCount === 0;
+              return (
+                <View
+                  key={String(p.id)}
+                  style={{
+                    width: gridLayout.tileW,
+                    marginRight: isEndOfRow ? 0 : gridLayout.gap,
+                    marginBottom: gridLayout.gap,
+                  }}>
+                  <ProjectGridTile
+                    project={p}
+                    meetings={meetings}
+                    onPress={() => setSelected({project: p, meetings})}
+                  />
+                </View>
+              );
+            })}
+          </View>
         </View>
       </ScrollView>
+
+      <ProjectDetailModal
+        visible={!!selected}
+        project={selected?.project}
+        meetings={selected?.meetings || []}
+        onClose={() => setSelected(null)}
+      />
     </SafeAreaView>
   );
 }
 
-function ProjectCard({project, meetings, expanded, onToggle}) {
-  const ctx = project.context;
+function ProjectGridTile({project, meetings, onPress}) {
   const tasks = project.tasks || [];
   const status = (project.status || '—').replace(/_/g, ' ');
   const priority = project.priority || '—';
   const client = project.client_name || 'Client';
+  const deadline = project.deadline ? formatShortDate(project.deadline) : '—';
 
   return (
-    <View style={styles.projectShell}>
-      <TouchableOpacity
-        onPress={onToggle}
-        activeOpacity={0.85}
-        style={[styles.projectHeader, Platform.OS === 'web' ? {cursor: 'pointer'} : null]}>
-        <View style={styles.projectHeaderText}>
-          <Text style={styles.projectName} numberOfLines={2}>
-            {project.name}
-          </Text>
-          <Text style={styles.projectClient} numberOfLines={1}>
-            {client}
-          </Text>
-        </View>
-        <View style={styles.projectMetaCol}>
-          <Text style={styles.chev}>{expanded ? '▾' : '▸'}</Text>
-        </View>
-      </TouchableOpacity>
-
-      <View style={styles.badgeRow}>
-        <MetaChip label="Status" value={status} />
-        <MetaChip label="Priority" value={priority} />
-        <MetaChip label="Deadline" value={project.deadline ? formatShortDate(project.deadline) : '—'} />
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.88}
+      style={[styles.tileOuter, Platform.OS === 'web' ? {cursor: 'pointer'} : null]}>
+      <View style={styles.tileHeader}>
+        <Text style={styles.tileName} numberOfLines={3}>
+          {project.name}
+        </Text>
       </View>
+      <Text style={styles.tileClient} numberOfLines={1}>
+        {client}
+      </Text>
+      <View style={styles.tileMetaRow}>
+        <Text style={styles.tileMetaLine} numberOfLines={1}>
+          {status} · {priority}
+        </Text>
+        <Text style={styles.tileMetaLine} numberOfLines={1}>
+          Due {deadline}
+        </Text>
+      </View>
+      <View style={styles.tileFooter}>
+        <Text style={styles.tileBadge}>{tasks.length} tasks</Text>
+        <Text style={styles.tileBadge}>{meetings.length} meetings</Text>
+      </View>
+      <Text style={styles.tileHint}>View details</Text>
+    </TouchableOpacity>
+  );
+}
 
-      {expanded ? (
-        <View style={styles.projectBody}>
-          {!!project.description && (
-            <View style={styles.block}>
-              <Text style={styles.blockTitle}>Description</Text>
-              <Text style={styles.blockBody}>{project.description}</Text>
-            </View>
-          )}
+function ProjectDetailModal({visible, project, meetings, onClose}) {
+  if (!project) return null;
 
-          {ctx ? (
-            <View style={styles.contextBox}>
-              <Text style={styles.contextTitle}>Project memory</Text>
-              <ContextLine label="Summary" text={ctx.summary} />
-              <ContextLine label="Current status" text={ctx.current_status} />
-              <ContextLine label="Priorities" text={ctx.current_priorities} />
-              <ContextLine label="Blockers" text={ctx.blockers} />
-              <ContextLine label="Next steps" text={ctx.next_steps} />
-              {Array.isArray(ctx.key_contacts_json) && ctx.key_contacts_json.length > 0 ? (
-                <Text style={styles.contextFooter}>{ctx.key_contacts_json.length} key contacts on file</Text>
-              ) : null}
-              {Array.isArray(ctx.important_links_json) && ctx.important_links_json.length > 0 ? (
-                <Text style={styles.contextFooter}>{ctx.important_links_json.length} important links on file</Text>
-              ) : null}
-            </View>
-          ) : (
-            <Text style={styles.noContext}>No project context row yet — it fills in as the assistant updates memory.</Text>
-          )}
-
-          <View style={styles.tasksHeader}>
-            <Text style={styles.tasksTitle}>Recent tasks</Text>
-            <Text style={styles.tasksCount}>{tasks.length}</Text>
-          </View>
-          {tasks.length === 0 ? (
-            <Text style={styles.noTasks}>No tasks linked to this project in SQLite.</Text>
-          ) : (
-            tasks.map((t) => (
-              <View key={String(t.id)} style={styles.taskRow}>
-                <Text style={styles.taskTitle} numberOfLines={3}>
-                  {t.title}
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.modalRoot}>
+        <Pressable style={styles.modalBackdrop} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" />
+        <View style={styles.modalCardWrap}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalHeaderText}>
+                <Text style={styles.modalTitle} numberOfLines={3}>
+                  {project.name}
                 </Text>
-                <Text style={styles.taskMeta} numberOfLines={1}>
-                  {t.source || '—'} · {t.classification_type || '—'} · {formatShortDate(t.created_at)}
+                <Text style={styles.modalSubtitle} numberOfLines={1}>
+                  {project.client_name || 'Client'}
                 </Text>
               </View>
-            ))
-          )}
-
-          <View style={styles.tasksHeader}>
-            <Text style={styles.tasksTitle}>Meetings</Text>
-            <Text style={styles.tasksCount}>{meetings.length}</Text>
+              <TouchableOpacity onPress={onClose} style={styles.modalCloseBtn} hitSlop={{top: 12, bottom: 12, left: 12, right: 12}}>
+                <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent} showsVerticalScrollIndicator>
+              <View style={styles.badgeRow}>
+                <MetaChip label="Status" value={(project.status || '—').replace(/_/g, ' ')} />
+                <MetaChip label="Priority" value={project.priority || '—'} />
+                <MetaChip label="Deadline" value={project.deadline ? formatShortDate(project.deadline) : '—'} />
+              </View>
+              <ProjectDetailBody project={project} meetings={meetings} />
+            </ScrollView>
           </View>
-          {meetings.length === 0 ? (
-            <Text style={styles.noTasks}>No meetings linked to this project yet.</Text>
-          ) : (
-            meetings.map((m, idx) => {
-              const openLink = m.html_link || m.hangout_link || '';
-              const startText = formatShortDate(m.start);
-              return (
-                <View key={String(m.id || `${project.id}-meeting-${idx}`)} style={styles.taskRow}>
-                  <Text style={styles.taskTitle} numberOfLines={2}>
-                    {m.summary || '(Untitled meeting)'}
-                  </Text>
-                  <Text style={styles.taskMeta} numberOfLines={1}>
-                    {startText} · {m.provider || 'calendar'}
-                  </Text>
-                  {openLink ? (
-                    <TouchableOpacity onPress={() => Linking.openURL(openLink)} style={styles.linkBtn}>
-                      <Text style={styles.linkBtnText}>Open meeting link</Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <Text style={styles.noMeetingLink}>No meeting link saved</Text>
-                  )}
-                </View>
-              );
-            })
-          )}
         </View>
-      ) : null}
+      </View>
+    </Modal>
+  );
+}
+
+function ProjectDetailBody({project, meetings}) {
+  const ctx = project.context;
+  const tasks = project.tasks || [];
+
+  return (
+    <View style={styles.projectBody}>
+      {!!project.description && (
+        <View style={styles.block}>
+          <Text style={styles.blockTitle}>Description</Text>
+          <Text style={styles.blockBody}>{project.description}</Text>
+        </View>
+      )}
+
+      {ctx ? (
+        <View style={styles.contextBox}>
+          <Text style={styles.contextTitle}>Project memory</Text>
+          <ContextLine label="Summary" text={ctx.summary} />
+          <ContextLine label="Current status" text={ctx.current_status} />
+          <ContextLine label="Priorities" text={ctx.current_priorities} />
+          <ContextLine label="Blockers" text={ctx.blockers} />
+          <ContextLine label="Next steps" text={ctx.next_steps} />
+          {Array.isArray(ctx.key_contacts_json) && ctx.key_contacts_json.length > 0 ? (
+            <Text style={styles.contextFooter}>{ctx.key_contacts_json.length} key contacts on file</Text>
+          ) : null}
+          {Array.isArray(ctx.important_links_json) && ctx.important_links_json.length > 0 ? (
+            <Text style={styles.contextFooter}>{ctx.important_links_json.length} important links on file</Text>
+          ) : null}
+        </View>
+      ) : (
+        <Text style={styles.noContext}>No project context row yet — it fills in as the assistant updates memory.</Text>
+      )}
+
+      <View style={styles.tasksHeader}>
+        <Text style={styles.tasksTitle}>Recent tasks</Text>
+        <Text style={styles.tasksCount}>{tasks.length}</Text>
+      </View>
+      {tasks.length === 0 ? (
+        <Text style={styles.noTasks}>No tasks linked to this project in SQLite.</Text>
+      ) : (
+        tasks.map((t) => (
+          <View key={String(t.id)} style={styles.taskRow}>
+            <Text style={styles.taskTitle} numberOfLines={3}>
+              {t.title}
+            </Text>
+            <Text style={styles.taskMeta} numberOfLines={1}>
+              {t.source || '—'} · {t.classification_type || '—'} · {formatShortDate(t.created_at)}
+            </Text>
+          </View>
+        ))
+      )}
+
+      <View style={styles.tasksHeader}>
+        <Text style={styles.tasksTitle}>Meetings</Text>
+        <Text style={styles.tasksCount}>{meetings.length}</Text>
+      </View>
+      {meetings.length === 0 ? (
+        <Text style={styles.noTasks}>No meetings linked to this project yet.</Text>
+      ) : (
+        meetings.map((m, idx) => {
+          const openLink = m.html_link || m.hangout_link || '';
+          const startText = formatShortDate(m.start);
+          return (
+            <View key={String(m.id || `${project.id}-meeting-${idx}`)} style={styles.taskRow}>
+              <Text style={styles.taskTitle} numberOfLines={2}>
+                {m.summary || '(Untitled meeting)'}
+              </Text>
+              <Text style={styles.taskMeta} numberOfLines={1}>
+                {startText} · {m.provider || 'calendar'}
+              </Text>
+              {openLink ? (
+                <TouchableOpacity onPress={() => Linking.openURL(openLink)} style={styles.linkBtn}>
+                  <Text style={styles.linkBtnText}>Open meeting link</Text>
+                </TouchableOpacity>
+              ) : (
+                <Text style={styles.noMeetingLink}>No meeting link saved</Text>
+              )}
+            </View>
+          );
+        })
+      )}
     </View>
   );
 }
@@ -382,44 +456,145 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 16,
   },
-  projectShell: {
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'stretch',
+  },
+  tileOuter: {
     borderWidth: 1,
-    borderColor: colors.dark[500] + '12',
+    borderColor: colors.dark[500] + '14',
     borderRadius: 14,
     backgroundColor: colors.primary[50],
-    marginBottom: 12,
-    overflow: 'hidden',
-  },
-  projectHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    backgroundColor: colors.primary[100] + '90',
+    paddingVertical: 14,
+    minHeight: 148,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 2px 10px rgba(15, 23, 42, 0.06)',
+      },
+      default: {
+        shadowColor: colors.primary[900],
+        shadowOffset: {width: 0, height: 2},
+        shadowOpacity: 0.06,
+        shadowRadius: 6,
+        elevation: 2,
+      },
+    }),
   },
-  projectHeaderText: {
-    flex: 1,
-    paddingRight: 8,
+  tileHeader: {
+    minHeight: 44,
+    justifyContent: 'flex-start',
   },
-  projectName: {
-    fontSize: 16,
+  tileName: {
+    fontSize: 15,
     fontWeight: '800',
     color: colors.primary[900],
+    lineHeight: 20,
   },
-  projectClient: {
-    marginTop: 4,
+  tileClient: {
+    marginTop: 6,
     fontSize: 12,
     fontWeight: '600',
     color: colors.secondary[700],
   },
-  projectMetaCol: {
-    alignItems: 'flex-end',
+  tileMetaRow: {
+    marginTop: 10,
+    gap: 4,
   },
-  chev: {
-    fontSize: 16,
-    color: colors.primary[900],
+  tileMetaLine: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.primary[900] + '72',
+  },
+  tileFooter: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  tileBadge: {
+    fontSize: 11,
     fontWeight: '700',
+    color: colors.secondary[700],
+    backgroundColor: colors.secondary[500] + '18',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  tileHint: {
+    marginTop: 10,
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.secondary[600],
+  },
+  modalRoot: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  modalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.primary[900] + '55',
+  },
+  modalCardWrap: {
+    width: '100%',
+    maxWidth: 560,
+    maxHeight: '88%',
+    zIndex: 1,
+  },
+  modalCard: {
+    ...commonStyles.glassEffectStrong,
+    borderRadius: 16,
+    overflow: 'hidden',
+    maxHeight: '100%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.dark[500] + '10',
+    backgroundColor: colors.primary[100] + '80',
+  },
+  modalHeaderText: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.primary[900],
+  },
+  modalSubtitle: {
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.secondary[700],
+  },
+  modalCloseBtn: {
+    padding: 6,
+    borderRadius: 10,
+    backgroundColor: colors.primary[50],
+    borderWidth: 1,
+    borderColor: colors.dark[500] + '12',
+  },
+  modalCloseText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.primary[900],
+    lineHeight: 18,
+  },
+  modalScroll: {
+    maxHeight: 520,
+  },
+  modalScrollContent: {
+    paddingBottom: 20,
   },
   badgeRow: {
     flexDirection: 'row',
