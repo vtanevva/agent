@@ -656,7 +656,11 @@ def process_normalized_message(normalized: dict) -> dict[str, Any]:
     )
 
     td_iso = scheduling_result.get("task_due_datetime")
-    if td_iso and not classification.get("due_datetime"):
+    # Chat-task shortcuts only get a due date from the user's words (parser / override).
+    # Do not copy scheduling heuristics into the persisted classification — otherwise
+    # undated chat items gain a synthetic ISO, land on the week grid, and never show
+    # under Unscheduled.
+    if source != "chat_task" and td_iso and not classification.get("due_datetime"):
         classification["due_datetime"] = td_iso
         if scheduling_result.get("due_hint_text"):
             classification["due_hint_text"] = scheduling_result.get("due_hint_text")

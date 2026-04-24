@@ -447,11 +447,15 @@ export default function WeeklySchedulePage() {
           </View>
         </ScrollView>
 
-        {unscheduledFiltered.length > 0 && (
-          <View style={styles.unCard}>
-            <Text style={styles.unCardTitle}>Unscheduled</Text>
-            <Text style={styles.unCardHint}>Tasks without a due time stay here.</Text>
-            {unscheduledFiltered.slice(0, 24).map((t) => (
+        <View style={styles.unCard}>
+          <Text style={styles.unCardTitle}>Unscheduled</Text>
+          <Text style={styles.unCardHint}>
+            Tasks without a due date appear here until you set a time on the home screen or in chat.
+          </Text>
+          {unscheduledFiltered.length === 0 ? (
+            <Text style={styles.unEmpty}>No unscheduled tasks.</Text>
+          ) : (
+            unscheduledFiltered.slice(0, 24).map((t) => (
               <TouchableOpacity
                 key={String(t._id)}
                 style={styles.unRow}
@@ -474,9 +478,9 @@ export default function WeeklySchedulePage() {
                 </Text>
                 <Text style={styles.unMeta}>{t.priority || 'LATER'}</Text>
               </TouchableOpacity>
-            ))}
-          </View>
-        )}
+            ))
+          )}
+        </View>
       </ScrollView>
 
       <BottomNav
@@ -766,6 +770,7 @@ const styles = StyleSheet.create({
   },
   unCardTitle: {fontSize: 15, fontWeight: '700', color: theme.colors.textPrimary},
   unCardHint: {marginTop: 4, marginBottom: 10, fontSize: 12, color: theme.colors.textSecondary},
+  unEmpty: {fontSize: 12, color: theme.colors.textSecondary, fontStyle: 'italic'},
   unRow: {
     padding: 10,
     borderRadius: 12,

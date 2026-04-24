@@ -1451,9 +1451,19 @@ def list_local_tasks(
                 "(t.client_id IS NULL AND t.source = 'gmail' AND lower(trim(coalesce(t.workspace_id, ''))) = ?)"
             )
             extra_params.append(mbox)
-        if uid and "@" not in uid:
-            ors.append("(t.client_id IS NULL AND t.source_id LIKE ?)")
-            extra_params.append(f"chat_task:{uid}-%")
+        # Chat tasks use ``source_id = f"chat_task:{session_id}:{uuid}"`` where
+        # ``session_id`` is ``{app_user_id}-{6 random base36 chars}`` (see
+        # ``frontend/src/config/api.js`` ``genSession``). Match that prefix for
+        # any ``client_id`` — Home already scopes the same way; without this,
+        # rows linked to Inbox but whose ``clients.data_owner_key`` is missing
+        # or stale never appear on the week view.
+        if uid:
+            ors.append(
+                "(t.source IN ('chat', 'chat_task') AND t.source_id LIKE ? ESCAPE '\\')"
+            )
+            extra_params.append(
+                "chat_task:" + uid.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "-%"
+            )
         filters.append("(" + " OR ".join(ors) + ")")
     where_sql = ("WHERE " + " AND ".join(filters)) if filters else ""
 

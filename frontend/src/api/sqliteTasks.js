@@ -64,7 +64,13 @@ export function mapSqliteTaskToUi(row) {
   }
 
   const cls = classificationObjectFromRow(row);
-  const dueDatetime = cls.due_datetime || cls.due_datetime_iso || null;
+  const dueDatetime =
+    (row.due_datetime != null && String(row.due_datetime).trim() !== ''
+      ? row.due_datetime
+      : null) ||
+    cls.due_datetime ||
+    cls.due_datetime_iso ||
+    null;
 
   const pipelineLike = {
     _id: id,

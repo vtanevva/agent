@@ -224,7 +224,9 @@ async function loadTasksFromSqlite(userId) {
     const withDue = [];
     const withoutDue = [];
     for (const t of all) {
-      if (t?.due_datetime) withDue.push(t);
+      const d = t?.due_datetime;
+      const hasDue = d != null && String(d).trim() !== '' && toDateSafe(d);
+      if (hasDue) withDue.push(t);
       else withoutDue.push(t);
     }
     return {tasks: withDue, unscheduled: withoutDue};

@@ -255,5 +255,6 @@ def try_create_task_from_chat(
         )
     return (
         f'I added "{title}" to your tasks (no due date yet). '
-        "It shows on your home screen; you can set a deadline from there or on the weekly schedule."
+        "It appears on your home screen and in the Unscheduled section on the weekly schedule; "
+        "you can set a deadline anytime from home or chat."
     )

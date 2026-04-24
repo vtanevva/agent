@@ -40,13 +40,14 @@ def _row_to_api(row: dict) -> dict:
     shape), so we flatten useful bits out of ``classification_json`` for it.
     """
     cls = _safe_json_loads(row.get("classification_json"))
-    due = (
-        cls.get("due_datetime")
-        or cls.get("due_datetime_iso")
-        or cls.get("normalized_due", {}).get("iso")
-        if isinstance(cls.get("normalized_due"), dict)
-        else None
-    )
+    src_l = str(row.get("source") or "").strip().lower()
+    due = cls.get("due_datetime") or cls.get("due_datetime_iso")
+    # For chat-created tasks, never promote heuristic ``normalized_due`` to a UI due —
+    # only explicit fields above (matches unified_processor chat_task scheduling skip).
+    if not due and src_l != "chat_task":
+        nd = cls.get("normalized_due")
+        if isinstance(nd, dict):
+            due = nd.get("iso")
 
     ctype = str(row.get("classification_type") or "").upper()
     if "URGENT" in ctype or "NOW" in ctype or "P0" in ctype:
