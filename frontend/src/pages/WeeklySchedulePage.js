@@ -11,7 +11,7 @@ import {
   Dimensions,
   Modal,
 } from 'react-native';
-import {useRoute, useNavigation, useFocusEffect} from '@react-navigation/native';
+import {useRoute, useNavigation} from '@react-navigation/native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 
 import {theme} from '../styles/theme';
@@ -19,6 +19,8 @@ import {API_BASE_URL} from '../config/api';
 import {buildScheduleItems, fetchScheduleSources, toDateSafe} from '../api/scheduleData';
 import TopSearchBar from '../components/TopSearchBar';
 import BottomNav from '../components/BottomNav';
+import {useAutoRefresh} from '../hooks/useAutoRefresh';
+import {emitDataChange} from '../utils/dataEvents';
 
 const TIMELINE_START_HOUR = 6;
 const HOUR_HEIGHT = 54;
@@ -212,11 +214,7 @@ export default function WeeklySchedulePage() {
     }
   }, [userId, weekStart]);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (userId) loadAll();
-    }, [userId, loadAll]),
-  );
+  useAutoRefresh(loadAll, {enabled: !!userId});
 
   const scheduleItems = useMemo(() => buildScheduleItems(events, tasks), [events, tasks]);
 
@@ -290,6 +288,7 @@ export default function WeeklySchedulePage() {
       if (!r.ok || !data?.success) throw new Error(data?.error || `HTTP ${r.status}`);
       setDetailItem(null);
       await loadAll();
+      emitDataChange('schedule:task-completed');
     } catch (e) {
       if (/^\d+$/.test(String(taskId))) {
         setTasks((prev) => prev.filter((t) => String(t._id) !== String(taskId)));

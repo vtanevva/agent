@@ -21,6 +21,7 @@ import {theme} from '../styles/theme';
 import {API_BASE_URL} from '../config/api';
 import {extractEmailAddress} from '../utils/emailParse';
 import {buildChatMetadata} from '../utils/chatClientMetadata';
+import {emitDataChange} from '../utils/dataEvents';
 import {useVoiceCapture} from '../hooks/useVoiceCapture';
 
 /** Keep GET URL under a safe length; Gmail compose uses query params. */
@@ -202,6 +203,11 @@ export default function QuickChatPage() {
       } else {
         setMessages((prev) => [...prev, {role: 'assistant', text: reply || '…'}]);
       }
+
+      // A chat turn may have spawned a task, project, or meeting server-side
+      // (see ``handle_chat_turn`` in the backend). Poke every subscribed page
+      // so the new row shows up without a manual refresh.
+      emitDataChange('chat:turn');
     } catch (e) {
       pendingReplyDraftSendRef.current = false;
       setMessages((prev) => [

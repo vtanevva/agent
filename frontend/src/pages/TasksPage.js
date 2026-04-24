@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useMemo, useState} from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,8 @@ import {
   mapActionItemToUi,
   buildReplyDraftNavParams,
 } from '../api/actionItems';
+import {useAutoRefresh} from '../hooks/useAutoRefresh';
+import {emitDataChange} from '../utils/dataEvents';
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -49,7 +51,7 @@ export default function TasksPage() {
     }
   }, [userId]);
 
-  const loadTasks = async () => {
+  const loadTasks = useCallback(async () => {
     if (!userId) return;
     setLoading(true);
     setError('');
@@ -63,7 +65,12 @@ export default function TasksPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId]);
+
+  const reloadAll = useCallback(async () => {
+    if (!userId) return;
+    await Promise.all([loadTasks(), loadInbox()]);
+  }, [userId, loadTasks, loadInbox]);
 
   const syncFromGmail = async () => {
     if (!userId) return;
@@ -72,13 +79,7 @@ export default function TasksPage() {
     );
   };
 
-  useEffect(() => {
-    if (userId) loadTasks();
-  }, [userId]);
-
-  useEffect(() => {
-    loadInbox();
-  }, [loadInbox]);
+  useAutoRefresh(reloadAll);
 
   const openReplyDraft = (item) => {
     const {seedPrompt, replyDraft} = buildReplyDraftNavParams(item);
@@ -209,6 +210,7 @@ export default function TasksPage() {
       }
 
       await loadTasks();
+      emitDataChange('tasks:completed');
     } catch (e) {
       setError(e?.message || 'Failed to complete task');
     }
@@ -264,6 +266,7 @@ export default function TasksPage() {
       }
 
       await loadTasks();
+      emitDataChange('tasks:status-changed');
     } catch (e) {
       setError(e?.message || 'Failed to update task');
     }
@@ -308,10 +311,7 @@ export default function TasksPage() {
                 <Text style={styles.controlButtonText}>{syncing ? 'Processing…' : '🚀 Process Emails'}</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={() => {
-                  loadTasks();
-                  loadInbox();
-                }}
+                onPress={reloadAll}
                 disabled={syncing || loading}
                 style={[styles.controlButtonAlt, (syncing || loading) && styles.controlButtonDisabled]}>
                 <Text style={styles.controlButtonTextAlt}>{loading ? 'Refreshing…' : 'Refresh'}</Text>

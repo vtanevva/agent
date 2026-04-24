@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import {useRoute, useNavigation, useFocusEffect} from '@react-navigation/native';
+import {useRoute, useNavigation} from '@react-navigation/native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {Svg, Path} from 'react-native-svg';
 import {LinearGradient} from 'expo-linear-gradient';
@@ -24,6 +24,8 @@ import {fetchUserSearch} from '../api/userSearch';
 import {CORE_BACKEND_URL} from '../config/api';
 import TopSearchBar from '../components/TopSearchBar';
 import BottomNav from '../components/BottomNav';
+import {useAutoRefresh} from '../hooks/useAutoRefresh';
+import {emitDataChange} from '../utils/dataEvents';
 
 function greeting() {
   const h = new Date().getHours();
@@ -108,15 +110,7 @@ export default function HomePage() {
     }
   }, [userId]);
 
-  useEffect(() => {
-    loadItems();
-  }, [loadItems]);
-
-  useFocusEffect(
-    useCallback(() => {
-      loadItems();
-    }, [loadItems])
-  );
+  useAutoRefresh(loadItems);
 
   const visibleItems = useMemo(() => {
     const seen = new Set();
@@ -208,6 +202,7 @@ export default function HomePage() {
           source: item.source,
         });
       }
+      emitDataChange('home:item-done');
     } catch (e) {
       Alert.alert('Could not mark done', String(e?.message || e));
     }

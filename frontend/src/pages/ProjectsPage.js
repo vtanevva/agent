@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useState} from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import {colors} from '../styles/colors';
 import {commonStyles} from '../styles/commonStyles';
 import {fetchSqliteProjectsOverview} from '../api/sqliteProjects';
 import {fetchScheduleSources} from '../api/scheduleData';
+import {useAutoRefresh} from '../hooks/useAutoRefresh';
 
 function formatShortDate(iso) {
   if (!iso || typeof iso !== 'string') return '—';
@@ -69,11 +70,15 @@ export default function ProjectsPage() {
       ]);
       setProjects(rows);
       setCalendarEvents(Array.isArray(schedule?.events) ? schedule.events : []);
-      const next = {};
-      for (const p of rows) {
-        next[p.id] = true;
-      }
-      setExpanded(next);
+      // Preserve the user's expand/collapse choices across auto-refreshes, and
+      // default newly-discovered projects to expanded so they pop into view.
+      setExpanded((prev) => {
+        const next = {...prev};
+        for (const p of rows) {
+          if (next[p.id] === undefined) next[p.id] = true;
+        }
+        return next;
+      });
     } catch (e) {
       setError(e?.message || 'Failed to load projects');
       setProjects([]);
@@ -82,9 +87,7 @@ export default function ProjectsPage() {
     }
   }, [userId]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useAutoRefresh(load);
 
   const toggle = (id) => {
     setExpanded((prev) => ({...prev, [id]: !prev[id]}));

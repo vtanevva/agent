@@ -29,6 +29,7 @@ import EmailReplyModal from '../components/EmailReplyModal';
 import ComposeEmailModal from '../components/ComposeEmailModal';
 import {extractEmailAddress} from '../utils/emailParse';
 import {buildChatMetadata} from '../utils/chatClientMetadata';
+import {emitDataChange} from '../utils/dataEvents';
 
 export default function ChatPage() {
   const route = useRoute();
@@ -447,6 +448,10 @@ export default function ChatPage() {
       setTimeout(() => {
         fetchSessions();
       }, 1000);
+
+      // A chat turn may have spawned a task, project, or meeting server-side;
+      // notify other pages so the row appears without a manual refresh.
+      emitDataChange('chat:turn');
     } catch (e) {
       console.error('send error', e);
       Alert.alert('Error', 'Failed to send message. Please try again.');
