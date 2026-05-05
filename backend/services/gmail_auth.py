@@ -215,35 +215,32 @@ def get_linked_gmail_address(user_id: Optional[str] = None) -> Optional[str]:
 
 def get_gmail_service():
     token_path = _get_token_path()
-    credentials_path = get_client_secrets_path()
     creds = None
 
-    if token_path.exists():
-        creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+    # Try the default token.json first, then fall back to any token_*.json in the same dir.
+    candidates = [token_path] + sorted(token_path.parent.glob(f"{token_path.stem}_*.json"))
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        try:
+            c = Credentials.from_authorized_user_file(str(candidate), SCOPES)
+            if c and c.refresh_token:
+                creds = c
+                token_path = candidate
+                break
+        except Exception:
+            continue
 
     if creds and creds.expired and creds.refresh_token:
         creds.refresh(Request())
+        with open(token_path, "w", encoding="utf-8") as f:
+            f.write(creds.to_json())
 
     if not creds or not creds.valid:
-        if not credentials_path.exists():
-            raise RuntimeError(
-                "Missing Google OAuth credentials file. "
-                f"Tried: {credentials_path} (set GMAIL_CREDENTIALS_PATH to override)"
-            )
-
-        flow = InstalledAppFlow.from_client_secrets_file(
-            str(credentials_path),
-            SCOPES,
+        raise RuntimeError(
+            "No valid Gmail token. Authenticate via GET /google/auth/<username> "
+            "then retry. Token path: " + str(token_path)
         )
-        # For "web" OAuth clients, Google requires the redirect URI to match exactly.
-        # `run_local_server()` uses `http://localhost:<port>/`, so we allow pinning the port.
-        # Add `http://localhost:<port>/` to your OAuth client's Authorized redirect URIs.
-        port_raw = (os.getenv("GMAIL_OAUTH_LOCAL_SERVER_PORT") or "").strip()
-        port = int(port_raw) if port_raw else 0
-        creds = flow.run_local_server(port=port)
-
-        with open(token_path, "w", encoding="utf-8") as token_file:
-            token_file.write(creds.to_json())
 
     service = build("gmail", "v1", credentials=creds)
     return service

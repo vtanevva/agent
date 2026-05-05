@@ -253,6 +253,8 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> Dict[str, Any]:
     new_baseline = int(latest_seen or notif.history_id)
     set_gmail_last_history_id(email_address, new_baseline, note="processed")
 
+    log.info(f"[GMAIL PUSH] found message_ids={message_ids} watch_label_ids={watch_label_ids}")
+
     if not message_ids:
         return {"success": True, "status": "no_changes", "email_address": email_address, "history_id": notif.history_id}
 
@@ -265,10 +267,9 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> Dict[str, Any]:
             thread_id = str(msg.get("threadId") or "")
             msg_label_ids = msg.get("labelIds") or []
 
-            # Only draft replies for received/inbox messages.
-            # Pub/Sub will also notify on messages you SENT; those should never trigger drafts
-            # (otherwise you can get a "draft loop" on your own replies).
             label_set = {str(x) for x in msg_label_ids if x}
+            log.info(f"[GMAIL PUSH] message_id={mid} labels={label_set}")
+
             if "SENT" in label_set:
                 # The user replied in this Gmail thread — record it so the tasks list
                 # can hide the original inbound message as "answered".
@@ -300,7 +301,7 @@ def process_gmail_history_delta(notif: GmailPushNotification) -> Dict[str, Any]:
                     except Exception as e:
                         log.exception(f"[GMAIL PUSH] mark_thread_answered failed: {e}")
                 continue
-            if "INBOX" not in label_set:
+            if "STARRED" not in label_set:
                 continue
 
             # Zapier-style: only trigger when the message has a watched label.
@@ -508,7 +509,7 @@ def start_watch(*, email_address: str, topic: str, label_ids: list[str] | None =
             )
         return resolved
 
-    label_ids = label_ids or _parse_env_labels() or ["INBOX"]
+    label_ids = label_ids or _parse_env_labels() or ["STARRED"]
 
     service = get_gmail_service()
 

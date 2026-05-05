@@ -347,10 +347,11 @@ def upsert_gmail_watch_state(
 
     now = utc_iso()
     label_ids_json = None
-    try:
-        label_ids_json = json.dumps(label_ids or [])
-    except Exception:
-        label_ids_json = "[]"
+    if label_ids is not None:
+        try:
+            label_ids_json = json.dumps(label_ids)
+        except Exception:
+            label_ids_json = "[]"
 
     with get_conn() as conn:
         conn.execute(
