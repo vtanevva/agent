@@ -413,6 +413,37 @@ def send_reply():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@gmail_reply_bp.post("/api/gmail/send")
+def send_new_email():
+    payload = request.get_json(silent=True) or {}
+    to_email = _safe_str(payload.get("to"))
+    subject = _safe_str(payload.get("subject"))
+    body_text = _safe_str(payload.get("body"))
+    if not to_email or not body_text:
+        return jsonify({"success": False, "error": "missing_to_or_body"}), 400
+
+    try:
+        service = get_gmail_service()
+    except Exception as e:
+        body, status = _gmail_connect_error(str(e))
+        return jsonify(body), status
+
+    try:
+        msg = MIMEMultipart()
+        msg["To"] = to_email
+        msg["Subject"] = subject or "(no subject)"
+        msg.attach(MIMEText(body_text, "plain", "utf-8"))
+        raw = _encode_mime_message(msg)
+        resp = service.users().messages().send(userId="me", body={"raw": raw}).execute()
+        return jsonify({"success": True, "id": resp.get("id")}), 200
+    except HttpError as e:
+        log.exception(f"send new email failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+    except Exception as e:
+        log.exception(f"send new email failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @gmail_reply_bp.post("/api/gmail/forward")
 def forward():
     payload = request.get_json(silent=True) or {}

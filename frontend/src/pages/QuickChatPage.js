@@ -18,7 +18,7 @@ import {SafeAreaView} from 'react-native-safe-area-context';
 import {Svg, Line, Path} from 'react-native-svg';
 
 import {theme} from '../styles/theme';
-import {API_BASE_URL} from '../config/api';
+import {API_BASE_URL, CORE_BACKEND_URL} from '../config/api';
 import {extractEmailAddress} from '../utils/emailParse';
 import {buildChatMetadata} from '../utils/chatClientMetadata';
 import {emitDataChange} from '../utils/dataEvents';
@@ -68,6 +68,7 @@ export default function QuickChatPage() {
   const [loading, setLoading] = useState(false);
   const [editableDraft, setEditableDraft] = useState('');
   const [showReplyComposer, setShowReplyComposer] = useState(false);
+  const [sendReplyError, setSendReplyError] = useState('');
   /** Gmail: idle → sending → opened_gmail (compose opened in browser/app; user sends there). */
   const [gmailReplyBtn, setGmailReplyBtn] = useState('idle');
   const [rewriteAsInstruction, setRewriteAsInstruction] = useState('');
@@ -228,23 +229,27 @@ export default function QuickChatPage() {
       (rd?.reply_to_email && String(rd.reply_to_email).trim()) ||
       extractEmailAddress(String(rd?.from_header || ''));
     const to = (toRaw || '').trim();
-    if (!to || !bodyText) {
-      Alert.alert('Cannot open Gmail', !to ? 'Could not detect recipient email.' : 'Draft is empty.');
-      return;
-    }
+    setSendReplyError('');
+    if (!bodyText) { setSendReplyError('Draft is empty.'); return; }
+    if (!to) { setSendReplyError('Could not detect recipient email.'); return; }
     setGmailReplyBtn('sending');
     try {
-      const url = buildGmailComposeDeepLink({
-        to,
-        subject: String(rd?.subject || '').trim(),
-        body: bodyText,
-        threadId,
+      const r = await fetch(`${CORE_BACKEND_URL}/api/gmail/reply`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({thread_id: threadId, to, body: bodyText}),
       });
-      await Linking.openURL(url);
+      const data = await r.json().catch(() => ({}));
+      if (data?.action === 'connect_google') {
+        setGmailReplyBtn('idle');
+        setSendReplyError('Gmail not connected. Please reconnect Google.');
+        return;
+      }
+      if (!data?.success) throw new Error(data?.error || data?.message || `HTTP ${r.status}`);
       setGmailReplyBtn('opened_gmail');
     } catch (e) {
       setGmailReplyBtn('idle');
-      Alert.alert('Gmail', String(e?.message || e));
+      setSendReplyError(String(e?.message || e));
     }
   }, [editableDraft]);
 
@@ -367,8 +372,8 @@ export default function QuickChatPage() {
             <Text style={styles.replyComposerHint}>
               {String(replyDraftRef.current.source || '').toLowerCase() === 'gmail'
                 ? gmailReplyBtn === 'opened_gmail'
-                  ? 'Gmail compose opened—tap Send in Gmail to deliver.'
-                  : 'Opens Gmail compose with your draft (you send from Gmail).'
+                  ? 'Reply sent successfully.'
+                  : 'Review your draft and hit Send Reply.'
                 : 'Share or paste into Slack when ready.'}
             </Text>
             <TextInput
@@ -431,10 +436,10 @@ export default function QuickChatPage() {
                   activeOpacity={0.85}>
                   <Text style={styles.sendReplyBtnText}>
                     {gmailReplyBtn === 'sending'
-                      ? 'Opening…'
+                      ? 'Sending…'
                       : gmailReplyBtn === 'opened_gmail'
-                        ? 'Opened Gmail'
-                        : 'Send in Gmail'}
+                        ? 'Sent'
+                        : 'Send Reply'}
                   </Text>
                 </TouchableOpacity>
               ) : (

@@ -1,292 +1,218 @@
 # Aivis - AI Personal Assistant
 
-A comprehensive AI-powered personal assistant with email management, calendar integration, contact management, and **User Awareness** (memory + RAG).
+An AI-powered personal assistant with email (Gmail) management, calendar integration,
+contact management, and a memory system that learns from conversations, Gmail, and Slack.
 
-## Features
+The app is two independent Flask services plus an Expo (React Native + web) frontend:
 
-- 🤖 **AI Chat**: Intelligent conversational interface
-- 📧 **Gmail Integration**: Email management and automation
-- 📅 **Calendar**: Google Calendar and Outlook integration
-- 👥 **Contacts**: Contact management and sync
-- 🧠 **User Awareness**: Memory system that learns from conversations and documents
-- 📄 **Document RAG**: Upload documents and ask questions about them
-- 💬 **Multi-channel**: WhatsApp, Email, Web Chat
+- **Core backend** (`backend/core_app.py`, port `5000`) — SQLite storage, Gmail/Slack
+  webhooks, Google OAuth + Calendar, tasks/action items, and the REST API the frontend talks to.
+- **AI service** (`backend/ai_app.py`, port `5055`) — the chat orchestrator and LLM agents.
+  The core backend proxies `/api/chat` to this service over HTTP.
+- **Frontend** (`frontend/`) — an Expo app (works on web, iOS, and Android) that talks to
+  the core backend.
 
-## User Awareness System
+See [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md) for the full request/data flow.
 
-The User Awareness system enables Aivis to respond like a real assistant who knows you:
+> Note: MongoDB and a standalone document-RAG pipeline referenced in older docs have been
+> removed / are not wired up by default. Persistence is SQLite (`backend/storage/aivis.db`).
 
-- **Remembers** your preferences, work info, and identity
-- **Learns** from past conversations automatically
-- **Retrieves** relevant context from uploaded documents
-- **Summarizes** conversation threads for long-term memory
-- **Isolates** data per user for security
-
-### Quick Start
-
-1. **Set up environment variables** (see `.env.example`)
-2. **Upload a document**:
-   ```bash
-   curl -X POST http://localhost:5000/memory/upload-file \
-     -F "file=@document.pdf" \
-     -F "user_id=your-user-id" \
-     -F "title=My Document"
-   ```
-3. **Chat with context**:
-   - Aivis will automatically use facts, summaries, and document content
-   - No manual context injection needed
-
-### Documentation
-
-- **User Guide**: [docs/USER_AWARENESS.md](docs/USER_AWARENESS.md)
-- **Testing Runbook**: [docs/RUNBOOK_USER_AWARENESS.md](docs/RUNBOOK_USER_AWARENESS.md)
-- **System Architecture**: [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md)
-
-## Installation
-
-### Prerequisites
+## Prerequisites
 
 - Python 3.10+
-- MongoDB (local or Atlas)
-- Pinecone account (for User Awareness)
-- OpenAI API key
+- Node.js 20+ and npm
+- An OpenAI API key (only hard requirement to chat)
+- Optional, for specific integrations: a Google Cloud OAuth client (Gmail/Calendar), a
+  Microsoft Azure AD app (Outlook Calendar), and a Pinecone account (only if you enable RAG)
 
-### Setup
+## Setup
 
-1. **Clone the repository**:
-   ```bash
-   git clone <repo-url>
-   cd mental
-   ```
+### 1. Clone and configure environment
 
-2. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+```bash
+git clone <repo-url>
+cd mental
+cp env.example .env
+# Edit .env — at minimum, set OPENAI_API_KEY
+```
 
-3. **Configure environment**:
-   ```bash
-   cp env.example .env
-   # Edit .env with your API keys
-   ```
+See [Environment Variables](#environment-variables) below for what each variable does.
 
-4. **Run two processes** (core API and AI are separate):
-   ```bash
-   # Terminal 1 — orchestrator + LLM (default http://127.0.0.1:5055)
-   python server.py ai
+### 2. Backend
 
-   # Terminal 2 — SQLite, webhooks, HTTP API including POST /api/chat
-   python server.py core
-   ```
-   (Equivalent: `python backend/ai_app.py` and `cd backend && python core_app.py`.)
+```bash
+python -m venv .venv
+# Windows (PowerShell/cmd):
+.venv\Scripts\activate
+# Windows (Git Bash):
+source .venv/Scripts/activate
+# macOS/Linux:
+source .venv/bin/activate
 
-   - Core API: `http://localhost:5000` (set `PORT` with gunicorn / `start.sh`).
-   - AI service: `http://localhost:5055` (set `AI_CHAT_PORT` or use `./start-ai.sh`).
-   - Point the backend at the AI service with `AI_SERVICE_URL` if it is not on the default URL.
+pip install -r requirements.txt
+```
+
+Run the two backend services in separate terminals from the repo root:
+
+```bash
+# Terminal 1 — AI service (orchestrator + LLM), http://127.0.0.1:5055
+python server.py ai
+
+# Terminal 2 — core API (SQLite, webhooks, REST), http://localhost:5000
+python server.py core
+```
+
+The first run creates `backend/storage/aivis.db` automatically from
+`backend/storage/schema.sql` — no manual migration step is needed.
+
+(Equivalent direct invocations: `python backend/ai_app.py` from the repo root, and
+`cd backend && python core_app.py`.)
+
+### 3. Frontend
+
+```bash
+cd frontend
+npm install
+npm run web      # opens the Expo web app, talks to http://localhost:5000
+# or: npm start   # Expo dev tools — press w/i/a for web/iOS/Android
+```
+
+On web, the frontend auto-detects the core backend at `http://<current-host>:5000`, so no
+extra config is needed for local dev. To point it somewhere else (a device on your LAN, a
+deployed backend, etc.), set `EXPO_PUBLIC_API_BASE_URL` (and optionally
+`EXPO_PUBLIC_CORE_BACKEND_URL`) in `frontend/.env` — see
+[frontend/src/config/api.js](frontend/src/config/api.js).
+
+### 4. Verify it's running
+
+```bash
+curl http://localhost:5000/health
+curl http://127.0.0.1:5055/health
+```
+
+Then open the frontend (the web build opens automatically, or scan the QR code with Expo Go
+for a device) and send a chat message.
 
 ## Environment Variables
 
-Key variables (see `env.example` for full list):
+Full reference lives in [env.example](env.example) and [backend/config.py](backend/config.py).
+Only `OPENAI_API_KEY` is required to start chatting; everything else unlocks an optional
+integration.
 
-```bash
-# Required
-OPENAI_API_KEY=sk-...
-# Core backend → AI service (defaults shown)
-AI_SERVICE_URL=http://127.0.0.1:5055
-AI_SERVICE_TIMEOUT=120
-# Optional shared secret (set same value on both processes)
-# AI_SERVICE_SECRET=...
-
-MONGO_URI=mongodb://localhost:27017/
-
-# User Awareness (optional but recommended)
-PINECONE_API_KEY=your-key
-PINECONE_INDEX_NAME=aivis-memory
-PINECONE_ENV=us-east-1
-
-# Google (for Gmail/Calendar)
-GOOGLE_SECRET_FILE=google_client_secret.json
-```
+| Variable | Required for | Notes |
+|---|---|---|
+| `OPENAI_API_KEY` | Chat | Required |
+| `SQLITE_PATH` | Core backend | Defaults to `storage/aivis.db` (relative to `backend/`) |
+| `AI_SERVICE_URL`, `CORE_BACKEND_URL` | Core ↔ AI service | Defaults match `python server.py` ports |
+| `GOOGLE_SECRET_FILE`, `OAUTH_REDIRECT_URI` | Gmail / Calendar | Needs an OAuth client JSON from Google Cloud Console, saved to the path in `GOOGLE_SECRET_FILE` (default `google_client_secret.json` in the repo root) |
+| `GMAIL_PUBSUB_TOPIC`, `GMAIL_PUBSUB_WEBHOOK_SECRET` | Gmail push notifications | Only needed for real-time Gmail webhooks |
+| `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` | Outlook Calendar | Optional |
+| `IG_APP_ID`, `IG_APP_SECRET` | Instagram messaging | Optional |
+| `SLACK_BOT_TOKEN`, `SLACK_WEBHOOK_SECRET` | Slack ingestion | Optional |
+| `PINECONE_API_KEY`, `PINECONE_INDEX_NAME`, `PINECONE_ENV` | RAG | Only used when `ENABLE_RAG=true` |
+| `ENABLE_MEMORY`, `ENABLE_RAG`, `ENABLE_AUTOGEN` | Feature flags | See `backend/config.py` |
 
 ## API Endpoints
 
-### Memory System
+The core backend (`:5000`) exposes the REST API the frontend uses. Highlights:
 
-- `POST /memory/ingest-message` - Ingest a message
-- `POST /memory/upload-file` - Upload and index a document
-- `GET /memory/context` - Get context bundle (debug)
-- `GET /memory/facts` - List user facts
-- `POST /memory/facts` - Add a fact
-- `DELETE /memory/facts/<id>` - Delete a fact
-- `GET /memory/threads/<id>/summary` - Get thread summary
+### Chat
+- `POST /api/chat` - Chat endpoint (proxies to the AI service)
+- `POST /api/session_chat`, `POST /api/transcribe` - session chat, voice transcription
 
-### Chat & Email
+### Gmail
+- `GET /api/gmail/threads`, `GET /api/gmail/thread-detail` - list/read threads
+- `POST /api/gmail/send`, `POST /api/gmail/reply`, `POST /api/gmail/forward` - send mail
+- `POST /api/gmail/draft-*` - draft creation/management
+- `POST /api/gmail/watch/start|stop` - Gmail push notifications
 
-- `POST /api/chat` - Chat endpoint
-- `GET /api/gmail/threads` - List email threads
-- `POST /api/gmail/send` - Send email
-- `POST /api/gmail/reply` - Reply to thread
+### Calendar & OAuth
+- `GET /google/auth/<username>`, `GET /google/oauth2callback` - Google OAuth flow
+- `GET /api/calendar/events`, `POST /api/calendar/create` - Calendar events
 
-### Calendar & Contacts
+### Tasks & Action Items
+- `GET /api/tasks`, `POST /api/tasks/<id>/complete`
+- `GET /api/action-items`, `POST /api/action-items/<id>/archive|done`
 
-- `GET /api/calendar/events` - List events
-- `POST /api/calendar/events` - Create event
-- `GET /api/contacts` - List contacts
-- `POST /api/contacts` - Add contact
+### Misc
+- `GET /health` - health check (both services)
+- `GET /memory/context` - debug: current memory/context bundle for a user
+- `GET /metrics/summary` - ingestion/classification metrics
+
+See [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md) for the complete endpoint map and the
+ingestion pipeline each message flows through.
 
 ## Project Structure
 
 ```
 mental/
-├── app/
-│   ├── memory/              # User Awareness system
-│   │   ├── models.py        # Data models
-│   │   ├── vector_store.py  # Pinecone interface
-│   │   ├── ingestion_service.py
-│   │   ├── memory_gate.py   # Fact curation
-│   │   ├── retrieval_service.py
-│   │   ├── prompt_builder.py
-│   │   └── background_jobs.py
-│   ├── api/                 # Legacy / optional Flask routes (if present)
-│   │   └── ...
-│   ├── services/            # Business logic
-│   ├── agents/              # AI agents
-│   └── tools/               # Tool implementations
-├── tests/
-│   └── test_memory_system.py
-├── docs/
-│   ├── USER_AWARENESS.md
-│   └── RUNBOOK_USER_AWARENESS.md
-├── server.py                # Dev launcher: `python server.py core|ai`
-├── backend/core_app.py      # Core API (Flask); gunicorn: `core_app:app` (cwd backend/)
-├── backend/ai_app.py        # AI chat service (Flask); gunicorn: `backend.ai_app:app` (cwd repo root)
-└── requirements.txt
+├── server.py                  # Dev launcher: `python server.py core|ai`
+├── start.sh / start-ai.sh     # Production entrypoints (gunicorn)
+├── requirements.txt           # Python dependencies (repo root, canonical)
+├── env.example                # Copy to .env and fill in
+├── SYSTEM_ARCHITECTURE.md     # Full architecture + endpoint map
+├── backend/
+│   ├── core_app.py            # Core Flask API (SQLite, webhooks, REST) — :5000
+│   ├── ai_app.py               # AI chat Flask service (orchestrator) — :5055
+│   ├── config.py               # Centralized env-based configuration
+│   ├── api/routes/             # Flask blueprints (gmail, calendar, tasks, chat, webhooks, ...)
+│   ├── application/
+│   │   ├── orchestrators/      # event_orchestrator, ai_chat_orchestrator
+│   │   ├── agents/              # AivisCore, Gmail, Slack agents
+│   │   └── services/memory/     # facts/context/RAG (Pinecone-backed, optional)
+│   ├── services/                # Business logic (classification, replies, follow-ups, ...)
+│   ├── storage/                 # sqlite_db.py, schema.sql, aivis.db
+│   ├── workers/                 # background jobs (ingestion, follow-ups)
+│   ├── integrations/            # LLM + external service clients
+│   └── utils/
+├── frontend/                    # Expo app (web + iOS + Android)
+│   └── src/
+│       ├── pages/                # Chat, Tasks, Contacts, Calendar, Settings, ...
+│       ├── components/
+│       ├── api/                  # HTTP clients for the core backend
+│       └── config/api.js         # Backend URL auto-detection
+└── tests/                       # pytest suite
 ```
 
 ## Testing
 
-### Run Unit Tests
-
 ```bash
-pytest tests/test_memory_system.py -v
+pytest tests/ -v
 ```
 
-### Manual Testing
+## Security Notes
 
-See [docs/RUNBOOK_USER_AWARENESS.md](docs/RUNBOOK_USER_AWARENESS.md) for step-by-step testing guide.
+- `.env` is gitignored — never commit real API keys or OAuth secrets.
+- Google/Microsoft OAuth tokens are cached locally (`backend/token*.json`,
+  `backend/credentials.json`) and are also gitignored.
+- `FLASK_SECRET_KEY` must be set to a real secret before deploying to production
+  (`backend/config.py` refuses to start in production with the default dev key).
 
-## Architecture
+## Deployment
 
-### User Awareness Flow
-
-```
-Message/File → Ingestion → Memory Gate → Vector Store
-                                ↓
-                            MongoDB
-                                ↓
-Query → Retrieval → Context Bundle → Prompt Builder → LLM
-```
-
-### Key Technologies
-
-- **Backend**: Flask (Python)
-- **Database**: MongoDB
-- **Vector DB**: Pinecone
-- **LLM**: OpenAI GPT-4
-- **Embeddings**: OpenAI text-embedding-ada-002
-
-## Security
-
-- **User Isolation**: Pinecone namespaces per user_id
-- **Fact Curation**: Only stable facts stored, not transient emotions
-- **API Security**: user_id required for all memory operations
-- **Soft Deletes**: Facts can be deactivated, not permanently deleted
-
-## Performance
-
-### Token Control
-
-- Max 10 facts per query
-- Max 5 thread summaries
-- Max 8 document chunks
-- Max 20 recent messages
-
-### Background Processing
-
-- Fact extraction: async (doesn't block)
-- Thread summarization: every 5 messages
-- Document indexing: async
+The repo ships a `Dockerfile` and `start.sh` for Railway: the container builds the Expo web
+app into `web-build/`, then `start.sh` runs both the AI service (background, `AI_CHAT_PORT`)
+and the core backend (foreground, `$PORT`) under gunicorn in a single container. See
+`Dockerfile`, `start.sh`, and `railway.toml`.
 
 ## Troubleshooting
 
-### Pinecone Not Connecting
+**`ModuleNotFoundError` when running `core_app.py` directly** — run it via
+`python server.py core` from the repo root, or `cd backend && python core_app.py` (it needs
+`backend/` on `sys.path`).
 
-```bash
-# Verify API key
-echo $PINECONE_API_KEY
+**SQLite schema mismatch error on startup** — the schema changed since your local
+`aivis.db` was created. Either delete `backend/storage/aivis.db` (dev data is disposable) and
+restart, or write a migration.
 
-# Check index exists in Pinecone console
-```
+**Frontend can't reach the backend** — on web it auto-targets
+`http://<window.hostname>:5000`; on a physical device set `EXPO_PUBLIC_USE_LOCAL=true` and
+your machine's LAN IP, or set `EXPO_PUBLIC_API_BASE_URL` explicitly. See
+`frontend/src/config/api.js`.
 
-### Facts Not Extracted
+**Gmail/Calendar features fail with an OAuth error** — you need a Google Cloud OAuth client
+saved as `google_client_secret.json` (or point `GOOGLE_SECRET_FILE` at it), and
+`OAUTH_REDIRECT_URI` must match a redirect URI registered on that OAuth client.
 
-```bash
-# Check logs
-tail -f logs/app.log | grep "fact"
-
-# Add fact manually
-curl -X POST http://localhost:5000/memory/facts \
-  -H "Content-Type: application/json" \
-  -d '{"user_id": "test", "text": "Test fact", "type": "other", "confidence": 0.9}'
-```
-
-### Document Upload Fails
-
-```bash
-# Install document parsers
-pip install PyPDF2 python-docx
-
-# Check upload folder
-mkdir -p uploads
-chmod 755 uploads
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
-
-## License
-
-[Your License Here]
-
-## Support
-
-For issues or questions:
-- Documentation: `docs/`
-- Issues: GitHub Issues
-- Email: [your-email]
-
-## Roadmap
-
-- [ ] Celery/RQ for production background jobs
-- [ ] More document types (Markdown, HTML)
-- [ ] Fact confidence decay over time
-- [ ] User feedback loop for fact validation
-- [ ] Shared/team knowledge bases
-- [ ] Google Drive and Notion integration
-- [ ] WhatsApp webhook integration
-- [ ] Voice interface
-
-## Acknowledgments
-
-Built with:
-- Flask
-- MongoDB
-- Pinecone
-- OpenAI
-- And many other great open-source libraries
-
+**"Missing required environment variables: OPENAI_API_KEY"** — set it in `.env`; both
+services load `.env` via `python-dotenv` on startup.
